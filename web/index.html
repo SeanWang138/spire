@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>The Spire - Boss Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f1220;
+            --card: #181c30;
+            --text: #e8eaf6;
+            --muted: #8d93b8;
+            --solar: #ff9f43;
+            --frost: #4fc3f7;
+            --hp: #ef5350
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 16px;
+            max-width: 760px;
+            margin: auto
+        }
+
+        h1 {
+            margin: 0 0 4px
+        }
+
+        .sub {
+            color: var(--muted);
+            margin-bottom: 16px;
+            font-size: 14px
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 14px
+        }
+
+        .bar {
+            height: 14px;
+            background: #2a2f4d;
+            border-radius: 7px;
+            overflow: hidden;
+            margin: 6px 0 10px
+        }
+
+        .fill {
+            height: 100%;
+            transition: width .5s
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px
+        }
+
+        .big {
+            font-size: 28px;
+            font-weight: 700
+        }
+
+        input {
+            width: 100%;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid #333a63;
+            background: #0f1220;
+            color: var(--text)
+        }
+
+        #status {
+            font-size: 12px;
+            color: var(--muted)
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🐉 The Spire - Floor 1</h1>
+    <div class="sub">Boss: <code id="contract"></code></div>
+
+    <div class="card">
+        <div class="row"><span>Boss HP</span><span id="hpText">...</span></div>
+        <div class="bar">
+            <div class="fill" id="hpFill" style="background:var(--hp);width:0"></div>
+        </div>
+        <div class="row"><span>Jackpot</span></div>
+        <div class="big" id="jackpot">...</div>
+    </div>
+
+    <div class="card">
+        <b>Meta Radar</b> (resistensi Boss vs suplai senjata)
+        <div class="row" style="margin-top:10px"><span>🔥 Solar Blade - suplai <span id="s0">...</span></span><span
+                id="r0">...</span></div>
+        <div class="bar">
+            <div class="fill" id="f0" style="background:var(--solar);width:0"></div>
+        </div>
+        <div class="row"><span>❄️ Frost Spear - suplai <span id="s1">...</span></span><span id="r1">...</span></div>
+        <div class="bar">
+            <div class="fill" id="f1" style="background:var(--frost);width:0"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <b>Akun pemain</b>
+        <input id="acct" value="seanwang-spire.testnet">
+        <div class="row" style="margin-top:10px"><span>Inventaris (Solar / Frost)</span><span id="inv">...</span></div>
+        <div class="row"><span>Saldo di contract</span><span id="bal">...</span></div>
+        <div class="row"><span>Damage ronde ini</span><span id="dmg">...</span></div>
+    </div>
+    <div id="status">memuat...</div>
+
+    <script>
+        const CONTRACT = "boss2.seanwang-spire.testnet";
+        const RPCS = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"];
+        document.getElementById("contract").textContent = CONTRACT;
+        const $ = (id) => document.getElementById(id);
+        const near = (y) => (Number(BigInt(y) / 10n ** 20n) / 10000).toFixed(2) + " NEAR";
+
+        async function view(method, args = {}) {
+            const body = {
+                jsonrpc: "2.0", id: "x", method: "query", params: {
+                    request_type: "call_function", finality: "optimistic", account_id: CONTRACT,
+                    method_name: method, args_base64: btoa(JSON.stringify(args))
+                }
+            };
+            let last;
+            for (const url of RPCS) {
+                try {
+                    const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+                    const j = await r.json();
+                    if (j.error || (j.result && j.result.error)) throw new Error(JSON.stringify(j.error || j.result.error));
+                    return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+                } catch (e) {last = e;}
+            }
+            throw last;
+        }
+
+        async function refresh() {
+            try {
+                const acct = $("acct").value.trim();
+                const [hp, jackpot, res, supply, inv, bal, dmg] = await Promise.all([
+                    view("get_boss_hp"), view("get_jackpot"), view("get_resistance"), view("get_supply"),
+                    view("get_inventory", {account_id: acct}), view("get_balance", {account_id: acct}),
+                    view("get_damage", {account_id: acct})]);
+                $("hpText").textContent = hp + " / 1000";
+                $("hpFill").style.width = hp / 10 + "%";
+                $("jackpot").textContent = near(jackpot);
+                [0, 1].forEach((i) => {
+                    $("s" + i).textContent = supply[i];
+                    $("r" + i).textContent = "Resistensi " + res[i] / 100 + "%";
+                    $("f" + i).style.width = res[i] / 100 + "%";
+                });
+                $("inv").textContent = inv[0] + " / " + inv[1];
+                $("bal").textContent = near(bal);
+                $("dmg").textContent = dmg;
+                $("status").textContent = "Terhubung ke testnet - update " + new Date().toLocaleTimeString();
+            } catch (e) {
+                $("status").textContent = "Gagal membaca chain: " + e.message;
+            }
+        }
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+
+</html>
