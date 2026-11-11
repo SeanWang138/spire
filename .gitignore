@@ -1,3 +1,60 @@
-target/
+# ==============================================================================
+# SpireFi Monorepo .gitignore
+# ==============================================================================
+
+# Dependencies
 node_modules/
+relayer/node_modules/
+web/node_modules/
+
+# Rust & Cargo Build Artifacts
+target/
+contract/target/
+**/*.rs.bk
+
+# Next.js & Web Application Build Artifacts
+web/.next/
+web/out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+
+# Environment Variables & Private Credentials
 .env
+.env*.local
+.env.local
+web/.env.local
+relayer/.env
+.near-credentials/
+*.pem
+*.key
+
+# Preserve example environment templates
+!.env.example
+!web/.env.example
+!relayer/.env.example
+
+# Agent Tools, Workspaces & System-Generated Directories
+.agents/
+.gemini/
+.system_generated/
+
+# Logs & Debugging
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Operating System & IDE Artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test Coverage & Temporary Scratch Files
+coverage/
+scratch/
