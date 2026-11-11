@@ -1,0 +1,89 @@
+{
+  "description": "Deterministic test vectors for NPC Merchant bonding curve, spread, and treasury safeguards in The Spire v3.1",
+  "config": {
+    "target_stock": 100,
+    "base_price_yocto": "100000000000000000000000",
+    "spread_bps": 1000,
+    "min_treasury_reserve_yocto": "1000000000000000000000000"
+  },
+  "vectors": [
+    {
+      "name": "equilibrium_stock_sufficient_treasury",
+      "description": "Stock is at target equilibrium (100 units) with healthy treasury",
+      "stock": 100,
+      "target_stock": 100,
+      "base_price_yocto": "100000000000000000000000",
+      "buyback_multiplier_bps": 10000,
+      "treasury_reserve_yocto": "5000000000000000000000000",
+      "expected_mid_price_yocto": "100000000000000000000000",
+      "expected_buy_price_yocto": "100000000000000000000000",
+      "expected_sell_price_yocto": "90000000000000000000000",
+      "expected_is_closed": false
+    },
+    {
+      "name": "zero_stock_maximum_scarcity",
+      "description": "Stock is completely depleted (0 units), price doubles to 2 * P0",
+      "stock": 0,
+      "target_stock": 100,
+      "base_price_yocto": "100000000000000000000000",
+      "buyback_multiplier_bps": 10000,
+      "treasury_reserve_yocto": "5000000000000000000000000",
+      "expected_mid_price_yocto": "200000000000000000000000",
+      "expected_buy_price_yocto": "200000000000000000000000",
+      "expected_sell_price_yocto": "180000000000000000000000",
+      "expected_is_closed": false
+    },
+    {
+      "name": "half_stock_high_demand",
+      "description": "Stock is half target (50 units), price scales to 1.5 * P0",
+      "stock": 50,
+      "target_stock": 100,
+      "base_price_yocto": "100000000000000000000000",
+      "buyback_multiplier_bps": 10000,
+      "treasury_reserve_yocto": "2000000000000000000000000",
+      "expected_mid_price_yocto": "150000000000000000000000",
+      "expected_buy_price_yocto": "150000000000000000000000",
+      "expected_sell_price_yocto": "135000000000000000000000",
+      "expected_is_closed": false
+    },
+    {
+      "name": "oversupply_above_target",
+      "description": "Stock exceeds target (150 units), price stays at baseline P0",
+      "stock": 150,
+      "target_stock": 100,
+      "base_price_yocto": "100000000000000000000000",
+      "buyback_multiplier_bps": 10000,
+      "treasury_reserve_yocto": "10000000000000000000000000",
+      "expected_mid_price_yocto": "100000000000000000000000",
+      "expected_buy_price_yocto": "100000000000000000000000",
+      "expected_sell_price_yocto": "90000000000000000000000",
+      "expected_is_closed": false
+    },
+    {
+      "name": "ai_buyback_boost_multiplier_15000",
+      "description": "AI proposal boosted buyback multiplier to 15000 bps (1.5x sell price)",
+      "stock": 100,
+      "target_stock": 100,
+      "base_price_yocto": "100000000000000000000000",
+      "buyback_multiplier_bps": 15000,
+      "treasury_reserve_yocto": "5000000000000000000000000",
+      "expected_mid_price_yocto": "100000000000000000000000",
+      "expected_buy_price_yocto": "100000000000000000000000",
+      "expected_sell_price_yocto": "135000000000000000000000",
+      "expected_is_closed": false
+    },
+    {
+      "name": "treasury_depleted_below_1_near",
+      "description": "Treasury reserve drops below 1 NEAR, merchant closes sell channel",
+      "stock": 100,
+      "target_stock": 100,
+      "base_price_yocto": "100000000000000000000000",
+      "buyback_multiplier_bps": 10000,
+      "treasury_reserve_yocto": "999999999999999999999999",
+      "expected_mid_price_yocto": "100000000000000000000000",
+      "expected_buy_price_yocto": "100000000000000000000000",
+      "expected_sell_price_yocto": "90000000000000000000000",
+      "expected_is_closed": true
+    }
+  ]
+}

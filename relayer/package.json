@@ -1,0 +1,26 @@
+{
+  "name": "spire-relayer",
+  "version": "3.1.0",
+  "description": "SpireFi autonomous keeper, relayer & indexer",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "keeper": "node dist/index.js --role keeper",
+    "indexer": "node dist/index.js --role indexer",
+    "test": "npm run build && node --test tests/pricing.test.ts tests/tee.test.ts tests/indexer.test.ts tests/keeper.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "near-api-js": "^5.0.1",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2"
+  }
+}

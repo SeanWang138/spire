@@ -1,0 +1,112 @@
+{
+  "description": "Deterministic test vectors for NEP-297 EVENT_JSON parsing and validation in The Spire v3.1",
+  "standard": "spire",
+  "version": "3.1.0",
+  "events": [
+    {
+      "name": "deposit_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"deposit\",\"data\":[{\"account_id\":\"alice.testnet\",\"amount\":\"1000000000000000000000000\"}]}",
+      "expected_event": "deposit",
+      "expected_data": [
+        {
+          "account_id": "alice.testnet",
+          "amount": "1000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "name": "craft_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"craft\",\"data\":[{\"account_id\":\"alice.testnet\",\"recipe\":\"craft_weapon_solar\",\"output_token\":\"weapon:solar\",\"amount\":1,\"materials_consumed\":[{\"token_id\":\"ore:iron\",\"amount\":2},{\"token_id\":\"essence:solar\",\"amount\":1}]}]}",
+      "expected_event": "craft",
+      "expected_data": [
+        {
+          "account_id": "alice.testnet",
+          "recipe": "craft_weapon_solar",
+          "output_token": "weapon:solar",
+          "amount": 1,
+          "materials_consumed": [
+            { "token_id": "ore:iron", "amount": 2 },
+            { "token_id": "essence:solar", "amount": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reforge_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"reforge\",\"data\":[{\"account_id\":\"alice.testnet\",\"burn_element\":\"weapon:solar\",\"received_element\":\"weapon:frost\",\"burned_count\":2,\"minted_count\":1}]}",
+      "expected_event": "reforge",
+      "expected_data": [
+        {
+          "account_id": "alice.testnet",
+          "burn_element": "weapon:solar",
+          "received_element": "weapon:frost",
+          "burned_count": 2,
+          "minted_count": 1
+        }
+      ]
+    },
+    {
+      "name": "raid_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"raid\",\"data\":[{\"account_id\":\"alice.testnet\",\"floor\":1,\"round\":1,\"weapon\":\"weapon:solar\",\"damage\":250,\"boss_remaining_hp\":750,\"ticket_paid\":\"100000000000000000000000\",\"tribute_taken\":false}]}",
+      "expected_event": "raid",
+      "expected_data": [
+        {
+          "account_id": "alice.testnet",
+          "floor": 1,
+          "round": 1,
+          "weapon": "weapon:solar",
+          "damage": 250,
+          "boss_remaining_hp": 750,
+          "ticket_paid": "100000000000000000000000",
+          "tribute_taken": false
+        }
+      ]
+    },
+    {
+      "name": "boss_defeated_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"boss_defeated\",\"data\":[{\"floor\":1,\"round\":1,\"killer\":\"bob.testnet\",\"total_jackpot\":\"1360000000000000000000000\",\"total_damage\":1000,\"trophy_token_id\":\"trophy-f1-r1-bob\"}]}",
+      "expected_event": "boss_defeated",
+      "expected_data": [
+        {
+          "floor": 1,
+          "round": 1,
+          "killer": "bob.testnet",
+          "total_jackpot": "1360000000000000000000000",
+          "total_damage": 1000,
+          "trophy_token_id": "trophy-f1-r1-bob"
+        }
+      ]
+    },
+    {
+      "name": "ai_proposal_applied_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"ai_proposal_applied\",\"data\":[{\"epoch\":2,\"old_resistance\":[4500,4500,4500],\"new_resistance\":[8500,3114,1886],\"buyback_multiplier_bps\":15000,\"proposer\":\"keeper.testnet\",\"memo\":\"Rebalance Solar dominance after raid surge\"}]}",
+      "expected_event": "ai_proposal_applied",
+      "expected_data": [
+        {
+          "epoch": 2,
+          "old_resistance": [4500, 4500, 4500],
+          "new_resistance": [8500, 3114, 1886],
+          "buyback_multiplier_bps": 15000,
+          "proposer": "keeper.testnet",
+          "memo": "Rebalance Solar dominance after raid surge"
+        }
+      ]
+    },
+    {
+      "name": "merchant_trade_event",
+      "raw_log": "EVENT_JSON:{\"standard\":\"spire\",\"version\":\"3.1.0\",\"event\":\"merchant_trade\",\"data\":[{\"account_id\":\"alice.testnet\",\"action\":\"buy\",\"item_id\":\"ore:iron\",\"amount\":5,\"price_paid\":\"250000000000000000000000\",\"current_stock\":95,\"treasury_reserve\":\"5400000000000000000000000\"}]}",
+      "expected_event": "merchant_trade",
+      "expected_data": [
+        {
+          "account_id": "alice.testnet",
+          "action": "buy",
+          "item_id": "ore:iron",
+          "amount": 5,
+          "price_paid": "250000000000000000000000",
+          "current_stock": 95,
+          "treasury_reserve": "5400000000000000000000000"
+        }
+      ]
+    }
+  ]
+}

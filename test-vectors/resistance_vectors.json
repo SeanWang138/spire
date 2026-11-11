@@ -1,0 +1,73 @@
+{
+  "description": "Deterministic test vectors for 3-element adaptive resistance renormalization in The Spire v3.1",
+  "config": {
+    "total_bps": 13500,
+    "min_bps": 1000,
+    "max_bps": 8500
+  },
+  "vectors": [
+    {
+      "name": "canonical_dispatch_vector",
+      "description": "Primary authoritative test vector from ORIGINAL_REQUEST.md and PROJECT.md",
+      "input_supplies": [80, 20, 10],
+      "expected_resistances": [8500, 3114, 1886],
+      "total_bps": 13500
+    },
+    {
+      "name": "uniform_distribution",
+      "description": "Equal supply across all 3 elements",
+      "input_supplies": [10, 10, 10],
+      "expected_resistances": [4500, 4500, 4500],
+      "total_bps": 13500
+    },
+    {
+      "name": "zero_supply_fallback",
+      "description": "Initial state before any weapons are crafted",
+      "input_supplies": [0, 0, 0],
+      "expected_resistances": [4500, 4500, 4500],
+      "total_bps": 13500
+    },
+    {
+      "name": "single_dominant_solar",
+      "description": "All circulating weapons are solar; solar clamped at 8500, remainder equally split",
+      "input_supplies": [100, 0, 0],
+      "expected_resistances": [8500, 2500, 2500],
+      "total_bps": 13500
+    },
+    {
+      "name": "single_dominant_frost",
+      "description": "All circulating weapons are frost; frost clamped at 8500, remainder equally split",
+      "input_supplies": [0, 100, 0],
+      "expected_resistances": [2500, 8500, 2500],
+      "total_bps": 13500
+    },
+    {
+      "name": "single_dominant_void",
+      "description": "All circulating weapons are void; void clamped at 8500, remainder equally split",
+      "input_supplies": [0, 0, 100],
+      "expected_resistances": [2500, 2500, 8500],
+      "total_bps": 13500
+    },
+    {
+      "name": "two_equal_elements_one_zero",
+      "description": "Equal solar and frost weapons, zero void weapons; void clamped to min 1000",
+      "input_supplies": [50, 50, 0],
+      "expected_resistances": [6250, 6250, 1000],
+      "total_bps": 13500
+    },
+    {
+      "name": "extreme_skew_frost",
+      "description": "Frost dominates heavily, void is zero; frost hits max 8500",
+      "input_supplies": [1, 99, 0],
+      "expected_resistances": [2567, 8500, 2433],
+      "total_bps": 13500
+    },
+    {
+      "name": "nearly_balanced_odd_supply",
+      "description": "Slightly asymmetric supplies",
+      "input_supplies": [33, 33, 34],
+      "expected_resistances": [4455, 4455, 4590],
+      "total_bps": 13500
+    }
+  ]
+}
