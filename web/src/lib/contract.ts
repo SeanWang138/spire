@@ -388,7 +388,7 @@ async function rpcView<T>(
 // ---------------------------------------------------------------------------
 
 /**
- * Floor indexing: the contract is 0-based (0/1/2), the UI is 1-based (Lantai 1/2/3).
+ * Floor indexing: the contract is 0-based (0/1/2), the UI is 1-based (Floor 1/2/3).
  * Every floor value crossing this adapter is converted HERE and nowhere else.
  */
 function toOnchainFloor(uiFloor: number): number {
@@ -548,7 +548,7 @@ export async function get_damage(
 // Change calls (signed with the Function Call Access Key — signless)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_GAS = 150_000_000_000_000n; // 150 TGas
+const DEFAULT_GAS = 30_000_000_000_000n; // 30 TGas (optimal for 0.1 NEAR subaccount)
 
 async function signedCall(
   sessionAccountId: string,
@@ -557,16 +557,16 @@ async function signedCall(
   args: Record<string, unknown> = {},
   opts?: { attachedDepositYocto?: string; gas?: bigint }
 ): Promise<ChangeResult> {
-  try {
-    const keyStore = new keyStores.InMemoryKeyStore();
-    await keyStore.setKey(
-      NETWORK_ID,
-      sessionAccountId,
-      KeyPair.fromString(sessionSecretKey as Parameters<typeof KeyPair.fromString>[0])
-    );
-    const near = new Near({ networkId: NETWORK_ID, nodeUrl: RPC_ENDPOINTS[0], keyStore });
-    const account: Account = await near.account(sessionAccountId);
+  const keyStore = new keyStores.InMemoryKeyStore();
+  await keyStore.setKey(
+    NETWORK_ID,
+    sessionAccountId,
+    KeyPair.fromString(sessionSecretKey as Parameters<typeof KeyPair.fromString>[0])
+  );
+  const near = new Near({ networkId: NETWORK_ID, nodeUrl: RPC_ENDPOINTS[0], keyStore });
+  const account: Account = await near.account(sessionAccountId);
 
+  try {
     const result = await account.signAndSendTransaction({
       receiverId: CONTRACT_ID,
       actions: [
@@ -581,8 +581,8 @@ async function signedCall(
 
     return { txHash: result?.transaction_outcome?.id ?? "pending" };
   } catch (err: unknown) {
-    console.warn(`[SpireFi Client] On-chain call ${methodName} fell back to local simulated execution:`, err);
-    return { txHash: `sim_tx_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` };
+    console.error(`[SpireFi Client] On-chain call ${methodName} failed:`, err);
+    throw err;
   }
 }
 
@@ -611,17 +611,17 @@ export async function changeCall(
 // --- Player progression ---
 
 export async function claim_starter(): Promise<ChangeResult> {
-  return changeCall("claim_starter");
+  return changeCall("claim_starter", {}, { gas: 30_000_000_000_000n });
 }
 
 /** Gather GATHER_AMOUNT units of one material node (cooldown + epoch cap apply). */
 export async function gather(item_id: ItemId): Promise<ChangeResult> {
-  return changeCall("gather", { item_id });
+  return changeCall("gather", { item_id }, { gas: 30_000_000_000_000n });
 }
 
 /** Craft a weapon of the given element (0 solar / 1 frost / 2 void). */
 export async function craft_weapon(element: ElementIndex): Promise<ChangeResult> {
-  return changeCall("craft_weapon", { element });
+  return changeCall("craft_weapon", { element }, { gas: 40_000_000_000_000n });
 }
 
 /** Transmute weapons: burn weapons of `burn_element` into `target_element`. */
@@ -629,7 +629,7 @@ export async function reforge(
   burn_element: ElementIndex,
   target_element: ElementIndex
 ): Promise<ChangeResult> {
-  return changeCall("reforge", { burn_element, target_element });
+  return changeCall("reforge", { burn_element, target_element }, { gas: 40_000_000_000_000n });
 }
 
 /**
@@ -645,7 +645,7 @@ export async function attack(
   return changeCall(
     "attack",
     { floor: toOnchainFloor(floor), weapon_element, stances },
-    { gas: 200_000_000_000_000n }
+    { gas: 50_000_000_000_000n } // 50 TGas
   );
 }
 
@@ -654,17 +654,17 @@ export async function claim_payout(
   floor: number,
   round: number
 ): Promise<ChangeResult> {
-  return changeCall("claim_payout", { floor: toOnchainFloor(floor), round });
+  return changeCall("claim_payout", { floor: toOnchainFloor(floor), round }, { gas: 40_000_000_000_000n });
 }
 
 /** Claim the seized-tribute loot for a completed (floor, round). */
 export async function claim_jackpot(): Promise<ChangeResult> {
-  return changeCall("claim_jackpot");
+  return changeCall("claim_jackpot", {}, { gas: 50_000_000_000_000n });
 }
 
 /** Anyone can resolve a floor whose deadline passed (boss regains the pot). */
 export async function resolve_expired(floor: number): Promise<ChangeResult> {
-  return changeCall("resolve_expired", { floor: toOnchainFloor(floor) });
+  return changeCall("resolve_expired", { floor: toOnchainFloor(floor) }, { gas: 40_000_000_000_000n });
 }
 
 /** Keeper/TEE admin entry point (kept for ABI completeness). */

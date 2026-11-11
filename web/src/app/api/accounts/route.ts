@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connect, keyStores, KeyPair } from "near-api-js";
+import { connect, keyStores, KeyPair, utils } from "near-api-js";
 
 export const dynamic = "force-dynamic";
 
@@ -21,22 +21,16 @@ export async function POST(req: NextRequest) {
       process.env.KEEPER_PRIVATE_KEY ||
       "";
     const rpcUrl =
-      process.env.NEAR_RPC_URL || "https://rpc.testnet.near.org";
+      process.env.NEAR_RPC_URL || "https://rpc.testnet.fastnear.com";
     const fundingYocto =
-      process.env.SUBACCOUNT_FUNDING_YOCTO || "50000000000000000000000"; // 0.05 NEAR
+      process.env.SUBACCOUNT_FUNDING_YOCTO || "100000000000000000000000"; // 0.1 NEAR
 
     // If private key is configured (e.g. in Vercel Environment Variables), execute real on-chain creation
     if (parentPrivateKey) {
       try {
-        let keyPair: ReturnType<typeof KeyPair.fromRandom>;
-        if (public_key) {
-          const raw = public_key.startsWith("ed25519:")
-            ? public_key.slice("ed25519:".length)
-            : public_key;
-          keyPair = KeyPair.fromString(`ed25519:${raw}` as Parameters<typeof KeyPair.fromString>[0]);
-        } else {
-          keyPair = KeyPair.fromRandom("ed25519");
-        }
+        const targetPublicKey = public_key
+          ? utils.PublicKey.from(public_key)
+          : KeyPair.fromRandom("ed25519").getPublicKey();
 
         const keyStore = new keyStores.InMemoryKeyStore();
         await keyStore.setKey(
@@ -47,13 +41,13 @@ export async function POST(req: NextRequest) {
         const near = await connect({ networkId: "testnet", nodeUrl: rpcUrl, keyStore } as never);
         const parent = await near.account(parentAccountId);
 
-        await parent.createAccount(account_id, keyPair.getPublicKey(), BigInt(fundingYocto));
+        await parent.createAccount(account_id, targetPublicKey, BigInt(fundingYocto));
 
         return NextResponse.json({
           success: true,
           status: "provisioned",
           account_id,
-          public_key: keyPair.getPublicKey().toString(),
+          public_key: targetPublicKey.toString(),
           onchain: true,
         });
       } catch (err: unknown) {
@@ -80,7 +74,7 @@ export async function POST(req: NextRequest) {
       account_id,
       public_key: public_key || "ed25519:mock_preview_key",
       onchain: false,
-      message: "Preview mode provisioned. Configure NEAR_PARENT_PRIVATE_KEY in Vercel for live on-chain sub-account creation.",
+      message: "Preview mode provisioned. Configure NEAR_PARENT_PRIVATE_KEY in environment for live on-chain sub-account creation.",
     });
   } catch (error: unknown) {
     console.error("[API Accounts] Request parsing error:", error);

@@ -11,6 +11,7 @@ import { KeyPair } from "near-api-js";
 export const NETWORK_ID = "testnet";
 
 export const RPC_ENDPOINTS = [
+  "https://rpc.testnet.fastnear.com",
   "https://test.rpc.fastnear.com",
   "https://rpc.testnet.near.org",
 ];
