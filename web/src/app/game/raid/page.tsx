@@ -176,7 +176,7 @@ export default function RaidPage() {
           title="Boss arena unavailable"
           hint={
             tower.error || meta.error
-              ? "get_tower / get_meta view call failed from the public RPC. The SpireFi contract may not be deployed yet, or the endpoint is down. No simulated data is shown here."
+              ? "Unable to connect to the Boss Arena telemetry on NEAR Testnet. Please verify your connection or reload."
               : "Loading arena..."
           }
           onReload={() => {

@@ -91,7 +91,7 @@ export default function MerchantPage() {
       {!merchant.data ? (
         <EmptyState
           title="Bazaar unavailable"
-          hint="get_merchant view call failed from the public RPC — the contract may not be deployed yet. The panel stays empty, no simulated data is shown."
+          hint="Unable to retrieve merchant data from the network. Please verify your connection or reload."
           onReload={merchant.reload}
         />
       ) : (
@@ -114,7 +114,7 @@ export default function MerchantPage() {
                 <div className="flex items-center gap-2">
                   <Store className="w-4 h-4 text-frost" />
                   <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
-                    Quote Inspector <span className="text-slate-500">// get_quote + reason kontrak</span>
+                    Quote Inspector <span className="text-slate-500">// Live Trade Pricing</span>
                   </h2>
                 </div>
                 <div className="flex items-center gap-2">
@@ -162,7 +162,7 @@ export default function MerchantPage() {
                       ? quotes.buy.reason
                       : quotes.buy
                       ? "The contract did not provide a reason."
-                      : "Quote unavailable (get_quote failed)."}
+                      : "Quote temporarily unavailable."}
                   </p>
                 </div>
 
@@ -186,7 +186,7 @@ export default function MerchantPage() {
                       ? quotes.sell.reason
                       : quotes.sell
                       ? "The contract did not provide a reason."
-                      : "Quote unavailable (get_quote failed)."}
+                      : "Quote temporarily unavailable."}
                   </p>
                 </div>
               </div>

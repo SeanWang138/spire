@@ -114,14 +114,14 @@ export default function AiPage() {
         <div className="flex flex-col gap-2">
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">Boss Brain</h1>
           <p className="text-xs sm:text-sm font-mono text-slate-400">
-            Proposal TEE per-epoch: multiplier buyback per elemen, resep altar, dan taunt —
-            semuanya diverifikasi tanda tangan Ed25519 oleh kontrak.
+            Per-epoch TEE proposals: elemental buyback multipliers, altar transmutation recipes, and boss taunts —
+            cryptographically verified via Ed25519 signatures on-chain.
           </p>
           <FloorSelector floor={floor} setFloor={setFloor} />
         </div>
         <EmptyState
           title="AI state unavailable"
-          hint="get_ai_state view call failed from the public RPC — the latest TEE proposal cannot be displayed. No simulated data on this page."
+          hint="Unable to retrieve AI oracle telemetry from the network. Please reload or check your connection."
           onReload={() => {
             tower.reload();
             aiState.reload();
@@ -138,8 +138,8 @@ export default function AiPage() {
       <div className="flex flex-col gap-2">
         <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">Boss Brain</h1>
         <p className="text-xs sm:text-sm font-mono text-slate-400">
-          Proposal TEE per-epoch: multiplier buyback per elemen, resep altar, dan taunt —
-          semuanya diverifikasi tanda tangan Ed25519 oleh kontrak.
+          Per-epoch TEE proposals: elemental buyback multipliers, altar transmutation recipes, and boss taunts —
+          cryptographically verified via Ed25519 signatures on-chain.
         </p>
         <FloorSelector floor={floor} setFloor={setFloor} />
       </div>
@@ -317,7 +317,7 @@ export default function AiPage() {
             })}
             <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
               <KeyRound className="w-3 h-3" />
-              <span>Resep diaktifkan lewat proposal TEE yang ditandatangani — bukan input manual.</span>
+              <span>Altar recipes are activated through cryptographically signed TEE proposals, not manual overrides.</span>
             </div>
           </div>
         </div>

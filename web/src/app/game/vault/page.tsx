@@ -100,7 +100,7 @@ export default function VaultPage() {
       balance.reload();
       reload?.();
     } catch (err) {
-      setTxMessage(err instanceof Error ? err.message : "Transaction failed — check the session key & contract.");
+      setTxMessage(err instanceof Error ? err.message : "Transaction failed — check session key or network.");
     } finally {
       setBusy(null);
     }
@@ -117,14 +117,14 @@ export default function VaultPage() {
     } catch {
       setClaimableYocto(null);
       setClaimLoot(null);
-      setClaimableError("get_claimable failed — contract unreachable.");
+      setClaimableError("Unable to calculate claimable bounty. Contract unreachable.");
     }
   };
 
   if (!session) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <EmptyState title="No session yet" hint="Enter from /game/start to use the signless vault." />
+        <EmptyState title="No active session" hint="Enter your account name on the Title Screen to access the signless vault." />
       </div>
     );
   }
@@ -137,14 +137,14 @@ export default function VaultPage() {
       <div>
         <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">Vault</h1>
         <p className="text-xs sm:text-sm font-mono text-slate-400 mt-1">
-          Ledger internal kontrak. Deposit mendanai tiket raid, jackpot claims, dan staking backer — semua signless.
+          Internal ledger. Deposits fund raid tickets, jackpot claims, and backer staking — entirely signless.
         </p>
       </div>
 
       {!balance.data ? (
         <EmptyState
           title="Vault balance unavailable"
-          hint="get_balance view call failed from the public RPC. The contract may not be deployed yet; the panel stays empty with no simulated data."
+          hint="Unable to retrieve vault balance from the network. Please reload or check your connection."
           onReload={balance.reload}
         />
       ) : (
@@ -169,7 +169,7 @@ export default function VaultPage() {
               <div className="flex items-center gap-2">
                 <ScrollText className="w-4 h-4 text-emerald-400" />
                 <span className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                  Claim Round
+                  Claim Round Rewards
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
@@ -199,7 +199,7 @@ export default function VaultPage() {
                 onClick={checkClaimable}
                 className="w-full py-1.5 rounded bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-xs font-mono font-bold transition-colors"
               >
-                Check claimable → get_claimable + get_claimable_loot
+                Check Unclaimed Raid Rewards
               </button>
               <div className="text-[11px] font-mono leading-relaxed">
                 {claimableYocto !== null ? (
@@ -222,21 +222,21 @@ export default function VaultPage() {
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() =>
-                    run("claim", () => claim_payout(claimFloor, claimRound), `claim_payout f${claimFloor} r${claimRound}`)
+                    run("claim", () => claim_payout(claimFloor, claimRound), `Claim Round ${claimRound} Payout`)
                   }
                   disabled={busy !== null}
                   className="py-2 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
                 >
-                  {busy === "claim" ? "Mengirim…" : "Claim Payout"}
+                  {busy === "claim" ? "Submitting..." : "Claim Payout"}
                 </button>
                 <button
                   onClick={() =>
-                    run("claim-all", () => claim_jackpot(), "claim_jackpot (semua putaran terbaru)")
+                    run("claim-all", () => claim_jackpot(), "Claim All Recent Bounties")
                   }
                   disabled={busy !== null}
                   className="py-2 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
                 >
-                  {busy === "claim-all" ? "Mengirim…" : "Claim Semua"}
+                  {busy === "claim-all" ? "Submitting..." : "Claim All"}
                 </button>
               </div>
             </div>
@@ -249,7 +249,7 @@ export default function VaultPage() {
               <div className="flex items-center gap-2">
                 <ArrowDownCircle className="w-4 h-4 text-emerald-400" />
                 <span className="text-sm font-bold uppercase font-mono tracking-wide text-white">Deposit</span>
-                <span className="text-[10px] font-mono text-slate-400">payable NEAR</span>
+                <span className="text-[10px] font-mono text-slate-400">Payable NEAR</span>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {DEPOSIT_PRESETS.map((val) => (
@@ -275,21 +275,22 @@ export default function VaultPage() {
                 className="w-full p-2 rounded-lg bg-panel-dark border border-white/10 text-white text-sm focus:outline-none focus:border-emerald-400"
               />
               <button
-                onClick={() => run("deposit", () => deposit(nearToYocto(depositNear)), `deposit ${depositNear} NEAR`)}
+                onClick={() =>
+                  run("deposit", () => deposit(nearToYocto(depositNear)), `Deposit ${depositNear} NEAR`)
+                }
                 disabled={busy !== null || depositNear <= 0}
-                className="w-full py-2 rounded-lg bg-emerald-400 hover:bg-emerald-500 text-oled text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40 active:scale-[0.99]"
+                className="w-full py-2 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-oled text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40 active:scale-[0.99]"
               >
-                {busy === "deposit" ? "Mengirim…" : `Deposit ${depositNear} NEAR`}
+                {busy === "deposit" ? "Submitting..." : `Deposit ${depositNear} NEAR`}
               </button>
             </div>
 
-            {/* Withdraw — amount: Option<U128> */}
+            {/* Withdraw */}
             <div className="rounded-xl bg-panel-card border border-solar/30 p-4 shadow-xl space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ArrowUpCircle className="w-4 h-4 text-solar" />
                   <span className="text-sm font-bold uppercase font-mono tracking-wide text-white">Withdraw</span>
-                  <span className="text-[10px] font-mono text-slate-400">amount: Option</span>
                 </div>
                 <button
                   onClick={() => {
@@ -324,20 +325,20 @@ export default function VaultPage() {
                   }}
                   className="accent-solar"
                 />
-                null amount — withdraw the entire balance
+                Withdraw entire balance to wallet
               </label>
               <button
                 onClick={() =>
                   run(
                     "withdraw",
                     () => withdraw(withdrawAll ? null : nearToYocto(withdrawNear)),
-                    withdrawAll ? "withdraw (all)" : `withdraw ${withdrawNear} NEAR`
+                    withdrawAll ? "Withdraw (Entire Balance)" : `Withdraw ${withdrawNear} NEAR`
                   )
                 }
                 disabled={busy !== null || (!withdrawAll && withdrawNear <= 0) || (!withdrawAll && withdrawNear > withdrawMax)}
                 className="w-full py-2 rounded-lg bg-solar hover:bg-solar-dark text-oled text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40 active:scale-[0.99]"
               >
-                {busy === "withdraw" ? "Mengirim…" : "Withdraw"}
+                {busy === "withdraw" ? "Submitting..." : "Withdraw"}
               </button>
             </div>
 
@@ -348,7 +349,7 @@ export default function VaultPage() {
                 <span className="text-sm font-bold uppercase font-mono tracking-wide text-white">
                   Backer Vault
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">15% tiket → dividen</span>
+                <span className="text-[10px] font-mono text-slate-400">15% tickets → dividends</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                 <div>
@@ -400,32 +401,32 @@ export default function VaultPage() {
                     run(
                       "back",
                       () => back_boss_vault(backFloor, nearToYocto(backAmount)),
-                      `back_boss_vault f${backFloor} ${backAmount} NEAR`
+                      `Stake ${backAmount} NEAR on Floor ${backFloor}`
                     )
                   }
                   disabled={busy !== null || backAmount <= 0}
                   className="py-2 rounded-lg bg-frost hover:bg-frost-dark text-oled text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40 active:scale-[0.99]"
                 >
-                  {busy === "back" ? "Mengirim…" : `Back ${backAmount} NEAR`}
+                  {busy === "back" ? "Submitting..." : `Back ${backAmount} NEAR`}
                 </button>
                 <button
                   onClick={() =>
                     run(
                       "dividend",
                       () => claim_backer_dividend(dividendFloor, backer.data?.current_cycle ?? 0),
-                      `claim_backer_dividend f${dividendFloor}`
+                      `Claim Dividends Floor ${dividendFloor}`
                     )
                   }
                   disabled={busy !== null || !backer.data || backer.data.shares === "0"}
                   className="py-2 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40"
                 >
-                  {busy === "dividend" ? "Mengirim…" : "Claim Dividend"}
+                  {busy === "dividend" ? "Submitting..." : "Claim Dividend"}
                 </button>
               </div>
               <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
                 <Swords className="w-3 h-3" />
                 <span>
-                  Dividen mengikuti 15% potongan tiket floor yang kamu backing, dibayar proporsional per share.
+                  Dividends accrue from a 15% share of raid tickets on the floor you back, distributed proportionally per share.
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
@@ -449,8 +450,8 @@ export default function VaultPage() {
             <div className="rounded-xl bg-panel-card border border-white/10 p-4 shadow-xl space-y-2">
               <div className="flex items-center gap-2">
                 <History className="w-4 h-4 text-frost" />
-                <span className="text-sm font-bold uppercase font-mono tracking-wide text-white">Riwayat Vault</span>
-                <span className="text-[10px] font-mono text-slate-400">lokal // sesi browser ini</span>
+                <span className="text-sm font-bold uppercase font-mono tracking-wide text-white">Vault Activity</span>
+                <span className="text-[10px] font-mono text-slate-400">local // current browser session</span>
               </div>
               <div className="max-h-44 overflow-y-auto space-y-1 pr-1">
                 {history.length === 0 ? (

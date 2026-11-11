@@ -180,8 +180,7 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
       )}
 
       <p className="text-[10px] font-mono text-slate-500">
-        Prices are quoted live from get_quote(item, side, qty) — the reason string is shown in
-        the Quote Inspector beside this desk.
+        Prices are calculated dynamically on-chain based on real-time stock pressure and demand volume.
       </p>
     </div>
   );

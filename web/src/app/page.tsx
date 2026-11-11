@@ -75,7 +75,7 @@ const ECONOMY_ROLES = [
   },
   {
     icon: <Hammer className="w-5 h-5 text-frost" />,
-    role: "Pengrajin (Artisan)",
+    role: "Artisan & Blacksmith",
     body: `Claim the starter kit (${STARTER_WEAPONS[0]}× solar / ${STARTER_WEAPONS[1]}× frost / ${STARTER_WEAPONS[2]}× void + ${STARTER_ORE} ore + ${STARTER_ESSENCE} essence), gather ${GATHER_AMOUNT} units per node, craft elemental weapons and trade them through the NPC merchant's bonding curve.`,
   },
   {

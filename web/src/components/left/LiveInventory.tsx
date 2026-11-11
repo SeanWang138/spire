@@ -116,14 +116,29 @@ export const LiveInventory: React.FC<LiveInventoryProps> = ({
       </div>
 
       {/* Claim Starter Bundle */}
-      <button
-        onClick={handleClaim}
-        disabled={disabled || isClaiming}
-        className="w-full py-2 px-3 rounded-lg border border-jackpot/40 bg-jackpot/10 hover:bg-jackpot/20 text-jackpot text-xs font-mono font-bold flex items-center justify-center gap-2 transition-all"
-      >
-        <Gift className="w-3.5 h-3.5" />
-        <span>{isClaiming ? "Granting Pack..." : "Claim Starter Pack (Free Starter Bundle)"}</span>
-      </button>
+      {(() => {
+        const hasClaimed = inventory.starter_locked.reduce((a, b) => a + b, 0) > 0;
+        return (
+          <button
+            onClick={handleClaim}
+            disabled={disabled || isClaiming || hasClaimed}
+            className={`w-full py-2 px-3 rounded-lg border text-xs font-mono font-bold flex items-center justify-center gap-2 transition-all ${
+              hasClaimed
+                ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-400/80 cursor-default"
+                : "border-jackpot/40 bg-jackpot/10 hover:bg-jackpot/20 text-jackpot active:scale-[0.99]"
+            }`}
+          >
+            <Gift className="w-3.5 h-3.5" />
+            <span>
+              {isClaiming
+                ? "Granting Pack..."
+                : hasClaimed
+                ? "Starter Pack Claimed (Active)"
+                : "Claim Starter Pack (Free Starter Bundle)"}
+            </span>
+          </button>
+        );
+      })()}
     </div>
   );
 };
