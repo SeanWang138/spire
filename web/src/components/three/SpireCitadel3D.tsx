@@ -102,11 +102,11 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
   const thetaRef = useRef<number>(mode === "showcase" ? 0.52 : 0.42);
   const phiRef = useRef<number>(mode === "showcase" ? 1.38 : 1.32);
   const targetLookYRef = useRef<number>(
-    mode === "showcase" ? 0.45 : FLOOR_CAM_TARGET_Y[selectedFloor] ?? 0
+    mode === "showcase" ? 0.52 : FLOOR_CAM_TARGET_Y[selectedFloor] ?? 0
   );
   const currentLookYRef = useRef<number>(targetLookYRef.current);
   const targetDistRef = useRef<number>(
-    mode === "showcase" ? 14.8 : FLOOR_CAM_DISTANCE[selectedFloor] ?? 8.6
+    mode === "showcase" ? 15.6 : FLOOR_CAM_DISTANCE[selectedFloor] ?? 8.6
   );
   const currentDistRef = useRef<number>(targetDistRef.current);
   const velThetaRef = useRef<number>(0);
@@ -132,8 +132,8 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       targetLookYRef.current = FLOOR_CAM_TARGET_Y[selectedFloor] ?? 0;
       targetDistRef.current = FLOOR_CAM_DISTANCE[selectedFloor] ?? 8.6;
     } else {
-      targetLookYRef.current = 0.42 + (FLOOR_CAM_TARGET_Y[selectedFloor] ?? 0) * 0.14;
-      targetDistRef.current = 14.8;
+      targetLookYRef.current = 0.52 + (FLOOR_CAM_TARGET_Y[selectedFloor] ?? 0) * 0.1;
+      targetDistRef.current = 15.6;
     }
     needsSingleRenderRef.current = true;
   }, [selectedFloor, mode]);
@@ -218,9 +218,9 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
 
       bloomPass = new UnrealBloomPass(
         new THREE.Vector2(initW, initH),
+        0.64,
         0.58,
-        0.74,
-        0.88
+        0.84
       );
       composer.addPass(bloomPass);
 
@@ -356,16 +356,20 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     scene.add(rimLight);
 
     // Dynamic floor & environmental bounce lights that wash surrounding cliffs & viaduct
-    const keepCoreLight = new THREE.PointLight(0xf2a63b, 9.0, 28, 1.45);
-    keepCoreLight.position.set(0, -1.35, 0.4);
+    const keepCoreLight = new THREE.PointLight(0xffb02e, 9.0, 24, 1.45);
+    keepCoreLight.position.set(0, -1.75, 0.8);
     scene.add(keepCoreLight);
 
-    const valleyWashLight = new THREE.PointLight(0xf2a63b, 6.0, 36, 1.25);
-    valleyWashLight.position.set(0, 1.5, 2.2);
+    const bastionCoreLight = new THREE.PointLight(0x38bdf8, 8.0, 22, 1.45);
+    bastionCoreLight.position.set(0, 0.4, 0.8);
+    scene.add(bastionCoreLight);
+
+    const valleyWashLight = new THREE.PointLight(0xffb02e, 5.5, 38, 1.25);
+    valleyWashLight.position.set(0, 1.4, 2.4);
     scene.add(valleyWashLight);
 
-    const apexAuraLight = new THREE.PointLight(0xa855f7, 7.0, 24, 1.35);
-    apexAuraLight.position.set(0, 4.2, 0.6);
+    const apexAuraLight = new THREE.PointLight(0xa855f7, 8.5, 24, 1.38);
+    apexAuraLight.position.set(0, 3.6, 0.8);
     scene.add(apexAuraLight);
 
     // =========================================================================
@@ -733,16 +737,29 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     conduitBeam.position.y = 3.6;
     citadelRoot.add(conduitBeam);
 
-    // Raycaster floor tags
+    // Gapless Tier Hitboxes (invisible to render & bloom, exact vertical tier bands for clean raycasting)
     const floorInteractives: THREE.Object3D[] = [];
-    const tagFloor = (obj: THREE.Object3D, floorNum: number) => {
-      obj.traverse((child) => {
-        child.userData.floor = floorNum;
-        if ((child as THREE.Mesh).isMesh) {
-          floorInteractives.push(child);
-        }
-      });
+    const hitboxMat = regMat(
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        colorWrite: false,
+      })
+    );
+    const registerHitbox = (radiusTop: number, radiusBottom: number, height: number, y: number, floorNum: number) => {
+      const box = new THREE.Mesh(
+        regGeo(new THREE.CylinderGeometry(radiusTop, radiusBottom, height, 16)),
+        hitboxMat
+      );
+      box.position.y = y;
+      box.userData.floor = floorNum;
+      citadelRoot.add(box);
+      floorInteractives.push(box);
     };
+    registerHitbox(2.55, 3.35, 2.61, -2.045, 1);
+    registerHitbox(1.88, 2.30, 2.03, 0.275, 2);
+    registerHitbox(1.42, 1.80, 5.18, 3.88, 3);
 
     // --- FLOOR 1: Foundation Keep (Tapered 12-Sided Fortress + Recessed Molten Lancets) ---
     const floor1Group = new THREE.Group();
@@ -791,11 +808,21 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
 
     const f1OrbitRingGroup = new THREE.Group();
     floor1Group.add(f1OrbitRingGroup);
-    const f1HairlineRing = new THREE.Mesh(regGeo(new THREE.TorusGeometry(2.38, 0.016, 8, 64)), f1GlowMat);
-    f1HairlineRing.rotation.x = Math.PI / 2;
-    f1HairlineRing.position.y = -0.35;
-    f1OrbitRingGroup.add(f1HairlineRing);
-    tagFloor(floor1Group, 1);
+    const f1ArcGeo = regGeo(new THREE.TorusGeometry(2.38, 0.022, 8, 18, Math.PI * 0.24));
+    const f1SatGeo = regGeo(new THREE.OctahedronGeometry(0.11, 0));
+    for (let i = 0; i < 6; i++) {
+      const arc = new THREE.Mesh(f1ArcGeo, f1GlowMat);
+      arc.rotation.x = Math.PI / 2;
+      arc.rotation.z = (i * Math.PI * 2) / 6;
+      arc.position.y = -0.35;
+      f1OrbitRingGroup.add(arc);
+    }
+    for (let i = 0; i < 4; i++) {
+      const sat = new THREE.Mesh(f1SatGeo, f1GlowMat);
+      const a = (i * Math.PI * 2) / 4;
+      sat.position.set(Math.cos(a) * 2.52, -0.32, Math.sin(a) * 2.52);
+      f1OrbitRingGroup.add(sat);
+    }
 
     // --- FLOOR 2: Glacial Bastion (Waisted Cloister + 6 Cryo-Crystal Pinnacles) ---
     const floor2Group = new THREE.Group();
@@ -834,29 +861,32 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       const colWrap = new THREE.Group();
       colWrap.rotation.y = ang;
       const stonePin = new THREE.Mesh(cryoColGeo, stoneDarkMat);
-      stonePin.position.set(0, -0.02, 1.52);
+      stonePin.position.set(0, -0.04, 1.52);
       const crystalHead = new THREE.Mesh(cryoTipGeo, f2GlowMat);
-      crystalHead.position.set(0, 0.96, 1.52);
-      crystalHead.scale.set(0.65, 1.65, 0.65);
+      crystalHead.position.set(0, 0.72, 1.52);
+      crystalHead.scale.set(0.6, 1.25, 0.6);
       colWrap.add(stonePin, crystalHead);
       floor2Group.add(colWrap);
 
-      // Orbiting glacial diamond fragments
+      // Orbiting glacial diamond fragments + broken cryo rune arcs
       const orbitCrystal = new THREE.Mesh(cryoTipGeo, f2GlowMat);
       orbitCrystal.position.set(
         Math.cos(ang) * 1.96,
-        i % 2 === 0 ? 0.25 : -0.25,
+        i % 2 === 0 ? 0.16 : -0.16,
         Math.sin(ang) * 1.96
       );
-      orbitCrystal.scale.set(0.45, 1.35, 0.45);
+      orbitCrystal.scale.set(0.45, 1.2, 0.45);
       f2CrystalsGroup.add(orbitCrystal);
-    }
 
-    const f2Ring = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.78, 0.015, 8, 64)), f2GlowMat);
-    f2Ring.rotation.x = Math.PI / 2;
-    f2Ring.position.y = 0.08;
-    floor2Group.add(f2Ring);
-    tagFloor(floor2Group, 2);
+      const f2Arc = new THREE.Mesh(
+        regGeo(new THREE.TorusGeometry(1.78, 0.018, 8, 16, Math.PI * 0.22)),
+        f2GlowMat
+      );
+      f2Arc.rotation.x = Math.PI / 2;
+      f2Arc.rotation.z = ang + 0.12;
+      f2Arc.position.y = 0.08;
+      f2CrystalsGroup.add(f2Arc);
+    }
 
     // --- FLOOR 3: Void Apex Sanctum (Cathedral Needle + Astrolabe + Shattered Crown) ---
     const floor3Group = new THREE.Group();
@@ -894,32 +924,41 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       crownGroup.add(hornWrap);
     }
 
-    // Precision Precessing Astrolabe / Armillary Rings (fine brass + glowing void rim)
-    const astrolabeRingA = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.42, 0.018, 8, 64)), f3GlowMat);
+    // Precision Precessing Astrolabe / Armillary Rings + Orbiting Void Satellites
+    const astrolabeRingA = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.42, 0.02, 8, 64)), f3GlowMat);
     astrolabeRingA.rotation.x = Math.PI / 2.6;
     astrolabeRingA.position.y = 0.82;
     floor3Group.add(astrolabeRingA);
 
-    const astrolabeRingB = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.12, 0.015, 8, 64)), brassTrimMat);
+    const astrolabeRingB = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.12, 0.017, 8, 64)), f3GlowMat);
     astrolabeRingB.rotation.x = -Math.PI / 2.9;
     astrolabeRingB.position.y = 1.48;
     floor3Group.add(astrolabeRingB);
 
-    const astrolabeRingC = new THREE.Mesh(regGeo(new THREE.TorusGeometry(0.86, 0.013, 8, 56)), apexCoreMat);
+    const astrolabeRingC = new THREE.Mesh(regGeo(new THREE.TorusGeometry(0.86, 0.015, 8, 56)), apexCoreMat);
     astrolabeRingC.rotation.y = Math.PI / 3;
     astrolabeRingC.position.y = 2.05;
     floor3Group.add(astrolabeRingC);
 
+    const crownOrbGroup = new THREE.Group();
+    crownOrbGroup.position.y = 1.15;
+    floor3Group.add(crownOrbGroup);
+    const voidOrbGeo = regGeo(new THREE.OctahedronGeometry(0.095, 0));
+    for (let i = 0; i < 3; i++) {
+      const a = (i * Math.PI * 2) / 3;
+      const orb = new THREE.Mesh(voidOrbGeo, f3GlowMat);
+      orb.position.set(Math.cos(a) * 1.48, 0.18 * Math.sin(i * 2.1), Math.sin(a) * 1.48);
+      crownOrbGroup.add(orb);
+    }
+
     // Floating Shattered Apex Relic Crystal
-    const apexBeacon = new THREE.Mesh(regGeo(new THREE.OctahedronGeometry(0.28, 0)), apexCoreMat);
-    apexBeacon.position.y = 3.55;
-    apexBeacon.scale.set(0.76, 1.65, 0.76);
+    const apexBeacon = new THREE.Mesh(regGeo(new THREE.OctahedronGeometry(0.26, 0)), apexCoreMat);
+    apexBeacon.position.y = 3.48;
+    apexBeacon.scale.set(0.76, 1.55, 0.76);
     floor3Group.add(apexBeacon);
 
-    tagFloor(floor3Group, 3);
-
     // =========================================================================
-    // 7. SHOCKWAVE PULSE RING + ASCENDING EMBER SPORES
+    // 7. CASCADE SURGE WAVE RINGS + HELICAL ORBITING CITADEL WISPS
     // =========================================================================
     const shockMat = regMat(
       new THREE.MeshBasicMaterial({
@@ -928,32 +967,70 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         opacity: 0,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
+        depthWrite: false,
       })
     );
     const shockRing = new THREE.Mesh(regGeo(new THREE.RingGeometry(1.25, 1.5, 48)), shockMat);
     shockRing.rotation.x = -Math.PI / 2;
     citadelRoot.add(shockRing);
 
-    const PARTICLE_COUNT = mode === "showcase" ? 210 : 95;
+    const wavePrimaryMat = regMat(
+      new THREE.MeshBasicMaterial({
+        color: 0xf2a63b,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    const waveRingPrimary = new THREE.Mesh(regGeo(new THREE.RingGeometry(1.88, 2.04, 64)), wavePrimaryMat);
+    waveRingPrimary.rotation.x = -Math.PI / 2;
+    citadelRoot.add(waveRingPrimary);
+
+    const waveSecondaryMat = regMat(
+      new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    const waveRingSecondary = new THREE.Mesh(regGeo(new THREE.RingGeometry(1.88, 2.04, 64)), waveSecondaryMat);
+    waveRingSecondary.rotation.x = -Math.PI / 2;
+    citadelRoot.add(waveRingSecondary);
+
+    const PARTICLE_COUNT = mode === "showcase" ? 240 : 110;
     const positions = new Float32Array(PARTICLE_COUNT * 3);
+    const particleRadii = new Float32Array(PARTICLE_COUNT);
+    const particleAngles = new Float32Array(PARTICLE_COUNT);
+    const particleYs = new Float32Array(PARTICLE_COUNT);
+    const particleOmegas = new Float32Array(PARTICLE_COUNT);
     const particleSpeeds = new Float32Array(PARTICLE_COUNT);
-    const spreadRadius = mode === "showcase" ? 9.5 : 3.2;
+    const spreadRadius = mode === "showcase" ? 8.2 : 3.4;
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const rad = 1.0 + Math.random() * spreadRadius;
+      const rad = 1.85 + Math.random() * spreadRadius;
+      const y = -3.8 + Math.random() * 9.5;
+      particleAngles[i] = ang;
+      particleRadii[i] = rad;
+      particleYs[i] = y;
+      particleOmegas[i] = (0.28 + Math.random() * 0.55) * (i % 3 === 0 ? -1 : 1);
+      particleSpeeds[i] = 0.008 + Math.random() * 0.014;
       positions[i * 3] = Math.cos(ang) * rad;
-      positions[i * 3 + 1] = -3.8 + Math.random() * 9.5;
+      positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = Math.sin(ang) * rad;
-      particleSpeeds[i] = 0.007 + Math.random() * 0.015;
     }
     const particleGeo = regGeo(new THREE.BufferGeometry());
     particleGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     const particleMat = regMat(
       new THREE.PointsMaterial({
         color: 0xffe4a0,
-        size: mode === "showcase" ? 0.068 : 0.055,
+        size: mode === "showcase" ? 0.082 : 0.06,
         transparent: true,
-        opacity: 0.78,
+        opacity: 0.85,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
@@ -1049,8 +1126,28 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     resizeObserver.observe(container);
 
     // =========================================================================
-    // 9. ANIMATION & HDR BLOOM SYNCHRONIZATION LOOP
+    // 9. ANIMATION, HARMONIC CASCADE WAVE & HDR BLOOM SYNCHRONIZATION LOOP
     // =========================================================================
+    const COL_SOLAR = new THREE.Color(0xffb02e);
+    const COL_FROST = new THREE.Color(0x38bdf8);
+    const COL_VOID = new THREE.Color(0xa855f7);
+    const COL_APEX_IDLE = new THREE.Color(0xc084fc);
+
+    const curF1Col = COL_SOLAR.clone();
+    const curF2Col = COL_FROST.clone();
+    const curF3Col = COL_VOID.clone();
+    const curApexCol = COL_APEX_IDLE.clone();
+    const cascadeCol = new THREE.Color(0xffb02e);
+    const envTargetCol = new THREE.Color(0xf2a63b);
+    const envCurrentCol = new THREE.Color(0xf2a63b);
+
+    const smoothstep01 = (v: number) => {
+      const t = Math.max(0, Math.min(1, v));
+      return t * t * (3 - 2 * t);
+    };
+
+    let lastCascadeOrigin: number | null = null;
+    let waveClock = 0;
     let time = 0;
     let hoverScalar = 0;
     let rafId = 0;
@@ -1058,20 +1155,22 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     const animate = () => {
       rafId = requestAnimationFrame(animate);
 
-      const freezeMotion = pausedRef.current || reducedMotionRef.current;
+      const paused = pausedRef.current;
+      // Keep gentle living orbit even if OS reduced-motion is on; explicit Pause freezes time.
+      const motionScale = paused ? 0 : reducedMotionRef.current ? 0.35 : 1;
       const selFloor = selectedFloorRef.current;
       const hovFloor = hoveredFloorRef.current;
-      const towerHot = isHoveredRef.current;
+      const towerHot = hovFloor !== null;
 
-      // Hover scalar always interpolates smoothly so bloom & lights respond even under reduced-motion
       const targetHover = towerHot ? 1 : 0;
       const prevHoverScalar = hoverScalar;
-      hoverScalar += (targetHover - hoverScalar) * 0.08;
+      hoverScalar += (targetHover - hoverScalar) * 0.09;
 
-      if (!freezeMotion) {
-        time += 0.016;
+      if (motionScale > 0) {
+        time += 0.016 * motionScale;
         if (!isDragging) {
-          thetaRef.current += (0.0022 + hoverScalar * 0.0028) + velThetaRef.current;
+          thetaRef.current +=
+            (0.0045 + hoverScalar * 0.0042) * motionScale + velThetaRef.current;
           velThetaRef.current *= 0.92;
         }
       }
@@ -1079,8 +1178,9 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       // Smooth camera transition
       const prevDist = currentDistRef.current;
       currentLookYRef.current += (targetLookYRef.current - currentLookYRef.current) * 0.08;
-      const hoverDistPull = towerHot ? -0.52 : 0;
-      currentDistRef.current += (targetDistRef.current + hoverDistPull - currentDistRef.current) * 0.08;
+      const hoverDistPull = towerHot ? -0.48 : 0;
+      currentDistRef.current +=
+        (targetDistRef.current + hoverDistPull - currentDistRef.current) * 0.08;
 
       const sinPhi = Math.sin(phiRef.current);
       camera.position.set(
@@ -1090,88 +1190,185 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       );
       camera.lookAt(0, currentLookYRef.current, 0);
 
-      // Billboard optical corona plane softly toward camera
+      // Harmonic cascade state progression across Floor 1 / 2 / 3
+      if (hovFloor !== null) {
+        if (hovFloor !== lastCascadeOrigin) {
+          lastCascadeOrigin = hovFloor;
+          waveClock = 0;
+        }
+        waveClock = Math.min(1.2, waveClock + 0.022);
+        cascadeCol.copy(hovFloor === 1 ? COL_SOLAR : hovFloor === 2 ? COL_FROST : COL_VOID);
+      } else {
+        lastCascadeOrigin = null;
+        waveClock = Math.max(0, waveClock - 0.06);
+      }
+
+      const d1 = hovFloor === null ? 0 : Math.abs(1 - hovFloor);
+      const d2 = hovFloor === null ? 0 : Math.abs(2 - hovFloor);
+      const d3 = hovFloor === null ? 0 : Math.abs(3 - hovFloor);
+
+      const stepDelay = (dist: number) => (dist === 0 ? 0.0 : dist === 1 ? 0.24 : 0.48);
+      const prog1 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d1)) / 0.34) : 0;
+      const prog2 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d2)) / 0.34) : 0;
+      const prog3 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d3)) / 0.34) : 0;
+
+      const crest1 = hovFloor !== null ? Math.sin(prog1 * Math.PI) : 0;
+      const crest2 = hovFloor !== null ? Math.sin(prog2 * Math.PI) : 0;
+      const crest3 = hovFloor !== null ? Math.sin(prog3 * Math.PI) : 0;
+
+      // Update per-tier chromatic convergence:
+      // Hover F1 -> Gold sweeps 1 -> 2 -> 3 | Hover F2 -> Blue sweeps 2 -> 1&3 | Hover F3 -> Purple sweeps 3 -> 2 -> 1
+      // When idle -> smoothly melt back to distinct Triad colors (Gold / Cyan / Violet)
+      if (hovFloor !== null) {
+        if (waveClock >= stepDelay(d1)) curF1Col.lerp(cascadeCol, d1 === 0 ? 0.28 : 0.16);
+        if (waveClock >= stepDelay(d2)) curF2Col.lerp(cascadeCol, d2 === 0 ? 0.28 : 0.16);
+        if (waveClock >= stepDelay(d3)) curF3Col.lerp(cascadeCol, d3 === 0 ? 0.28 : 0.16);
+        if (waveClock >= stepDelay(d3)) curApexCol.lerp(cascadeCol, 0.2);
+      } else {
+        curF1Col.lerp(COL_SOLAR, 0.09);
+        curF2Col.lerp(COL_FROST, 0.09);
+        curF3Col.lerp(COL_VOID, 0.09);
+        curApexCol.lerp(COL_APEX_IDLE, 0.09);
+      }
+
+      // Traveling additive harmonic wave rings along spire silhouette
+      const waveActive = hovFloor !== null && waveClock < 1.15;
+      const waveNorm = smoothstep01(waveClock / 0.92);
+      const ringAlpha = waveActive ? Math.sin(waveNorm * Math.PI) * 0.56 : 0;
+      const ringScaleHdr = hovFloor === 2 ? 2.15 : hovFloor === 1 ? 2.45 : 2.9;
+      if (ringAlpha > 0.01 && hovFloor !== null) {
+        wavePrimaryMat.color.copy(cascadeCol).multiplyScalar(ringScaleHdr);
+        wavePrimaryMat.opacity = ringAlpha;
+        const primaryY =
+          hovFloor === 1
+            ? -1.75 + waveNorm * 6.2
+            : hovFloor === 2
+              ? 0.35 + waveNorm * 4.1
+              : 4.25 - waveNorm * 6.3;
+        waveRingPrimary.position.y = primaryY;
+        waveRingPrimary.scale.setScalar(1.22 - ((primaryY + 2) / 6.5) * 0.38);
+
+        if (hovFloor === 2) {
+          waveSecondaryMat.color.copy(cascadeCol).multiplyScalar(ringScaleHdr);
+          waveSecondaryMat.opacity = ringAlpha;
+          const secondaryY = 0.35 - waveNorm * 2.45;
+          waveRingSecondary.position.y = secondaryY;
+          waveRingSecondary.scale.setScalar(1.0 + waveNorm * 0.34);
+        } else {
+          waveSecondaryMat.opacity = 0;
+        }
+      } else {
+        wavePrimaryMat.opacity = 0;
+        waveSecondaryMat.opacity = 0;
+      }
+
+      // Environmental wash color tracks hovered floor (or active floor / dominant element)
       const activeFocus = hovFloor ?? selFloor;
-      const focusHex = FLOOR_COLORS[activeFocus] ?? ELEMENT_COLORS[dominantElementRef.current] ?? 0xf2a63b;
+      const focusHex =
+        hovFloor !== null
+          ? hovFloor === 1
+            ? 0xffb02e
+            : hovFloor === 2
+              ? 0x38bdf8
+              : 0xa855f7
+          : FLOOR_COLORS[activeFocus] ?? ELEMENT_COLORS[dominantElementRef.current] ?? 0xf2a63b;
+      envTargetCol.setHex(focusHex);
+      envCurrentCol.lerp(envTargetCol, 0.1);
       const focusY = FLOOR_CAM_TARGET_Y[activeFocus] ?? 0.5;
 
       coronaPlane.position.y += (focusY - coronaPlane.position.y) * 0.1;
       coronaPlane.lookAt(camera.position);
-      coronaShaderMat.uniforms.uColor.value.setHex(focusHex);
-      coronaShaderMat.uniforms.uBoost.value = hoverScalar;
+      coronaShaderMat.uniforms.uColor.value.copy(envCurrentCol);
+      coronaShaderMat.uniforms.uBoost.value = hoverScalar + Math.max(crest1, crest2, crest3) * 0.45;
 
       // Synchronize Sky Dome scattering & mountain bounce illumination
       const dirToTower = new THREE.Vector3(0, 0.35 + focusY * 0.04, 0)
         .sub(camera.position)
         .normalize();
       skyDomeMat.uniforms.uTime.value = time;
-      skyDomeMat.uniforms.uBeaconColor.value.setHex(focusHex);
+      skyDomeMat.uniforms.uBeaconColor.value.copy(envCurrentCol);
       skyDomeMat.uniforms.uBeaconDir.value.copy(dirToTower);
       skyDomeMat.uniforms.uBloomBoost.value = hoverScalar;
 
-      valleyWashLight.color.setHex(focusHex);
-      valleyWashLight.intensity = 6.0 + hoverScalar * 11.5;
-      keepCoreLight.color.setHex(activeFocus === 1 ? 0xf2a63b : focusHex);
-      keepCoreLight.intensity = 8.0 + hoverScalar * 9.0;
-      apexAuraLight.color.setHex(activeFocus === 3 ? 0xc084fc : focusHex);
-      apexAuraLight.intensity = 6.5 + hoverScalar * 10.5;
+      // Synchronized tier & valley lights (per-element balanced HDR luminance so obsidian stone stays crisp)
+      const cascadeLumCap = hovFloor === 2 ? 0.66 : hovFloor === 1 ? 0.78 : 1.0;
+      valleyWashLight.color.copy(envCurrentCol);
+      valleyWashLight.intensity = 5.5 + hoverScalar * (hovFloor === 2 ? 7.2 : 10.0);
+      keepCoreLight.color.copy(curF1Col);
+      keepCoreLight.intensity = 8.0 + crest1 * 6.0 * cascadeLumCap + (hovFloor !== null ? 3.5 * cascadeLumCap : 0);
+      bastionCoreLight.color.copy(curF2Col);
+      bastionCoreLight.intensity = 7.5 + crest2 * 6.0 * cascadeLumCap + (hovFloor !== null ? 3.5 * cascadeLumCap : 0);
+      apexAuraLight.color.copy(curF3Col);
+      apexAuraLight.intensity = 8.0 + crest3 * 6.2 * cascadeLumCap + (hovFloor !== null ? 4.0 * cascadeLumCap : 0);
 
       mistShaderMat.uniforms.uTime.value = time;
-      mistShaderMat.uniforms.uColor.value.setHex(focusHex);
-      mistShaderMat.uniforms.uBoost.value = hoverScalar;
+      mistShaderMat.uniforms.uColor.value.copy(envCurrentCol);
+      mistShaderMat.uniforms.uBoost.value = hoverScalar * (hovFloor === 2 ? 0.75 : 1.0);
 
       magicCircleMat.uniforms.uTime.value = time;
       magicCircleMat.uniforms.uHover.value = hoverScalar;
-      magicCircleMat.uniforms.uColor.value.setHex(focusHex);
+      magicCircleMat.uniforms.uColor.value.copy(envCurrentCol);
       magicCircleMesh.scale.setScalar(1 + hoverScalar * 0.12);
 
-      conduitBeamMat.uniforms.uColor.value.setHex(focusHex);
-      conduitBeamMat.uniforms.uBoost.value = hoverScalar + (shockwaveRef.current.active ? 0.5 : 0);
+      conduitBeamMat.uniforms.uColor.value.copy(envCurrentCol);
+      conduitBeamMat.uniforms.uBoost.value = hoverScalar * 0.8 + (shockwaveRef.current.active ? 0.45 : 0);
 
-      // Floor Unlock state + Calibrated HDR Radiance Multipliers (sharp glowing slits, zero stone whiteout)
+      // Floor Unlock state + Calibrated HDR Radiance Multipliers (distinct Triad idle, crisp Cascade on hover)
       const fs = floorsRef.current;
       const f2State = fs?.find((f) => f.floor === 2);
       const f3State = fs?.find((f) => f.floor === 3);
 
-      const pulse = freezeMotion ? 0 : Math.sin(time * 2.5) * 0.18;
-      const f1Mult =
-        (hovFloor === 1 ? 3.2 : selFloor === 1 ? 2.4 : 1.55) + hoverScalar * 0.85 + pulse;
+      const pulse = motionScale > 0 ? Math.sin(time * 2.5) * 0.14 : 0;
+      const f1HoverGain = hovFloor !== null ? ((hovFloor === 1 ? 1.15 : prog1 * 0.95) + crest1 * 0.85) * cascadeLumCap : 0;
+      const f2HoverGain = hovFloor !== null ? ((hovFloor === 2 ? 1.2 : prog2 * 1.0) + crest2 * 0.88) * cascadeLumCap : 0;
+      const f3HoverGain = hovFloor !== null ? ((hovFloor === 3 ? 1.4 : prog3 * 1.15) + crest3 * 0.95) * cascadeLumCap : 0;
+
+      const f1Mult = (hovFloor === 1 ? 1.9 : selFloor === 1 ? 1.95 : 1.68) + f1HoverGain + pulse;
       const f2Locked = Boolean(f2State && !f2State.unlocked);
       const f2Mult = f2Locked
-        ? 0.45
-        : (hovFloor === 2 ? 3.25 : selFloor === 2 ? 2.45 : 1.55) + hoverScalar * 0.85 + pulse;
+        ? 0.48
+        : (hovFloor === 2 ? 1.72 : selFloor === 2 ? 1.85 : 1.66) + f2HoverGain + pulse;
       const f3Locked = Boolean(f3State && !f3State.unlocked);
       const f3Mult = f3Locked
-        ? 0.45
-        : (hovFloor === 3 ? 3.35 : selFloor === 3 ? 2.5 : 1.65) + hoverScalar * 0.9 + pulse;
+        ? 0.48
+        : (hovFloor === 3 ? 2.15 : selFloor === 3 ? 2.1 : 1.82) + f3HoverGain + pulse;
 
-      f1GlowMat.color.setHex(0xf2a63b).multiplyScalar(f1Mult);
-      f2GlowMat.color.setHex(0x38bdf8).multiplyScalar(f2Mult);
-      f3GlowMat.color.setHex(0xa855f7).multiplyScalar(f3Mult);
-      apexCoreMat.color.setHex(focusHex === 0x38bdf8 ? 0xbae6fd : 0xffe4a0).multiplyScalar(2.3 + hoverScalar * 1.45 + pulse);
-      pylonGlowMat.color.setHex(focusHex).multiplyScalar(1.85 + hoverScalar * 1.15);
+      f1GlowMat.color.copy(curF1Col).multiplyScalar(f1Mult);
+      f2GlowMat.color.copy(curF2Col).multiplyScalar(f2Mult);
+      f3GlowMat.color.copy(curF3Col).multiplyScalar(f3Mult);
+      apexCoreMat.color.copy(curApexCol).multiplyScalar(2.1 + f3HoverGain * 0.72 + pulse);
+      pylonGlowMat.color.copy(envCurrentCol).multiplyScalar(1.75 + hoverScalar * 0.9 * cascadeLumCap);
 
-      if (!freezeMotion) {
-        f1OrbitRingGroup.rotation.y = time * (0.35 + hoverScalar * 0.65);
-        f2CrystalsGroup.rotation.y = -time * (0.48 + hoverScalar * 0.75);
-        crownGroup.rotation.y = time * 0.18;
-        astrolabeRingA.rotation.z = time * (f3State?.enrage ? 1.4 : 0.48 + hoverScalar * 0.7);
-        astrolabeRingB.rotation.z = -time * (0.62 + hoverScalar * 0.85);
-        astrolabeRingC.rotation.x = time * 0.75;
-        apexBeacon.rotation.y = time * (0.9 + hoverScalar * 0.9);
-        apexBeacon.position.y = 3.55 + Math.sin(time * 2.0) * 0.11 + hoverScalar * 0.14;
+      if (motionScale > 0) {
+        f1OrbitRingGroup.rotation.y = time * (0.58 + hoverScalar * 0.65);
+        f2CrystalsGroup.rotation.y = -time * (0.72 + hoverScalar * 0.78);
+        crownGroup.rotation.y = time * 0.24;
+        crownOrbGroup.rotation.y = -time * (0.85 + hoverScalar * 0.85);
+        crownOrbGroup.rotation.z = Math.sin(time * 0.8) * 0.14;
+        astrolabeRingA.rotation.z = time * (f3State?.enrage ? 1.4 : 0.62 + hoverScalar * 0.72);
+        astrolabeRingB.rotation.z = -time * (0.76 + hoverScalar * 0.85);
+        astrolabeRingC.rotation.x = time * 0.88;
+        apexBeacon.rotation.y = time * (1.05 + hoverScalar * 0.9);
+        apexBeacon.position.y = 3.55 + Math.sin(time * 2.2) * 0.11 + hoverScalar * 0.12;
 
         for (let i = 0; i < pylonsGroup.children.length; i++) {
-          pylonsGroup.children[i].position.y = 0.98 + Math.sin(time * 1.6 + i * 1.35) * 0.14;
+          pylonsGroup.children[i].position.y = 0.98 + Math.sin(time * 1.8 + i * 1.35) * 0.15;
         }
 
         const posArr = particleGeo.attributes.position.array as Float32Array;
-        const speedMult = 1 + hoverScalar * 1.35;
+        const omegaMult = (1 + hoverScalar * 1.45) * motionScale;
+        const riseMult = (1 + hoverScalar * 1.35) * motionScale;
         for (let i = 0; i < PARTICLE_COUNT; i++) {
-          posArr[i * 3 + 1] += particleSpeeds[i] * speedMult;
-          if (posArr[i * 3 + 1] > 5.7) {
-            posArr[i * 3 + 1] = -3.8;
+          particleAngles[i] += particleOmegas[i] * 0.016 * omegaMult;
+          particleYs[i] += particleSpeeds[i] * riseMult;
+          if (particleYs[i] > 5.7) {
+            particleYs[i] = -3.8;
           }
+          const rad = particleRadii[i];
+          const ang = particleAngles[i];
+          posArr[i * 3] = Math.cos(ang) * rad;
+          posArr[i * 3 + 1] = particleYs[i];
+          posArr[i * 3 + 2] = Math.sin(ang) * rad;
         }
         particleGeo.attributes.position.needsUpdate = true;
       }
@@ -1192,22 +1389,31 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         }
       }
 
+      const waveCrestPeak = Math.max(crest1, crest2, crest3);
       if (bloomPass) {
-        bloomPass.strength = 0.56 + hoverScalar * 0.52 + shockBoost;
-        bloomPass.radius = 0.72 + hoverScalar * 0.22;
+        bloomPass.strength = 0.60 + hoverScalar * (hovFloor === 2 ? 0.24 : 0.34) + waveCrestPeak * 0.22 + shockBoost;
+        bloomPass.radius = 0.58 + hoverScalar * 0.16;
       }
 
-      particleMat.color.setHex(focusHex);
-      particleMat.opacity = 0.55 + hoverScalar * 0.35;
+      particleMat.color.copy(envCurrentCol);
+      particleMat.opacity = 0.62 + hoverScalar * 0.3;
 
       const hoverStillEasing = Math.abs(hoverScalar - prevHoverScalar) > 0.001;
       const camStillEasing = Math.abs(currentDistRef.current - prevDist) > 0.001;
+      const colorDiff = (a: THREE.Color, b: THREE.Color) =>
+        Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
+      const cascadeSettling =
+        (hovFloor !== null && waveClock < 1.18) ||
+        colorDiff(curF1Col, COL_SOLAR) > 0.015 ||
+        colorDiff(curF2Col, COL_FROST) > 0.015 ||
+        colorDiff(curF3Col, COL_VOID) > 0.015;
 
       const shouldRender =
-        !freezeMotion ||
+        motionScale > 0 ||
         isDragging ||
         hoverStillEasing ||
         camStillEasing ||
+        cascadeSettling ||
         shockwaveRef.current.active ||
         needsSingleRenderRef.current;
 

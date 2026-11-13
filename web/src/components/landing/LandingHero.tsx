@@ -155,9 +155,8 @@ export const LandingHero: React.FC = () => {
             selectedFloor={selectedFloor}
             onSelectFloor={setSelectedFloor}
             externalHoveredFloor={hoveredFloor}
-            onHoverChange={(hovered, fNum) => {
-              if (fNum !== null) setHoveredFloor(fNum);
-              else if (!hovered) setHoveredFloor(null);
+            onHoverChange={(_hovered, fNum) => {
+              setHoveredFloor(fNum);
             }}
             dominantElement={activeDossier.elementIndex}
             showFloorDock={false}
