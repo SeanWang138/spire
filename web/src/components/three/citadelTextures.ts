@@ -579,19 +579,40 @@ export function createIceGlintTexture(regTex: TextureRegistry): THREE.CanvasText
  * Generates an intricate engraved circular ritual compass rune overlay for the pedestal base.
  */
 export function createArcaneDialTexture(regTex: TextureRegistry): THREE.CanvasTexture {
-  const S = 512;
+  const S = 1024;
   const [canvas, ctx] = createCanvas(S);
   const c = S * 0.5;
 
   ctx.clearRect(0, 0, S, S);
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+  ctx.shadowColor = "rgba(255, 255, 255, 0.85)";
+  ctx.shadowBlur = 10;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
 
+  // Soft outer mana annulus glow anchoring glyphs cleanly outside pedestal stone
+  const ringGlow = ctx.createRadialGradient(c, c, 315, c, c, 495);
+  ringGlow.addColorStop(0.0, "rgba(255,255,255,0.0)");
+  ringGlow.addColorStop(0.28, "rgba(255,255,255,0.10)");
+  ringGlow.addColorStop(0.68, "rgba(255,255,255,0.16)");
+  ringGlow.addColorStop(0.92, "rgba(255,255,255,0.22)");
+  ringGlow.addColorStop(1.0, "rgba(255,255,255,0.0)");
+  ctx.fillStyle = ringGlow;
+  ctx.beginPath();
+  ctx.arc(c, c, 495, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
   for (const [rad, lw] of [
-    [236, 2.4],
-    [214, 1.3],
-    [186, 2.0],
-    [144, 1.2],
+    [486, 4.4],
+    [470, 2.2],
+    [432, 3.8],
+    [396, 2.4],
+    [346, 3.4],
+    [324, 1.8],
+    [252, 1.6],
   ]) {
     ctx.lineWidth = lw;
     ctx.beginPath();
@@ -599,27 +620,68 @@ export function createArcaneDialTexture(regTex: TextureRegistry): THREE.CanvasTe
     ctx.stroke();
   }
 
-  for (let i = 0; i < 48; i++) {
-    const a = (i * Math.PI * 2) / 48;
+  // Fine perimeter compass graduations & segmented ward ticks
+  for (let i = 0; i < 64; i++) {
+    const a = (i * Math.PI * 2) / 64;
     const major = i % 4 === 0;
-    const rIn = major ? 188 : 204;
-    const rOut = 234;
-    ctx.lineWidth = major ? 2.2 : 1.0;
+    const rIn = major ? 432 : 450;
+    const rOut = 472;
+    ctx.lineWidth = major ? 3.4 : 1.6;
     ctx.beginPath();
     ctx.moveTo(c + Math.cos(a) * rIn, c + Math.sin(a) * rIn);
     ctx.lineTo(c + Math.cos(a) * rOut, c + Math.sin(a) * rOut);
     ctx.stroke();
   }
 
-  ctx.lineWidth = 1.6;
+  // 16 outer diamond runes + orbital pips between outer borders
+  for (let i = 0; i < 16; i++) {
+    const a = (i * Math.PI * 2) / 16;
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate(a);
+    if (i % 2 === 0) {
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.moveTo(434, 0);
+      ctx.lineTo(414, 12);
+      ctx.lineTo(396, 0);
+      ctx.lineTo(414, -12);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(414, 0, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(404, -10);
+      ctx.lineTo(426, 0);
+      ctx.lineTo(404, 10);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // 8-point sacred octagram framing outer plinth + pylon node locks
+  ctx.lineWidth = 3.2;
   for (const rot of [0, Math.PI / 4]) {
     ctx.save();
     ctx.translate(c, c);
     ctx.rotate(rot);
-    const side = 186 * Math.SQRT2;
+    const side = 428 * Math.SQRT2;
     ctx.strokeRect(-side * 0.5, -side * 0.5, side, side);
     ctx.restore();
   }
+
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI * 2) / 8;
+    ctx.lineWidth = i % 2 === 1 ? 3.2 : 2.2;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * 326, c + Math.sin(a) * 326);
+    ctx.lineTo(c + Math.cos(a) * 484, c + Math.sin(a) * 484);
+    ctx.stroke();
+  }
+  ctx.restore();
 
   return toTexture(canvas, regTex, { srgb: true, clamp: true });
 }
@@ -633,18 +695,39 @@ export function createGlyphRibbonTexture(regTex: TextureRegistry): THREE.CanvasT
   const [canvas, ctx] = createCanvas(W, H);
   ctx.clearRect(0, 0, W, H);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.88)";
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  // Clean dark negative space around sharp radiant center spine so belt runes stay crisp
+  const bandGrad = ctx.createLinearGradient(0, 8, 0, H - 8);
+  bandGrad.addColorStop(0.0, "rgba(255,255,255,0.0)");
+  bandGrad.addColorStop(0.16, "rgba(255,255,255,0.16)");
+  bandGrad.addColorStop(0.5, "rgba(255,255,255,0.28)");
+  bandGrad.addColorStop(0.84, "rgba(255,255,255,0.16)");
+  bandGrad.addColorStop(1.0, "rgba(255,255,255,0.0)");
+  ctx.fillStyle = bandGrad;
+  ctx.fillRect(0, 8, W, H - 16);
+
+  ctx.save();
+  ctx.shadowColor = "rgba(255,255,255,0.92)";
+  ctx.shadowBlur = 9;
+  ctx.strokeStyle = "rgba(255,255,255,1.0)";
+  ctx.fillStyle = "rgba(255,255,255,1.0)";
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Top & bottom filigree rails
-  ctx.lineWidth = 2.2;
+  // Double heavy glowing filigree border rails
+  ctx.lineWidth = 3.8;
   ctx.beginPath();
-  ctx.moveTo(0, 22);
-  ctx.lineTo(W, 22);
-  ctx.moveTo(0, H - 22);
-  ctx.lineTo(W, H - 22);
+  ctx.moveTo(0, 14);
+  ctx.lineTo(W, 14);
+  ctx.moveTo(0, H - 14);
+  ctx.lineTo(W, H - 14);
+  ctx.stroke();
+
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(0, 24);
+  ctx.lineTo(W, 24);
+  ctx.moveTo(0, H - 24);
+  ctx.lineTo(W, H - 24);
   ctx.stroke();
 
   const segments = 16;
@@ -653,43 +736,42 @@ export function createGlyphRibbonTexture(regTex: TextureRegistry): THREE.CanvasT
     const cx = i * segW + segW * 0.5;
     const cy = H * 0.5;
 
-    // Alternating diamond runes & alchemical chevrons
     if (i % 2 === 0) {
-      ctx.lineWidth = 2.6;
+      ctx.lineWidth = 3.6;
       ctx.beginPath();
-      ctx.moveTo(cx, cy - 22);
-      ctx.lineTo(cx + 12, cy);
-      ctx.lineTo(cx, cy + 22);
-      ctx.lineTo(cx - 12, cy);
+      ctx.moveTo(cx, cy - 30);
+      ctx.lineTo(cx + 15, cy);
+      ctx.lineTo(cx, cy + 30);
+      ctx.lineTo(cx - 15, cy);
       ctx.closePath();
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 5.4, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      ctx.lineWidth = 2.0;
+      ctx.lineWidth = 3.0;
       ctx.beginPath();
-      ctx.moveTo(cx - 10, cy - 15);
-      ctx.lineTo(cx, cy - 24);
-      ctx.lineTo(cx + 10, cy - 15);
-      ctx.moveTo(cx - 10, cy + 15);
-      ctx.lineTo(cx, cy + 24);
-      ctx.lineTo(cx + 10, cy + 15);
-      ctx.moveTo(cx, cy - 12);
-      ctx.lineTo(cx, cy + 12);
+      ctx.moveTo(cx - 12, cy - 18);
+      ctx.lineTo(cx, cy - 28);
+      ctx.lineTo(cx + 12, cy - 18);
+      ctx.moveTo(cx - 12, cy + 18);
+      ctx.lineTo(cx, cy + 28);
+      ctx.lineTo(cx + 12, cy + 18);
+      ctx.moveTo(cx, cy - 18);
+      ctx.lineTo(cx, cy + 18);
       ctx.stroke();
     }
 
-    // Rail notches
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.moveTo(i * segW, 14);
-    ctx.lineTo(i * segW, 30);
-    ctx.moveTo(i * segW, H - 30);
-    ctx.lineTo(i * segW, H - 14);
+    ctx.moveTo(i * segW, 10);
+    ctx.lineTo(i * segW, 34);
+    ctx.moveTo(i * segW, H - 34);
+    ctx.lineTo(i * segW, H - 10);
     ctx.stroke();
   }
+  ctx.restore();
 
   return toTexture(canvas, regTex, { repeatX: 2, repeatY: 1, srgb: true });
 }
