@@ -52,15 +52,15 @@ export async function POST(req: NextRequest) {
         });
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        // If account already exists on-chain, treat as success/confirmed
+        // If account already exists on-chain, reject with 409 so a new browser session
+        // cannot silently bind a mismatched local keypair to an existing account.
         if (errMsg.includes("already exists") || errMsg.includes("AccountAlreadyExists")) {
-          return NextResponse.json({
-            success: true,
-            status: "provisioned",
-            account_id,
-            onchain: true,
-            note: "Account already exists on testnet",
-          });
+          return NextResponse.json(
+            {
+              error: `Account "${account_id}" already exists on-chain. Please choose a different name.`,
+            },
+            { status: 409 }
+          );
         }
         console.error("[API Accounts] On-chain creation error:", err);
         return NextResponse.json({ error: errMsg }, { status: 500 });

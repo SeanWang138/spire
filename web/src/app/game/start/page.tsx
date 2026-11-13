@@ -37,6 +37,7 @@ export default function StartPage() {
   const [nameInput, setNameInput] = useState("");
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [submittedSession, setSubmittedSession] = useState<SessionData | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const cleanName = nameInput.trim();
   const nameValid = ACCOUNT_NAME_RE.test(cleanName);
@@ -71,6 +72,7 @@ export default function StartPage() {
   const handleEnter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nameValid || isProvisioning) return;
+    setErrorMsg(null);
     setIsProvisioning(true);
     const mgr = SessionManager.getInstance();
     const next = mgr.createSession(fullAccountId);
@@ -78,12 +80,20 @@ export default function StartPage() {
     try {
       await provision_account(next.accountId, next.publicKey);
       mgr.markProvisioned(next.accountId);
-    } catch {
-      // Relayer not reachable / route not deployed yet: keep the draft locally
-      // and surface a clear "awaiting provision" status instead of a hard error.
-      mgr.saveDraft(next);
+      setSubmittedSession(next);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("ACCOUNT_EXISTS") || msg.includes("already exists")) {
+        mgr.clearSession();
+        setSubmittedSession(null);
+        setErrorMsg(`"${next.accountId}" is already taken on-chain. Please pick a different name.`);
+      } else {
+        // Relayer not reachable / route not deployed yet: keep the draft locally
+        // and surface a clear "awaiting provision" status instead of a hard error.
+        mgr.saveDraft(next);
+        setSubmittedSession(next);
+      }
     }
-    setSubmittedSession(next);
     setIsProvisioning(false);
   };
 
@@ -135,6 +145,11 @@ export default function StartPage() {
               {cleanName.length > 0 && !nameValid && (
                 <p className="mt-1.5 text-[11px] font-mono text-hp">
                   2–32 characters, only [a-z 0-9 . _ -]
+                </p>
+              )}
+              {errorMsg && (
+                <p className="mt-1.5 text-[11px] font-mono text-hp">
+                  {errorMsg}
                 </p>
               )}
             </div>

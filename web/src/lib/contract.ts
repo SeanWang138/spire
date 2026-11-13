@@ -810,7 +810,20 @@ export async function provision_account(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ account_id: accountId, public_key: publicKey }),
   });
-  if (!res.ok) throw new Error(`RELAYER_UNAVAILABLE ${res.status}`);
+  if (!res.ok) {
+    let errMsg = `RELAYER_UNAVAILABLE ${res.status}`;
+    try {
+      const errJson = (await res.json()) as { error?: string };
+      if (res.status === 409) {
+        errMsg = `ACCOUNT_EXISTS: ${errJson.error || "Account name is already taken."}`;
+      } else if (errJson.error) {
+        errMsg = errJson.error;
+      }
+    } catch {
+      // ignore non-JSON error body
+    }
+    throw new Error(errMsg);
+  }
   return "provisioned";
 }
 
