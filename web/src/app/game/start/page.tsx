@@ -12,7 +12,6 @@ import {
   ChevronRight,
   Hammer,
   Vault,
-  CheckCircle2,
   Copy,
   Check,
   Eye,
@@ -27,73 +26,8 @@ import {
   verify_account_key,
 } from "@/lib/contract";
 import { useSessionAccount } from "@/lib/spire/hooks";
-import { useMotionControl } from "@/lib/spire/motion";
 
 const ACCOUNT_NAME_RE = /^[a-z0-9._-]{2,64}$/;
-
-// Procedural guild filigree crest
-export function SpireCrest({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 200 200"
-      className={className}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <circle
-        cx="100"
-        cy="100"
-        r="88"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeDasharray="4 4"
-        className="text-slate-500"
-      />
-      <circle
-        cx="100"
-        cy="100"
-        r="76"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        className="text-slate-400"
-      />
-      <path
-        d="M 50 140 C 35 100, 30 60, 60 30 C 80 50, 75 80, 100 100 C 125 80, 120 50, 140 30 C 170 60, 165 100, 150 140 Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        fill="rgba(15, 20, 36, 0.75)"
-        className="text-slate-200"
-      />
-      <path
-        d="M 100 18 L 108 85 L 104 175 L 100 185 L 96 175 L 92 85 Z"
-        fill="currentColor"
-        className="text-slate-100"
-      />
-      <line x1="100" y1="22" x2="100" y2="180" stroke="#080B11" strokeWidth="1.5" />
-      <path
-        d="M 45 80 C 65 85, 85 95, 100 115 C 115 95, 135 85, 155 80"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        className="text-slate-400"
-      />
-      <path
-        d="M 40 105 C 65 108, 85 118, 100 135 C 115 118, 135 108, 160 105"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        className="text-slate-500"
-      />
-      <polygon points="100,82 110,95 100,108 90,95" fill="#F59E0B" />
-      <path
-        d="M 70 160 L 100 178 L 130 160"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        className="text-slate-300"
-      />
-    </svg>
-  );
-}
 
 const ONBOARDING_STEPS = [
   {
@@ -118,8 +52,6 @@ const ONBOARDING_STEPS = [
 
 export default function StartPage() {
   const reduced = useReducedMotion();
-  const { paused } = useMotionControl();
-  const freezeCrest = reduced || paused;
   const session = useSessionAccount();
   const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
   const [nameInput, setNameInput] = useState("");
@@ -275,36 +207,33 @@ export default function StartPage() {
   };
 
   return (
-    <div className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center px-4 py-10">
-      {/* Guild crest & title */}
-      <div className="flex flex-col items-center max-w-2xl w-full text-center mb-8">
-        <motion.div
-          animate={freezeCrest ? undefined : { rotate: 360 }}
-          transition={freezeCrest ? undefined : { duration: 48, repeat: Infinity, ease: "linear" }}
-          className="relative w-24 h-24 sm:w-28 sm:h-28 mb-4 flex items-center justify-center text-slate-200 drop-shadow-[0_0_24px_rgba(245,158,11,0.3)]"
-        >
-          <SpireCrest className="w-full h-full" />
-        </motion.div>
-        <h1 className="text-4xl sm:text-5xl font-serif tracking-[0.12em] font-bold text-white mb-2">
-          SPIRE<span className="text-solar">FI</span>
+    <div className="flex flex-col gap-6">
+      {/* Compact Operate Workspace Masthead */}
+      <div className="pb-5 border-b border-brass/15">
+        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
+          {activeSession ? "Signless Session & Identity" : "Sanctum Signless Access"}
         </h1>
-        <p className="text-sm font-mono text-slate-300 max-w-lg leading-relaxed">
-          Forge a signless NEAR testnet citadel identity for instant raid strikes, crafting, and market swaps.
+        <p className="text-sm text-ash mt-1.5 max-w-2xl leading-relaxed">
+          Forge or unlock your NEAR testnet Function Call Access Key for instant raid strikes, crafting, and market swaps without wallet popups.
         </p>
       </div>
 
-      {/* Main 2-column Obsidian Initiation Gate + Quest Briefing */}
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* Main 7/5 Focal Priority Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         <motion.div
-          initial={reduced ? false : { opacity: 0, y: 10 }}
+          initial={reduced ? false : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="lg:col-span-6 citadel-stage p-5 sm:p-6"
+          transition={{ duration: 0.22 }}
+          className="lg:col-span-7 citadel-stage p-5 sm:p-6 flex flex-col justify-between"
         >
           {!activeSession ? (
-            <form onSubmit={handleEnter} className="flex flex-col gap-4">
+            <form onSubmit={handleEnter} className="flex flex-col gap-5">
               {/* Mode Switcher: Sign Up vs Login (Key) */}
-              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-oled border border-white/10" role="tablist" aria-label="Session authentication mode">
+              <div
+                className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#07080D]/90 border border-white/[0.06]"
+                role="tablist"
+                aria-label="Session authentication mode"
+              >
                 <button
                   type="button"
                   role="tab"
@@ -316,7 +245,7 @@ export default function StartPage() {
                   className={`min-h-[44px] py-2 px-3 rounded-md text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors ${
                     authMode === "signup"
                       ? "bg-solar text-oled"
-                      : "text-slate-300 hover:text-white hover:bg-white/[0.04]"
+                      : "text-ash hover:text-parchment hover:bg-white/[0.04]"
                   }`}
                 >
                   <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
@@ -333,7 +262,7 @@ export default function StartPage() {
                   className={`min-h-[44px] py-2 px-3 rounded-md text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-colors ${
                     authMode === "login"
                       ? "bg-frost text-oled"
-                      : "text-slate-300 hover:text-white hover:bg-white/[0.04]"
+                      : "text-ash hover:text-parchment hover:bg-white/[0.04]"
                   }`}
                 >
                   <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
@@ -345,7 +274,7 @@ export default function StartPage() {
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <label
                     htmlFor="spire-account-input"
-                    className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200"
+                    className="text-xs font-mono font-bold uppercase tracking-wider text-parchment"
                   >
                     Citadel Account Name
                   </label>
@@ -356,7 +285,7 @@ export default function StartPage() {
                           ? "text-jackpot"
                           : availability === "taken"
                           ? "text-hp"
-                          : "text-slate-300"
+                          : "text-ash"
                       }`}
                     >
                       {availability === "checking"
@@ -368,7 +297,7 @@ export default function StartPage() {
                   )}
                 </div>
 
-                <div className="flex items-center rounded-lg bg-oled border border-white/15 overflow-hidden focus-within:border-frost transition-colors">
+                <div className="flex items-center rounded-lg bg-[#07080D]/90 border border-white/15 overflow-hidden focus-within:border-frost transition-colors">
                   <input
                     id="spire-account-input"
                     type="text"
@@ -382,24 +311,24 @@ export default function StartPage() {
                     maxLength={64}
                     autoComplete="username"
                     aria-describedby="account-format-hint"
-                    className="flex-1 bg-transparent px-3 py-3 text-sm font-mono text-white placeholder:text-slate-500 focus:outline-none min-w-0"
+                    className="flex-1 bg-transparent px-3.5 py-3 text-sm font-mono text-parchment placeholder:text-pewter/70 focus:outline-none min-w-0"
                   />
-                  <span className="px-3 py-3 text-xs font-mono text-slate-300 bg-panel-dark border-l border-white/10 shrink-0">
+                  <span className="px-3 py-3 text-xs font-mono text-ash bg-panel-dark border-l border-white/10 shrink-0">
                     .spire.testnet
                   </span>
                 </div>
 
                 <p
                   id="account-format-hint"
-                  className={`mt-1.5 text-xs font-mono ${
-                    cleanName.length > 0 && !nameValid ? "text-hp font-semibold" : "text-slate-400"
+                  className={`mt-1.5 text-xs ${
+                    cleanName.length > 0 && !nameValid ? "text-hp font-semibold" : "text-pewter"
                   }`}
                 >
                   2 to 64 characters using lowercase letters, digits, dots, underscores, or hyphens.
                 </p>
 
                 {authMode === "signup" && availability === "taken" && (
-                  <p className="mt-2 text-xs font-mono text-solar leading-relaxed">
+                  <p className="mt-2 text-xs text-solar leading-relaxed">
                     This account already exists on-chain. Pick another name or{" "}
                     <button
                       type="button"
@@ -407,7 +336,7 @@ export default function StartPage() {
                         setAuthMode("login");
                         setErrorMsg(null);
                       }}
-                      className="underline font-bold text-frost hover:text-white"
+                      className="underline font-semibold text-frost hover:text-parchment"
                     >
                       switch to Recovery Key login
                     </button>
@@ -420,7 +349,7 @@ export default function StartPage() {
                 <div>
                   <label
                     htmlFor="spire-recovery-key"
-                    className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200 block mb-1.5"
+                    className="text-xs font-mono font-bold uppercase tracking-wider text-parchment block mb-1.5"
                   >
                     Recovery / Secret Key
                   </label>
@@ -434,7 +363,7 @@ export default function StartPage() {
                     }}
                     placeholder="ed25519:..."
                     autoComplete="off"
-                    className="w-full rounded-lg bg-oled border border-white/15 px-3 py-3 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-frost transition-colors"
+                    className="w-full rounded-lg bg-[#07080D]/90 border border-white/15 px-3.5 py-3 text-xs font-mono text-parchment placeholder:text-pewter/70 focus:outline-none focus:border-frost transition-colors"
                   />
                 </div>
               )}
@@ -442,14 +371,14 @@ export default function StartPage() {
               {errorMsg && (
                 <p
                   role="alert"
-                  className="text-xs font-mono text-hp bg-hp/10 border border-hp/30 rounded-lg px-3 py-2.5 leading-relaxed"
+                  className="text-xs font-mono text-hp bg-hp/10 border border-hp/30 rounded-lg px-3.5 py-2.5 leading-relaxed"
                 >
                   {errorMsg}
                 </p>
               )}
 
-              <div className="pt-3 border-t border-white/10 text-xs font-mono text-slate-300 space-y-1.5">
-                <div className="flex items-center gap-2 text-frost font-semibold">
+              <div className="pt-4 border-t border-white/[0.08] space-y-1.5">
+                <div className="flex items-center gap-2 text-xs font-mono text-frost font-semibold">
                   <KeyRound className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>
                     {authMode === "signup"
@@ -457,16 +386,16 @@ export default function StartPage() {
                       : "On-Chain Ed25519 Key Verification"}
                   </span>
                 </div>
-                <p className="text-slate-300 leading-relaxed font-sans text-xs">
+                <p className="text-ash leading-relaxed text-xs">
                   {authMode === "signup" ? (
                     <>
                       Generates an Ed25519 keypair in localStorage scoped strictly to gameplay methods on{" "}
-                      <code className="font-mono text-slate-100">spire.testnet</code> (1.0 NEAR gas allowance). No wallet extension popups during raids or bazaar trades.
+                      <code className="font-mono text-parchment">spire.testnet</code> (1.0 NEAR gas allowance). No wallet extension popups during raids or bazaar trades.
                     </>
                   ) : (
                     <>
                       Verifies your saved Recovery Key against NEAR Testnet{" "}
-                      <code className="font-mono text-slate-100">view_access_key_list</code> before restoring your local raiding session.
+                      <code className="font-mono text-parchment">view_access_key_list</code> before restoring your local raiding session.
                     </>
                   )}
                 </p>
@@ -499,145 +428,159 @@ export default function StartPage() {
               </button>
             </form>
           ) : (
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between text-xs font-mono border-b border-white/10 pb-3">
-                <span className="text-slate-400">Active Identity</span>
-                <span className="text-white font-bold break-all text-right">{activeSession.accountId}</span>
-              </div>
+            <div className="flex flex-col justify-between gap-5 h-full">
+              <div className="space-y-4">
+                {/* Identity & Status Header */}
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-medium text-pewter block">Active Identity</span>
+                    <span className="font-mono text-base sm:text-lg font-bold text-parchment break-all mt-0.5 block">
+                      {activeSession.accountId}
+                    </span>
+                  </div>
+                  {activeSession.provision === "confirmed" ? (
+                    <span className="px-2.5 py-1 rounded-md bg-jackpot/10 border border-jackpot/30 text-jackpot font-mono text-xs font-semibold inline-flex items-center gap-1.5 shrink-0">
+                      <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                      Confirmed on Testnet
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-md bg-frost/10 border border-frost/30 text-frost font-mono text-xs font-semibold inline-flex items-center gap-1.5 shrink-0">
+                      <Hourglass className="w-3.5 h-3.5" aria-hidden="true" />
+                      Awaiting Relayer
+                    </span>
+                  )}
+                </div>
 
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">Relayer Status</span>
-                {activeSession.provision === "confirmed" ? (
-                  <span className="text-jackpot font-bold inline-flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4" aria-hidden="true" /> Confirmed on Testnet
-                  </span>
-                ) : (
-                  <span className="text-frost font-bold inline-flex items-center gap-1.5">
-                    <Hourglass className="w-4 h-4" aria-hidden="true" /> Awaiting Relayer Confirmation
-                  </span>
-                )}
-              </div>
+                <div className="engraved-rule" />
 
-              {/* Recovery Key Backup Compartment */}
-              <div className="p-3 rounded-lg bg-oled border border-white/10 flex flex-col gap-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 inline-flex items-center gap-1.5">
-                    <KeyRound className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
-                    Recovery Key
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setShowSecret((v) => !v)}
-                      className="min-h-[44px] min-w-[44px] px-2 rounded border border-white/10 bg-panel-dark text-slate-300 hover:text-white inline-flex items-center justify-center transition-colors"
-                      aria-label={showSecret ? "Hide recovery key" : "Reveal recovery key"}
-                    >
-                      {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyKey(activeSession.secretKey)}
-                      className="min-h-[44px] px-3 rounded border border-white/10 bg-panel-dark hover:bg-white/10 text-xs font-mono text-slate-200 inline-flex items-center gap-1.5 transition-colors"
-                    >
-                      {copiedKey ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
-                          <span>Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Copy Key</span>
-                        </>
-                      )}
-                    </button>
+                {/* Recessed Recovery Key Well (flat inset, avoids card-in-card borders) */}
+                <div className="px-4 py-3.5 rounded-lg bg-[#07080D]/90 border border-white/[0.06] flex flex-col gap-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-parchment inline-flex items-center gap-1.5">
+                      <KeyRound className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
+                      Recovery Key
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowSecret((v) => !v)}
+                        className="min-h-[44px] min-w-[44px] px-2.5 rounded-md bg-white/[0.04] hover:bg-white/[0.09] text-ash hover:text-parchment inline-flex items-center justify-center transition-colors"
+                        aria-label={showSecret ? "Hide recovery key" : "Reveal recovery key"}
+                      >
+                        {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyKey(activeSession.secretKey)}
+                        className="min-h-[44px] px-3 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-xs font-mono text-parchment inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        {copiedKey ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
+                            <span>Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Copy Key</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-xs font-mono text-ash break-all select-all">
+                    {showSecret
+                      ? activeSession.secretKey
+                      : "ed25519:****************************************"}
                   </div>
                 </div>
-                <div className="text-xs font-mono text-slate-300 break-all select-all">
-                  {showSecret
-                    ? activeSession.secretKey
-                    : "ed25519:****************************************"}
+
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="text-xs text-ash leading-relaxed"
+                >
+                  {provisionNote ??
+                    (activeSession.provision === "confirmed"
+                      ? "Function Call Access Key is live in localStorage. Back up your Recovery Key above to sign in from another device."
+                      : "Keypair saved locally in browser storage. Background polling checks every 5s for relayer account creation.")}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <Link
+                    href="/game/forge"
+                    className="rpg-sheen min-h-[44px] flex-1 sm:flex-initial py-2.5 px-5 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Hammer className="w-4 h-4" aria-hidden="true" />
+                    Starter Forge
+                  </Link>
+                  <Link
+                    href="/game/raid"
+                    className="min-h-[44px] flex-1 sm:flex-initial py-2.5 px-5 rounded-lg border border-frost/35 bg-frost/10 hover:bg-frost/20 text-frost font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Swords className="w-4 h-4" aria-hidden="true" />
+                    Enter Raid Arena
+                  </Link>
                 </div>
               </div>
 
-              <p
-                role="status"
-                aria-live="polite"
-                className="text-xs font-mono text-slate-300 leading-relaxed"
-              >
-                {provisionNote ??
-                  (activeSession.provision === "confirmed"
-                    ? "Function Call Access Key is live in localStorage. Back up your Recovery Key above to sign in from another device."
-                    : "Keypair saved locally in browser storage. Background polling checks every 5s for relayer account creation.")}
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                <Link
-                  href="/game/forge"
-                  className="min-h-[44px] py-2.5 px-4 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
+              <div className="pt-4 border-t border-white/[0.07] flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-pewter">Switch identity or clear browser key</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    SessionManager.getInstance().clearSession();
+                    setSubmittedSession(null);
+                    setProvisionNote(null);
+                    setErrorMsg(null);
+                    setNameInput("");
+                    setSecretKeyInput("");
+                    setShowSecret(false);
+                  }}
+                  className="min-h-[44px] text-xs font-mono text-ash hover:text-hp transition-colors underline underline-offset-4"
                 >
-                  <Hammer className="w-4 h-4" aria-hidden="true" />
-                  1. Starter Forge
-                </Link>
-                <Link
-                  href="/game/raid"
-                  className="min-h-[44px] py-2.5 px-4 rounded-lg border border-frost/40 bg-frost/10 hover:bg-frost/20 text-frost font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Swords className="w-4 h-4" aria-hidden="true" />
-                  Enter Raid Arena
-                </Link>
+                  Revoke local session &amp; switch account
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  SessionManager.getInstance().clearSession();
-                  setSubmittedSession(null);
-                  setProvisionNote(null);
-                  setErrorMsg(null);
-                  setNameInput("");
-                  setSecretKeyInput("");
-                  setShowSecret(false);
-                }}
-                className="min-h-[44px] text-xs font-mono text-slate-400 hover:text-hp transition-colors underline underline-offset-4 self-start"
-              >
-                Revoke local session &amp; switch account
-              </button>
             </div>
           )}
         </motion.div>
 
-        {/* Right column: Game Loop Briefing */}
-        <div className="lg:col-span-6 obsidian-surface p-5 sm:p-6">
-          <h2 className="font-serif text-lg font-bold text-white mb-4 flex items-center gap-2">
-            <Vault className="w-4 h-4 text-solar" aria-hidden="true" />
-            Adventurer Progression Rite
-          </h2>
-          <ol className="divide-y divide-white/10">
-            {ONBOARDING_STEPS.map((item) => (
-              <li key={item.step} className="py-3.5 first:pt-0 last:pb-0 flex items-start gap-3">
-                <span className="font-mono text-xs font-bold text-solar shrink-0 mt-0.5">{item.step}</span>
-                <div className="min-w-0 flex-1">
+        {/* Right column: Compact Progression Guide */}
+        <aside className="lg:col-span-5 obsidian-surface p-5 sm:p-6 flex flex-col justify-between gap-4">
+          <div>
+            <h2 className="font-serif text-lg font-bold text-parchment flex items-center gap-2">
+              <Vault className="w-4 h-4 text-solar" aria-hidden="true" />
+              Adventurer Progression Rite
+            </h2>
+            <ol className="divide-y divide-white/[0.08] mt-4">
+              {ONBOARDING_STEPS.map((item) => (
+                <li key={item.step} className="py-4 first:pt-0 last:pb-0">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-white">{item.title}</h3>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-slate-500 shrink-0" aria-hidden="true" />
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="font-mono font-mono-numbers text-xs font-bold text-solar shrink-0">
+                        {item.step}
+                      </span>
+                      <h3 className="text-sm font-semibold text-parchment truncate">{item.title}</h3>
+                    </div>
+                    <Link
+                      href={item.href}
+                      className="inline-flex items-center min-h-[44px] px-2 -mr-2 text-xs font-mono font-semibold text-frost hover:underline shrink-0"
+                    >
+                      {item.href.replace("/game/", "")} &rarr;
+                    </Link>
                   </div>
-                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">{item.desc}</p>
-                  <Link
-                    href={item.href}
-                    className="inline-flex items-center min-h-[44px] text-xs font-mono text-frost hover:underline"
-                  >
-                    Open {item.href.replace("/game/", "")} &rarr;
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </div>
+                  <p className="text-xs text-ash leading-relaxed pl-6 mt-0.5">{item.desc}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
 
-      <div className="mt-10 text-center text-xs font-mono text-slate-400">
-        NEAR Protocol Testnet // NEP-245 Multi-Token &amp; Signless Combat
+          <div className="pt-4 border-t border-white/[0.07] flex items-center justify-between text-xs font-mono text-pewter">
+            <span>NEAR Protocol Testnet</span>
+            <span>NEP-245 Multi-Token</span>
+          </div>
+        </aside>
       </div>
     </div>
   );

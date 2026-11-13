@@ -18,25 +18,53 @@ export const ServerSupplyBar: React.FC<ServerSupplyBarProps> = ({ supplies }) =>
   const isDominant2 = p2 >= 50;
 
   return (
-    <div className="obsidian-surface p-4 sm:p-5 space-y-3">
-      <div className="flex items-center justify-between gap-2">
+    <section className="obsidian-surface px-5 py-4 sm:px-6 sm:py-5 space-y-3.5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2">
-          <BarChart3 className="w-4 h-4 text-frost" aria-hidden="true" />
-          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
+          <BarChart3 className="w-4 h-4 text-frost shrink-0" aria-hidden="true" />
+          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
             Circulating Weapon Supply
           </h2>
         </div>
-        <span className="text-xs font-mono text-slate-300">
-          Total: <span className="font-mono-numbers text-white font-bold">{total}</span>
-        </span>
+
+        {/* Inline Tabular Legend + Total */}
+        <dl className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-mono">
+          <div className="flex items-center gap-1.5">
+            <dt className="text-solar flex items-center gap-1.5 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-solar inline-block" aria-hidden="true" />
+              Solar
+            </dt>
+            <dd className="font-mono-numbers text-parchment font-bold">
+              {supplies[0]} ({p0.toFixed(1)}%)
+            </dd>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <dt className="text-frost flex items-center gap-1.5 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-frost inline-block" aria-hidden="true" />
+              Frost
+            </dt>
+            <dd className="font-mono-numbers text-parchment font-bold">
+              {supplies[1]} ({p1.toFixed(1)}%)
+            </dd>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <dt className="text-void flex items-center gap-1.5 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-void inline-block" aria-hidden="true" />
+              Void
+            </dt>
+            <dd className="font-mono-numbers text-parchment font-bold">
+              {supplies[2]} ({p2.toFixed(1)}%)
+            </dd>
+          </div>
+          <div className="flex items-center gap-1.5 pl-3 border-l border-white/10 text-pewter">
+            <dt>Total</dt>
+            <dd className="font-mono-numbers text-parchment font-bold">{total}</dd>
+          </div>
+        </dl>
       </div>
 
-      <p className="text-xs text-slate-300 font-mono">
-        Boss elemental resistance shifts from global crafted stock each epoch. Elements above 50% unlock Altar Reforge.
-      </p>
-
       {/* Segmented Stacked Bar with 50% marker */}
-      <div className="relative h-5 rounded-full overflow-hidden bg-panel-dark flex border border-white/10">
+      <div className="relative h-3.5 rounded-full overflow-hidden bg-[#07080D] flex border border-white/[0.08]">
         <div
           style={{ width: `${p0}%` }}
           className="h-full bg-solar transition-all duration-500"
@@ -58,48 +86,22 @@ export const ServerSupplyBar: React.FC<ServerSupplyBarProps> = ({ supplies }) =>
         />
       </div>
 
-      {/* Flat Ledger Breakdown */}
-      <dl className="grid grid-cols-3 gap-2 pt-1 text-xs font-mono">
-        <div className="flex items-center justify-between gap-1">
-          <dt className="text-solar flex items-center gap-1.5 font-semibold">
-            <span className="w-2 h-2 rounded-full bg-solar inline-block" aria-hidden="true" />
-            Solar
-          </dt>
-          <dd className="font-mono-numbers text-white font-bold">
-            {supplies[0]} ({p0.toFixed(1)}%)
-          </dd>
-        </div>
-        <div className="flex items-center justify-between gap-1">
-          <dt className="text-frost flex items-center gap-1.5 font-semibold">
-            <span className="w-2 h-2 rounded-full bg-frost inline-block" aria-hidden="true" />
-            Frost
-          </dt>
-          <dd className="font-mono-numbers text-white font-bold">
-            {supplies[1]} ({p1.toFixed(1)}%)
-          </dd>
-        </div>
-        <div className="flex items-center justify-between gap-1">
-          <dt className="text-void flex items-center gap-1.5 font-semibold">
-            <span className="w-2 h-2 rounded-full bg-void inline-block" aria-hidden="true" />
-            Void
-          </dt>
-          <dd className="font-mono-numbers text-white font-bold">
-            {supplies[2]} ({p2.toFixed(1)}%)
-          </dd>
-        </div>
-      </dl>
+      <div className="pt-3 border-t border-white/[0.07] flex flex-col lg:flex-row lg:items-center justify-between gap-2 text-xs">
+        <p className="text-pewter">
+          Boss resistance shifts each epoch from crafted stock; &ge;50% unlocks Altar Reforge.
+        </p>
 
-      {/* Saturation Alert */}
-      {(isDominant0 || isDominant1 || isDominant2) && (
-        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs font-mono text-amber-200">
-          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <span>
-            {isDominant0 && "Solar exceeds 50% supply: Altar Reforge accepts Solar as burn source, and Boss resistance shifts heavily toward Solar."}
-            {isDominant1 && "Frost exceeds 50% supply: Altar Reforge accepts Frost as burn source, and Boss resistance shifts heavily toward Frost."}
-            {isDominant2 && "Void exceeds 50% supply: Altar Reforge accepts Void as burn source, and Boss resistance shifts heavily toward Void."}
-          </span>
-        </div>
-      )}
-    </div>
+        {(isDominant0 || isDominant1 || isDominant2) && (
+          <div className="flex items-center gap-1.5 font-mono text-amber-300 shrink-0">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+            <span>
+              {isDominant0 && "Solar ≥50%: Reforge burn open · Boss favors Solar ward."}
+              {isDominant1 && "Frost ≥50%: Reforge burn open · Boss favors Frost ward."}
+              {isDominant2 && "Void ≥50%: Reforge burn open · Boss favors Void ward."}
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 };

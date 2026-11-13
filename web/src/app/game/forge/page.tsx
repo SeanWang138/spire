@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { CraftingForge } from "@/components/left/CraftingForge";
 import { GatheringAltar } from "@/components/left/GatheringAltar";
-import { LiveInventory } from "@/components/left/LiveInventory";
+import { LiveInventory, StarterKitButton } from "@/components/left/LiveInventory";
 import { ServerSupplyBar } from "@/components/left/ServerSupplyBar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { emptyInventory } from "@/lib/contract";
@@ -139,7 +139,7 @@ export default function ForgePage() {
 
   if (!session) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-4xl mx-auto py-8">
         <EmptyState
           title="No active session"
           hint="Provision your signless account on the Session Key screen to gather materials and forge weapons."
@@ -155,21 +155,27 @@ export default function ForgePage() {
   const txUrl = getExplorerTxUrl(statusMessage?.txHash);
 
   return (
-    <div className="px-1 py-8 flex flex-col gap-4">
-      <div>
-        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          Crafting Forge &amp; Altar
-        </h1>
-        <p className="text-xs sm:text-sm font-mono text-slate-300 mt-1">
-          Harvest materials (+2 per node), forge NEP-245 elemental weapons ({CRAFT_ORE_COST} Iron Ore + {CRAFT_ESSENCE_COST} Essence), and watch how realm supply shifts boss adaptation.
-        </p>
+    <div className="flex flex-col gap-5">
+      {/* Masthead with Contextual Starter Kit CTA */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-4 border-b border-brass/15">
+        <div>
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
+            Crafting Forge &amp; Altar
+          </h1>
+          <p className="text-sm text-ash mt-1">
+            Gather materials (+2 per node), craft elemental NEP-245 weapons ({CRAFT_ORE_COST} Ore + {CRAFT_ESSENCE_COST} Essence), and adapt to realm supply.
+          </p>
+        </div>
+        {inventory.data && (
+          <StarterKitButton inventory={inventory.data} onClaimStarter={handleClaimStarter} />
+        )}
       </div>
 
       {statusMessage && (
         <div
           role="status"
           aria-live="polite"
-          className={`p-3 rounded-lg border font-mono text-xs flex flex-wrap items-center justify-between gap-2 ${
+          className={`px-4 py-3 rounded-lg border font-mono text-xs flex flex-wrap items-center justify-between gap-2 ${
             statusMessage.type === "success"
               ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
               : "bg-hp/15 border-hp/40 text-hp"
@@ -203,29 +209,36 @@ export default function ForgePage() {
           onReload={inventory.reload}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-          <div className="md:col-span-4 flex flex-col gap-3">
-            <CraftingForge
-              inventory={inventory.data}
-              supplies={supply.data ?? undefined}
-              onCraft={handleCraft}
-              onReforge={handleReforge}
-              activeRecipe={recipeKnown ? activeRecipe : undefined}
-            />
-            <GatheringAltar onHarvest={handleGather} />
-          </div>
-          <div className="md:col-span-8 flex flex-col gap-3">
-            <LiveInventory inventory={inventory.data} onClaimStarter={handleClaimStarter} />
-            {supply.data ? (
-              <ServerSupplyBar supplies={supply.data} />
-            ) : (
-              <EmptyState
-                title="Global supply unavailable"
-                hint="Unable to retrieve realm weapon supply from the network."
-                onReload={supply.reload}
+        <div className="flex flex-col gap-5">
+          {/* Band 1: Structured 5/7 Inventory Ledger */}
+          <LiveInventory inventory={inventory.data} />
+
+          {/* Band 2: Action-First 7/5 Workbench (Forge left dominant, Altar right paired) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+            <div className="lg:col-span-7">
+              <CraftingForge
+                inventory={inventory.data}
+                supplies={supply.data ?? undefined}
+                onCraft={handleCraft}
+                onReforge={handleReforge}
+                activeRecipe={recipeKnown ? activeRecipe : undefined}
               />
-            )}
+            </div>
+            <div className="lg:col-span-5">
+              <GatheringAltar onHarvest={handleGather} />
+            </div>
           </div>
+
+          {/* Band 3: Full-Width Realm Circulating Supply & Boss Adaptation */}
+          {supply.data ? (
+            <ServerSupplyBar supplies={supply.data} />
+          ) : (
+            <EmptyState
+              title="Global supply unavailable"
+              hint="Unable to retrieve realm weapon supply from the network."
+              onReload={supply.reload}
+            />
+          )}
         </div>
       )}
     </div>

@@ -187,7 +187,7 @@ export default function RaidPage() {
 
   if (!session) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-4xl mx-auto py-8">
         <EmptyState
           title="Signless session not started"
           hint="Create or unlock your Spire account on the Session Key screen first so your browser holds an active Function Call Key."
@@ -200,7 +200,7 @@ export default function RaidPage() {
 
   if (!contractLive || !floorData) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-4xl mx-auto py-8">
         <EmptyState
           title="Boss arena unavailable"
           hint={
@@ -223,7 +223,7 @@ export default function RaidPage() {
   const dominantElement = resistances.indexOf(Math.max(...resistances)) as ElementIndex;
 
   return (
-    <section className="px-1 py-6 flex flex-col gap-5">
+    <section className="flex flex-col gap-6">
       {/* Floating Damage Readout */}
       <AnimatePresence>
         {lastDamage !== null && !reduced && (
@@ -241,7 +241,7 @@ export default function RaidPage() {
       </AnimatePresence>
 
       {/* Main 5/7 RPG Command & 3D Citadel Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Persistent Interactive 3D Citadel Selector + Elemental Radar */}
         <div className="lg:col-span-5 flex flex-col gap-4">
           <div className="citadel-stage overflow-hidden">

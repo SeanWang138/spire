@@ -184,7 +184,7 @@ export default function VaultPage() {
 
   if (!session) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto py-8">
         <EmptyState
           title="No active session"
           hint="Enter your account name and authorize a session key on the Title Screen to access the signless vault."
@@ -206,13 +206,13 @@ export default function VaultPage() {
   const trophySvgUri = normalizeSvgDataUri(trophy?.metadata?.media);
 
   return (
-    <div className="px-1 py-6 sm:py-8 flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 pb-5 border-b border-brass/15">
         <div>
-          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
             Vault &amp; Treasury
           </h1>
-          <p className="text-xs sm:text-sm font-mono text-slate-300 mt-1">
+          <p className="text-sm text-ash mt-1.5 max-w-2xl leading-relaxed">
             Internal ledger for signless raids, jackpot bounties, backer dividends, and Conqueror trophies.
           </p>
         </div>
@@ -224,7 +224,7 @@ export default function VaultPage() {
             nftSupply.reload();
             trophyToken.reload();
           }}
-          className="min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-card hover:bg-white/10 border border-white/15 text-slate-200 text-xs font-mono font-semibold flex items-center gap-2 transition-colors"
+          className="min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-card hover:bg-white/10 border border-white/15 text-parchment text-xs font-mono font-semibold flex items-center gap-2 transition-colors"
         >
           <RefreshCw className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
           Refresh Vault
@@ -262,7 +262,7 @@ export default function VaultPage() {
           onReload={balance.reload}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
           {/* Left rail: Ledger, Claims, Conqueror Trophy NFT Viewer */}
           <div className="md:col-span-5 flex flex-col gap-4">
             <section className="citadel-stage border-t-jackpot/40 p-5">

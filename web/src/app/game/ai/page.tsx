@@ -177,7 +177,7 @@ export default function AiPage() {
 
   if (!session) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto py-8">
         <EmptyState
           title="No active session"
           hint="Enter your account name and authorize a session key on the Title Screen to inspect the Boss Brain."
@@ -190,12 +190,12 @@ export default function AiPage() {
 
   if (aiState.error) {
     return (
-      <div className="px-1 py-6 sm:py-8 flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-3 pb-5 border-b border-brass/15">
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
             Boss Brain TEE Oracle
           </h1>
-          <p className="text-xs sm:text-sm font-mono text-slate-300">
+          <p className="text-sm text-ash max-w-2xl leading-relaxed">
             Per-epoch TEE enclave proposals: elemental buyback multipliers, altar transmutation recipes, and boss taunts verified on-chain via Ed25519 signatures.
           </p>
           <FloorSelector floor={floor} setFloor={setFloor} />
@@ -242,8 +242,8 @@ export default function AiPage() {
   };
 
   return (
-    <div className="px-1 py-6 sm:py-8 flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 pb-5 border-b border-brass/15">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
             <span
@@ -254,10 +254,12 @@ export default function AiPage() {
               Boss Brain TEE Oracle
             </h1>
           </div>
-          <p className="text-xs sm:text-sm font-mono text-ash">
+          <p className="text-sm text-ash max-w-2xl leading-relaxed">
             Per-epoch TEE enclave proposals: elemental buyback multipliers, altar transmutation recipes, and boss taunts verified on-chain via Ed25519 signatures.
           </p>
-          <FloorSelector floor={floor} setFloor={setFloor} />
+          <div className="pt-1">
+            <FloorSelector floor={floor} setFloor={setFloor} />
+          </div>
         </div>
       </div>
 

@@ -34,9 +34,9 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
       name: "Iron Vein",
       element: "Raw Ore",
       icon: Pickaxe,
-      color: "text-slate-200",
-      border: "border-slate-500/35 hover:border-slate-300",
-      bg: "bg-slate-500/10",
+      color: "text-ash",
+      border: "border-white/[0.07] hover:border-ash/45",
+      bg: "bg-[#07080D]/85 hover:bg-[#131624]",
     },
     {
       key: "essence:solar" as const,
@@ -44,8 +44,8 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
       element: "Solar Essence",
       icon: Flame,
       color: "text-solar",
-      border: "border-solar/35 hover:border-solar",
-      bg: "bg-solar/10",
+      border: "border-white/[0.07] hover:border-solar/45",
+      bg: "bg-[#07080D]/85 hover:bg-solar/[0.08]",
     },
     {
       key: "essence:frost" as const,
@@ -53,8 +53,8 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
       element: "Frost Essence",
       icon: Snowflake,
       color: "text-frost",
-      border: "border-frost/35 hover:border-frost",
-      bg: "bg-frost/10",
+      border: "border-white/[0.07] hover:border-frost/45",
+      bg: "bg-[#07080D]/85 hover:bg-frost/[0.08]",
     },
     {
       key: "essence:void" as const,
@@ -62,8 +62,8 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
       element: "Void Essence",
       icon: Sparkles,
       color: "text-void",
-      border: "border-void/35 hover:border-void",
-      bg: "bg-void/10",
+      border: "border-white/[0.07] hover:border-void/45",
+      bg: "bg-[#07080D]/85 hover:bg-void/[0.08]",
     },
   ];
 
@@ -83,11 +83,11 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
   };
 
   return (
-    <div className="obsidian-surface p-4 space-y-3">
+    <section className="obsidian-surface p-5 sm:p-6 flex flex-col justify-between gap-4 h-full">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Zap className="w-4 h-4 text-frost" aria-hidden="true" />
-          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
+          <h2 className="font-serif text-lg font-bold tracking-wide text-parchment">
             Gathering Altar
           </h2>
         </div>
@@ -97,13 +97,13 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
             {cooldownLeft}s cooldown
           </span>
         ) : (
-          <span className="text-[11px] font-mono text-slate-300">
-            {COOLDOWN_SECONDS}s cooldown · {GATHER_EPOCH_CAP}/epoch cap
+          <span className="text-xs font-mono text-pewter">
+            {COOLDOWN_SECONDS}s cooldown · {GATHER_EPOCH_CAP}/epoch
           </span>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-3.5 flex-1">
         {shrines.map((shrine) => {
           const Icon = shrine.icon;
           const isCurrentHarvesting = harvestingKey === shrine.key;
@@ -116,30 +116,32 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
               key={shrine.key}
               onClick={() => handleHarvest(shrine.key)}
               disabled={isBlocked}
-              className={`min-h-[64px] p-3 rounded-lg border text-left transition-colors ${
+              className={`min-h-[100px] p-4 rounded-lg border text-left flex flex-col justify-between transition-colors ${
                 shrine.border
               } ${shrine.bg} ${
                 isBlocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
               }`}
             >
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center justify-between gap-2">
                 <Icon className={`w-4 h-4 ${shrine.color}`} aria-hidden="true" />
                 {isSuccess ? (
                   <Check className="w-4 h-4 text-emerald-400" aria-hidden="true" />
                 ) : (
-                  <span className="text-[11px] font-mono text-slate-300 font-bold">
+                  <span className="text-xs font-mono font-mono-numbers text-ash font-bold">
                     +{GATHER_AMOUNT} Units
                   </span>
                 )}
               </div>
-              <div className="font-bold text-xs text-white truncate">{shrine.name}</div>
-              <div className={`text-[11px] font-mono ${shrine.color} truncate mt-0.5`}>
-                {isCurrentHarvesting ? "Channeling..." : shrine.element}
+              <div className="pt-3">
+                <div className="font-semibold text-sm text-parchment truncate">{shrine.name}</div>
+                <div className={`text-xs font-mono ${shrine.color} truncate mt-0.5`}>
+                  {isCurrentHarvesting ? "Channeling..." : shrine.element}
+                </div>
               </div>
             </button>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 };

@@ -91,13 +91,13 @@ export default function MerchantPage() {
   const txUrl = getExplorerTxUrl(banner?.txHash);
 
   return (
-    <div className="px-1 py-8 flex flex-col gap-6">
-      <div>
-        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">
+    <div className="flex flex-col gap-6">
+      <div className="pb-5 border-b border-brass/15">
+        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
           Merchant Bazaar &amp; Market Simulator
         </h1>
-        <p className="text-xs sm:text-sm font-mono text-slate-300 mt-1">
-          On-chain pricing comes directly from <code className="text-frost">get_quote()</code> with mathematical reasoning. Below, test an entire 1-week market cycle inside the fast-forward <span className="text-frost font-bold">SIMULASI</span> workbench.
+        <p className="text-sm text-ash mt-1.5 max-w-2xl leading-relaxed">
+          On-chain pricing comes directly from <code className="font-mono text-frost">get_quote()</code> with mathematical reasoning. Below, test an entire 1-week market cycle inside the fast-forward <span className="font-mono text-frost font-bold">SIMULASI</span> workbench.
         </p>
       </div>
 
@@ -147,7 +147,7 @@ export default function MerchantPage() {
           onReload={merchant.reload}
         />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <div className="lg:col-span-5">
             <NpcMerchantBazaar
               cashYocto={merchant.data.cash}
