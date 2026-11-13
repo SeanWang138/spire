@@ -9,13 +9,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        oled: "#080B11",
-        "panel-dark": "#0F1424",
-        "panel-card": "#13192B",
-        "panel-elevated": "#161D33",
+        oled: "#06060A",
+        "panel-dark": "#0C0D14",
+        "panel-card": "#12131D",
+        "panel-elevated": "#181A28",
+        parchment: "#F3EAD8",
+        ash: "#CEC4B3",
+        pewter: "#9A9184",
+        brass: "#E5A93B",
         solar: {
-          DEFAULT: "#F59E0B",
-          glow: "rgba(245, 158, 11, 0.25)",
+          DEFAULT: "#F2A63B",
+          glow: "rgba(242, 166, 59, 0.25)",
           dark: "#B45309",
         },
         frost: {
@@ -54,6 +58,13 @@ const config: Config = {
           "Cambria",
           "Times New Roman",
           "Times",
+          "serif",
+        ],
+        lore: [
+          "var(--font-lore)",
+          "Georgia",
+          "Cambria",
+          "Times New Roman",
           "serif",
         ],
         mono: [

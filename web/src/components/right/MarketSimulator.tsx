@@ -172,19 +172,19 @@ export const MarketSimulator: React.FC = () => {
   return (
     <section
       id="simulasi"
-      className="rounded-xl bg-panel-card border border-frost/30 elevation-panel p-5 sm:p-6 space-y-5"
+      className="citadel-stage p-5 sm:p-6 space-y-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="px-2.5 py-0.5 rounded bg-frost/15 border border-frost/40 text-frost font-mono text-xs font-bold tracking-widest uppercase">
+            <span className="px-2.5 py-0.5 rounded bg-solar/15 border border-brass/50 text-solar font-mono text-xs font-bold tracking-widest uppercase">
               SIMULASI
             </span>
-            <h2 className="font-serif text-xl sm:text-2xl font-bold text-white">
+            <h2 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
               1-Week Fast-Forward Market Workbench
             </h2>
           </div>
-          <p className="text-xs font-mono text-slate-300 mt-1.5">
+          <p className="text-xs font-mono text-ash mt-1.5">
             Accelerates 168 hours of raids, merchant cash reserve drains, and adaptive boss resistance into under a minute using deterministic contract math.
           </p>
         </div>
@@ -197,7 +197,7 @@ export const MarketSimulator: React.FC = () => {
               if (hour >= 168) setHour(0);
               setPlaying((p) => !p);
             }}
-            className="min-h-[44px] px-4 py-2 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 transition-colors"
+            className="rpg-sheen min-h-[44px] px-4 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 hover:from-amber-300 hover:to-amber-500 border border-amber-300/60 text-oled font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 transition-all"
           >
             {playing ? <Pause className="w-4 h-4" aria-hidden="true" /> : <Play className="w-4 h-4" aria-hidden="true" />}
             <span>{playing ? "Pause" : hour >= 168 ? "Replay Week" : "Fast-Forward"}</span>
@@ -209,13 +209,13 @@ export const MarketSimulator: React.FC = () => {
               setPlaying(false);
               setHour(0);
             }}
-            className="min-h-[44px] px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-slate-200 font-mono text-xs inline-flex items-center gap-1.5 transition-colors"
+            className="min-h-[44px] px-3 py-2 rounded-lg border border-brass/25 bg-panel-dark hover:bg-panel-elevated text-ash hover:text-parchment font-mono text-xs inline-flex items-center gap-1.5 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Reset</span>
           </button>
 
-          <div className="flex items-center rounded-lg bg-panel-dark p-1 border border-white/10">
+          <div className="flex items-center rounded-lg bg-panel-dark p-1 border border-brass/20">
             {([1, 4, 12] as const).map((sp) => (
               <button
                 type="button"
@@ -223,7 +223,7 @@ export const MarketSimulator: React.FC = () => {
                 onClick={() => setSpeed(sp)}
                 aria-pressed={speed === sp}
                 className={`min-h-[36px] px-2.5 rounded text-xs font-mono font-bold inline-flex items-center gap-1 transition-colors ${
-                  speed === sp ? "bg-frost text-oled" : "text-slate-300 hover:text-white"
+                  speed === sp ? "bg-frost text-oled" : "text-ash hover:text-parchment"
                 }`}
               >
                 <FastForward className="w-3 h-3" aria-hidden="true" />
@@ -252,13 +252,13 @@ export const MarketSimulator: React.FC = () => {
               className={`min-h-[68px] p-3 rounded-lg border text-left transition-colors ${
                 active
                   ? "bg-panel-dark border-frost/60"
-                  : "bg-panel-dark/60 border-white/10 hover:border-white/25"
+                  : "bg-panel-dark/60 border-brass/20 hover:border-brass/45"
               }`}
             >
-              <span className={`text-xs font-mono font-bold block ${active ? "text-frost" : "text-white"}`}>
+              <span className={`text-xs font-mono font-bold block ${active ? "text-frost" : "text-parchment"}`}>
                 {item.label}
               </span>
-              <span className="text-[11px] text-slate-300 mt-1 block leading-snug">{item.summary}</span>
+              <span className="text-[11px] text-ash mt-1 block leading-snug">{item.summary}</span>
             </button>
           );
         })}
@@ -278,7 +278,7 @@ export const MarketSimulator: React.FC = () => {
               <span className="w-3 h-0.5 bg-hp inline-block" aria-hidden="true" /> 1.0 NEAR Halt Floor
             </span>
           </div>
-          <span className="font-mono-numbers text-slate-200 font-bold">
+          <span className="font-mono-numbers text-parchment font-bold">
             Day {current.day} · Hour {current.hour} / 168
           </span>
         </div>
@@ -313,8 +313,8 @@ export const MarketSimulator: React.FC = () => {
             const x = padX + (dHour / 168) * plotW;
             return (
               <g key={dHour}>
-                <line x1={x} y1={padY} x2={x} y2={padY + plotH} stroke="rgba(255,255,255,0.06)" />
-                <text x={x} y={H - 2} fill="#94A3B8" fontSize="10" textAnchor="middle">
+                <line x1={x} y1={padY} x2={x} y2={padY + plotH} stroke="rgba(229,169,59,0.12)" />
+                <text x={x} y={H - 2} fill="#CEC4B3" fontSize="10" textAnchor="middle">
                   D{dHour / 24}
                 </text>
               </g>
@@ -322,24 +322,24 @@ export const MarketSimulator: React.FC = () => {
           })}
 
           {/* Curves */}
-          <path d={cashPath} fill="none" stroke="#F59E0B" strokeWidth="2.2" />
+          <path d={cashPath} fill="none" stroke="#F2A63B" strokeWidth="2.2" />
           <path d={pricePath} fill="none" stroke="#38BDF8" strokeWidth="1.8" strokeDasharray="3 2" />
 
           {/* Active Hour Scrubber Cursor */}
-          <line x1={cursorX} y1={padY} x2={cursorX} y2={padY + plotH} stroke="#E2E8F0" strokeWidth="1.5" />
+          <line x1={cursorX} y1={padY} x2={cursorX} y2={padY + plotH} stroke="#F3EAD8" strokeWidth="1.5" />
           <circle
             cx={cursorX}
             cy={padY + plotH - (current.cashNear / maxCash) * plotH}
             r="4.5"
-            fill={current.isClosed ? "#EF4444" : "#F59E0B"}
-            stroke="#080B11"
+            fill={current.isClosed ? "#EF4444" : "#F2A63B"}
+            stroke="#06060A"
             strokeWidth="1.5"
           />
         </svg>
 
         {/* Hour Slider */}
         <div className="flex items-center gap-3">
-          <label htmlFor="sim-hour-slider" className="text-xs font-mono text-slate-300 shrink-0">
+          <label htmlFor="sim-hour-slider" className="text-xs font-mono text-ash shrink-0">
             Scrub Week
           </label>
           <input

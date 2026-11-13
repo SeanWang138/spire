@@ -265,7 +265,7 @@ export default function VaultPage() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
           {/* Left rail: Ledger, Claims, Conqueror Trophy NFT Viewer */}
           <div className="md:col-span-5 flex flex-col gap-4">
-            <section className="rounded-xl bg-panel-card border border-jackpot/30 p-5 elevation-panel">
+            <section className="citadel-stage border-t-jackpot/40 p-5">
               <div className="flex items-center gap-2 mb-2">
                 <Coins className="w-4 h-4 text-jackpot" aria-hidden="true" />
                 <span className="text-xs uppercase font-bold tracking-widest font-mono text-slate-300">
@@ -281,7 +281,7 @@ export default function VaultPage() {
             </section>
 
             {/* Claim payout + loot */}
-            <section className="rounded-xl bg-panel-card border border-white/10 p-5 elevation-panel space-y-3">
+            <section className="obsidian-surface p-5 space-y-3">
               <div className="flex items-center gap-2">
                 <ScrollText className="w-4 h-4 text-emerald-400" aria-hidden="true" />
                 <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
@@ -373,7 +373,7 @@ export default function VaultPage() {
             </section>
 
             {/* On-Chain Conqueror Trophy NFT Viewer */}
-            <section className="rounded-xl bg-panel-card border border-jackpot/25 p-5 elevation-panel space-y-3">
+            <section className="obsidian-surface border-t-jackpot/35 p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Trophy className="w-4 h-4 text-jackpot" aria-hidden="true" />
@@ -425,11 +425,11 @@ export default function VaultPage() {
                 ) : trophy ? (
                   <div className="space-y-2.5">
                     {trophySvgUri ? (
-                      <div className="overflow-hidden rounded-lg border border-white/10 bg-oled">
+                      <div className="rpg-sheen group relative overflow-hidden rounded-xl border border-brass/60 bg-gradient-to-b from-[#1A1612] to-[#06060A] p-2 transition-transform duration-300 hover:scale-[1.02]">
                         <img
                           src={trophySvgUri}
                           alt={trophy.metadata?.title ?? `Conqueror Trophy ${trophy.token_id}`}
-                          className="w-full h-auto max-h-56 object-contain mx-auto block"
+                          className="w-full h-auto max-h-56 object-contain mx-auto block transition-transform duration-300 group-hover:scale-105"
                         />
                       </div>
                     ) : (
@@ -474,7 +474,7 @@ export default function VaultPage() {
             {/* Deposit & Withdraw split */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Deposit */}
-              <section className="rounded-xl bg-panel-card border border-emerald-400/30 p-5 elevation-panel space-y-3">
+              <section className="obsidian-surface border-t-emerald-400/40 p-5 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <ArrowDownCircle className="w-4 h-4 text-emerald-400" aria-hidden="true" />
@@ -531,7 +531,7 @@ export default function VaultPage() {
               </section>
 
               {/* Withdraw */}
-              <section className="rounded-xl bg-panel-card border border-solar/30 p-5 elevation-panel space-y-3">
+              <section className="obsidian-surface border-t-solar/40 p-5 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <ArrowUpCircle className="w-4 h-4 text-solar" aria-hidden="true" />
@@ -606,11 +606,11 @@ export default function VaultPage() {
             </div>
 
             {/* Backer: back_boss_vault + claim_backer_dividend */}
-            <section className="rounded-xl bg-panel-card border border-frost/30 p-5 elevation-panel space-y-3">
+            <section className="obsidian-surface border-t-frost/40 p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Shield className="w-4 h-4 text-frost" aria-hidden="true" />
-                  <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
+                  <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-parchment">
                     Backer Vault
                   </h2>
                 </div>
@@ -619,9 +619,16 @@ export default function VaultPage() {
                 </span>
               </div>
 
+              <div className="rounded-lg bg-hp/10 border-t border-hp/45 px-3.5 py-2.5 text-xs font-mono text-rose-100 leading-relaxed">
+                <strong>Cycle Principal Risk:</strong> Shares cost{" "}
+                <span className="text-parchment font-bold">{BACKER_SHARE_UNIT_NEAR.toFixed(2)} NEAR / share</span>{" "}
+                while Boss HP &ge; 80%. Dividends stream from 15% of tickets, and{" "}
+                <strong className="text-parchment">principal unlocks only upon Boss kill</strong>. If a timed floor expires unslain, cycle principal is absorbed and the round advances.
+              </div>
+
               <div className="grid grid-cols-2 gap-2.5 text-xs font-mono">
                 <div>
-                  <label htmlFor="back-floor" className="block text-[11px] text-slate-300 uppercase">
+                  <label htmlFor="back-floor" className="block text-[11px] text-ash uppercase">
                     Floor
                   </label>
                   <input
@@ -633,11 +640,11 @@ export default function VaultPage() {
                     onChange={(e) =>
                       setBackFloor(Math.min(3, Math.max(1, Number(e.target.value) || 1)))
                     }
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white font-mono-numbers"
+                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-brass/20 text-parchment font-mono-numbers"
                   />
                 </div>
                 <div>
-                  <label htmlFor="back-amount" className="block text-[11px] text-slate-300 uppercase">
+                  <label htmlFor="back-amount" className="block text-[11px] text-ash uppercase">
                     Stake (NEAR)
                   </label>
                   <input
@@ -647,32 +654,32 @@ export default function VaultPage() {
                     step={0.1}
                     value={backAmount}
                     onChange={(e) => setBackAmount(Number(e.target.value))}
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white font-mono-numbers"
+                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-brass/20 text-parchment font-mono-numbers"
                   />
                 </div>
               </div>
 
               {/* Flat hairline ledger breakdown (no nested bordered box) */}
-              <div className="pt-2 border-t border-white/10 divide-y divide-white/5 text-xs font-mono text-slate-300">
+              <div className="pt-2 border-t border-brass/15 divide-y divide-brass/10 text-xs font-mono text-ash">
                 <div className="py-1.5 flex items-center justify-between gap-2">
-                  <span className="text-slate-400">
+                  <span className="text-pewter">
                     Shares on Floor {dividendFloor} ({BACKER_SHARE_UNIT_NEAR} N/share)
                   </span>
-                  <span className="font-mono-numbers text-white font-bold">
+                  <span className="font-mono-numbers text-parchment font-bold">
                     {backer.data
-                      ? `${shareCount.toLocaleString()} shares (${stakedWeightNear.toFixed(2)} N weight)`
+                      ? `${shareCount.toLocaleString("en-US")} shares (${stakedWeightNear.toFixed(2)} N weight)`
                       : "Pending"}
                   </span>
                 </div>
                 <div className="py-1.5 flex items-center justify-between gap-2">
-                  <span className="text-slate-400">Current cycle</span>
+                  <span className="text-pewter">Current cycle</span>
                   <span className="font-mono-numbers text-frost font-bold">
                     {backer.data ? backer.data.current_cycle : "Pending"}
                   </span>
                 </div>
                 <div className="py-1.5 flex items-center justify-between gap-2">
-                  <span className="text-slate-400">Last claimed cycle</span>
-                  <span className="font-mono-numbers text-slate-200">
+                  <span className="text-pewter">Last claimed cycle</span>
+                  <span className="font-mono-numbers text-ash">
                     {backer.data ? backer.data.last_claimed_cycle : "Pending"}
                   </span>
                 </div>
@@ -734,7 +741,7 @@ export default function VaultPage() {
             </section>
 
             {/* Fund Jackpot */}
-            <section className="rounded-xl bg-panel-card border border-jackpot/25 p-5 elevation-panel space-y-3">
+            <section className="obsidian-surface border-t-jackpot/35 p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Flame className="w-4 h-4 text-jackpot" aria-hidden="true" />
@@ -792,7 +799,7 @@ export default function VaultPage() {
             </section>
 
             {/* History */}
-            <section className="rounded-xl bg-panel-card border border-white/10 p-5 elevation-panel space-y-3">
+            <section className="obsidian-surface p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-frost" aria-hidden="true" />

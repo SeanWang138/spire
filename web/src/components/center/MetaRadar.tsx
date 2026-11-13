@@ -76,7 +76,7 @@ export const MetaRadar: React.FC<MetaRadarProps> = ({
   ];
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 space-y-3">
+    <div className="obsidian-surface p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Radar className="w-4 h-4 text-solar" aria-hidden="true" />
@@ -84,8 +84,8 @@ export const MetaRadar: React.FC<MetaRadarProps> = ({
             3-Element Meta Radar
           </h2>
         </div>
-        <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-300">
-          <span>Pool:</span>
+        <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300">
+          <span>Pool</span>
           <span className="font-bold text-jackpot font-mono-numbers">
             {analysis.totalBps} bps
           </span>
@@ -108,10 +108,10 @@ export const MetaRadar: React.FC<MetaRadarProps> = ({
               strokeWidth="1"
               strokeDasharray="3,3"
             />
-            <polygon points="100,55 58.7,122.5 141.3,122.5" fill="none" stroke="#1e293b" strokeWidth="1" />
-            <line x1="100" y1="100" x2="100" y2="30" stroke="#475569" strokeWidth="1" />
-            <line x1="100" y1="100" x2="39.4" y2="135" stroke="#475569" strokeWidth="1" />
-            <line x1="100" y1="100" x2="160.6" y2="135" stroke="#475569" strokeWidth="1" />
+            <polygon points="100,55 58.7,122.5 141.3,122.5" fill="none" stroke="#262421" strokeWidth="1" />
+            <line x1="100" y1="100" x2="100" y2="30" stroke="#524B42" strokeWidth="1" />
+            <line x1="100" y1="100" x2="39.4" y2="135" stroke="#524B42" strokeWidth="1" />
+            <line x1="100" y1="100" x2="160.6" y2="135" stroke="#524B42" strokeWidth="1" />
 
             {/* Tribute Threshold Warning Ring (7000 bps) */}
             <circle
@@ -149,14 +149,14 @@ export const MetaRadar: React.FC<MetaRadarProps> = ({
           </svg>
         </div>
 
-        <div className="divide-y divide-white/10 font-mono text-xs">
+        <div className="divide-y divide-brass/15 font-mono text-xs">
           {bars.map((bar) => (
             <div key={bar.label} className="py-2 first:pt-0 last:pb-0">
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`${bar.textClass} flex items-center gap-1.5 font-bold`}>
                   {bar.icon} {bar.label}
                 </span>
-                <span className="font-mono-numbers text-white font-bold">
+                <span className="font-mono-numbers text-parchment font-bold">
                   {bar.bps} bps ({bpsToPercent(bar.bps)})
                 </span>
               </div>
@@ -173,8 +173,8 @@ export const MetaRadar: React.FC<MetaRadarProps> = ({
 
       {/* Epoch Timing & Permissionless update_meta() trigger */}
       {typeof epoch === "number" && (
-        <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-          <span className="text-slate-300">
+        <div className="pt-2 border-t border-brass/20 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+          <span className="text-ash">
             Epoch {epoch} · {epochMins === 0 ? "Rebalance Ready" : `Next shift in ~${epochMins}m`}
           </span>
           {canShiftMeta && onUpdateMeta && (
@@ -182,9 +182,9 @@ export const MetaRadar: React.FC<MetaRadarProps> = ({
               type="button"
               onClick={onUpdateMeta}
               disabled={updatingMeta}
-              className="min-h-[36px] px-2.5 py-1 rounded bg-frost/15 hover:bg-frost/25 border border-frost/40 text-frost font-bold flex items-center gap-1 transition-colors disabled:opacity-50"
+              className="min-h-[44px] px-3 py-1 rounded-lg bg-frost/15 hover:bg-frost/25 border border-frost/40 text-frost font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
             >
-              <RefreshCw className={`w-3 h-3 ${updatingMeta ? "animate-spin" : ""}`} aria-hidden="true" />
+              <RefreshCw className={`w-3.5 h-3.5 ${updatingMeta ? "animate-spin" : ""}`} aria-hidden="true" />
               {updatingMeta ? "Shifting..." : "Trigger Epoch Shift"}
             </button>
           )}

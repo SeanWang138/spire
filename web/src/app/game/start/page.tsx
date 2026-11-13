@@ -27,6 +27,7 @@ import {
   verify_account_key,
 } from "@/lib/contract";
 import { useSessionAccount } from "@/lib/spire/hooks";
+import { useMotionControl } from "@/lib/spire/motion";
 
 const ACCOUNT_NAME_RE = /^[a-z0-9._-]{2,64}$/;
 
@@ -117,6 +118,8 @@ const ONBOARDING_STEPS = [
 
 export default function StartPage() {
   const reduced = useReducedMotion();
+  const { paused } = useMotionControl();
+  const freezeCrest = reduced || paused;
   const session = useSessionAccount();
   const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
   const [nameInput, setNameInput] = useState("");
@@ -275,11 +278,15 @@ export default function StartPage() {
     <div className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center px-4 py-10">
       {/* Guild crest & title */}
       <div className="flex flex-col items-center max-w-2xl w-full text-center mb-8">
-        <div className="relative w-24 h-24 sm:w-28 sm:h-28 mb-4 flex items-center justify-center text-slate-200">
+        <motion.div
+          animate={freezeCrest ? undefined : { rotate: 360 }}
+          transition={freezeCrest ? undefined : { duration: 48, repeat: Infinity, ease: "linear" }}
+          className="relative w-24 h-24 sm:w-28 sm:h-28 mb-4 flex items-center justify-center text-slate-200 drop-shadow-[0_0_24px_rgba(245,158,11,0.3)]"
+        >
           <SpireCrest className="w-full h-full" />
-        </div>
+        </motion.div>
         <h1 className="text-4xl sm:text-5xl font-serif tracking-[0.12em] font-bold text-white mb-2">
-          SPIRE<span className="text-solar">Fi</span>
+          SPIRE<span className="text-solar">FI</span>
         </h1>
         <p className="text-sm font-mono text-slate-300 max-w-lg leading-relaxed">
           Forge a signless NEAR testnet citadel identity for instant raid strikes, crafting, and market swaps.

@@ -31,6 +31,14 @@ export const LiveHpBar: React.FC<LiveHpBarProps> = ({
     hasDeadline ? Math.floor((timeLeftNs as number) / 1e9) : 0
   );
 
+  const hpPercent = maxHp > 0 ? Math.max(0, Math.min(100, (currentHp / maxHp) * 100)) : 0;
+  const [ghostPercent, setGhostPercent] = useState<number>(hpPercent);
+
+  useEffect(() => {
+    const t = setTimeout(() => setGhostPercent(hpPercent), 320);
+    return () => clearTimeout(t);
+  }, [hpPercent]);
+
   useEffect(() => {
     if (!hasDeadline) return;
     setSecondsRemaining(Math.floor((timeLeftNs as number) / 1e9));
@@ -40,16 +48,15 @@ export const LiveHpBar: React.FC<LiveHpBarProps> = ({
     return () => clearInterval(timer);
   }, [timeLeftNs, hasDeadline]);
 
-  const hpPercent = maxHp > 0 ? Math.max(0, Math.min(100, (currentHp / maxHp) * 100)) : 0;
   const isEnraged = enrage || floor === ENRAGE_FLOOR;
 
   const barColor = expired
     ? "bg-slate-600"
     : isEnraged
-    ? "bg-hp"
+    ? "bg-gradient-to-r from-red-600 to-rose-400"
     : hpPercent < 66
-    ? "bg-solar"
-    : "bg-emerald-500";
+    ? "bg-gradient-to-r from-amber-600 to-amber-400"
+    : "bg-gradient-to-r from-emerald-600 to-emerald-400";
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -58,53 +65,64 @@ export const LiveHpBar: React.FC<LiveHpBarProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 space-y-2.5">
-      <div className="flex items-center justify-between text-xs font-mono">
-        <div className="flex items-center gap-1.5 font-bold text-white">
+    <div className="px-5 pb-5 pt-4 border-t border-brass/20 space-y-3 bg-[#090A10]/85">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div className="flex items-center gap-1.5 font-bold text-parchment uppercase tracking-wider">
           <Heart className={`w-4 h-4 ${isEnraged ? "text-hp" : "text-emerald-400"}`} aria-hidden="true" />
-          <span>Boss Health</span>
+          <span>Boss Vitality</span>
         </div>
         <div className="flex items-center gap-3">
           {hasDeadline && !expired && (
-            <div className="flex items-center gap-1 text-slate-300">
+            <div className="flex items-center gap-1 text-ash">
               <Clock className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
               <span className="font-mono-numbers">{formatTime(secondsRemaining)}</span>
             </div>
           )}
-          <span className="font-mono-numbers text-white font-bold text-sm">
-            {currentHp} <span className="text-slate-400 text-xs">/ {maxHp}</span> ({hpPercent.toFixed(1)}%)
+          <span className="font-mono-numbers text-parchment font-bold text-sm">
+            {currentHp.toLocaleString("en-US")} <span className="text-pewter text-xs">/ {maxHp.toLocaleString("en-US")}</span> ({hpPercent.toFixed(1)}%)
           </span>
         </div>
       </div>
 
-      {/* Main HP bar */}
-      <div className="h-4 w-full rounded-full bg-oled border border-white/10 p-0.5 overflow-hidden">
+      {/* Multi-Layered Segmented Boss Vitality Bar with Delayed Damage Ghost Trail */}
+      <div className="relative h-6 w-full rounded-lg bg-oled border border-brass/20 p-0.5 overflow-hidden">
+        <div
+          className="absolute inset-y-0.5 left-0.5 rounded-md bg-rose-500/45 transition-all duration-700 ease-out"
+          style={{ width: `calc(${ghostPercent}% - 4px)` }}
+        />
         <motion.div
           animate={{ width: `${hpPercent}%` }}
-          transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 140, damping: 22 }}
-          className={`h-full rounded-full ${barColor}`}
+          transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 160, damping: 24 }}
+          className={`relative z-10 h-full rounded-md ${barColor}`}
         />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-20 grid grid-cols-10 divide-x divide-[#04060D]/65"
+        >
+          {Array.from({ length: 10 }, (_, idx) => (
+            <div key={idx} />
+          ))}
+        </div>
       </div>
 
-      {/* Floor modifier strip */}
       {(wardElement !== null || (isEnraged && !expired) || expired) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-          {wardElement !== null && (
-            <span className="flex items-center gap-1 text-frost bg-frost/10 px-2.5 py-1 rounded border border-frost/20">
-              <Shield className="w-3 h-3" aria-hidden="true" />
-              Frost Ward active (Floor {FROST_WARD_FLOOR}: +1500 bps vs Frost)
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+          {wardElement !== null && floor === FROST_WARD_FLOOR && (
+            <span className="inline-flex items-center gap-1.5 text-sky-200 font-semibold">
+              <Shield className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+              Frost Ward active: Frost resistance boosted by +1,500 bps
             </span>
           )}
           {isEnraged && !expired && (
-            <span className="flex items-center gap-1 text-hp bg-hp/10 px-2.5 py-1 rounded border border-hp/20">
-              <AlertTriangle className="w-3 h-3" aria-hidden="true" />
-              ENRAGE (Floor {ENRAGE_FLOOR}): regenerates 10% max HP every 5 min
+            <span className="inline-flex items-center gap-1.5 text-rose-200 font-semibold">
+              <AlertTriangle className="w-3.5 h-3.5 text-hp" aria-hidden="true" />
+              Enrage Active: regenerating +10% max HP every 5m
             </span>
           )}
           {expired && (
-            <span className="flex items-center gap-1 text-slate-300 bg-white/5 px-2.5 py-1 rounded border border-white/10">
-              <Timer className="w-3 h-3" aria-hidden="true" />
-              Round expired: resolve to settle the pot
+            <span className="inline-flex items-center gap-1.5 text-slate-300 font-semibold">
+              <Timer className="w-3.5 h-3.5 text-slate-300" aria-hidden="true" />
+              Round timer expired
             </span>
           )}
         </div>

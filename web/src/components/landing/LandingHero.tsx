@@ -1,220 +1,286 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
-import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Play } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  ArrowRight,
+  Play,
+  Pause,
+  Flame,
+  Snowflake,
+  Sparkles,
+  Swords,
+  TrendingUp,
+} from "lucide-react";
+import { CitadelDiorama } from "@/components/three/CitadelDiorama";
+import { FLOOR_MAX_HP, FLOOR_TICKET_COST_NEAR } from "@/lib/spire/constants";
+import { useMotionControl } from "@/lib/spire/motion";
 
-const EMBERS = Array.from({ length: 16 }, (_, i) => ({
-  x: (i * 37 + 13) % 100,
-  y0: 62 + ((i * 17) % 38),
-  drift: 2 + (i % 5),
-  delay: (i % 9) * 0.7,
-  r: 0.6 + (i % 3) * 0.35,
-  color: ["#F59E0B", "#38BDF8", "#A855F7"][i % 3],
-}));
+const FLOOR_DOSSIERS: Record<
+  number,
+  {
+    floor: number;
+    roman: string;
+    tierName: string;
+    boss: string;
+    elementIndex: 0 | 1 | 2;
+    hp: number;
+    ticket: number;
+    rule: string;
+    accentText: string;
+    accentBorder: string;
+    activePill: string;
+  }
+> = {
+  1: {
+    floor: 1,
+    roman: "I",
+    tierName: "Foundation Keep",
+    boss: "Malakor, Solar Sentinel",
+    elementIndex: 0,
+    hp: FLOOR_MAX_HP[0],
+    ticket: FLOOR_TICKET_COST_NEAR[0],
+    rule: "Open entry floor · No round timer · 10% of defeated jackpot drips upward to Floor 2",
+    accentText: "text-solar",
+    accentBorder: "border-solar/50",
+    activePill: "border-solar/70 bg-solar/20 text-parchment",
+  },
+  2: {
+    floor: 2,
+    roman: "II",
+    tierName: "Glacial Bastion",
+    boss: "Valkyr, Glacial Warden",
+    elementIndex: 1,
+    hp: FLOOR_MAX_HP[1],
+    ticket: FLOOR_TICKET_COST_NEAR[1],
+    rule: "Frost Ward (+1,500 bps Frost resist) · 30 min round timer · Unlocks Floor 3 on kill",
+    accentText: "text-frost",
+    accentBorder: "border-frost/50",
+    activePill: "border-frost/70 bg-frost/20 text-parchment",
+  },
+  3: {
+    floor: 3,
+    roman: "III",
+    tierName: "Void Apex Sanctum",
+    boss: "Kaelen, Void Sovereign",
+    elementIndex: 2,
+    hp: FLOOR_MAX_HP[2],
+    ticket: FLOOR_TICKET_COST_NEAR[2],
+    rule: "Enrage (+10% max HP every 5 min) · 20 min timer · Mints NEP-171 Conqueror Trophy",
+    accentText: "text-purple-300",
+    accentBorder: "border-void/55",
+    activePill: "border-void/70 bg-void/20 text-parchment",
+  },
+};
 
 export const LandingHero: React.FC = () => {
-  const reduced = useReducedMotion();
+  const { paused, togglePaused, reducedMotion } = useMotionControl();
+  const [selectedFloor, setSelectedFloor] = useState<number>(1);
+  const [hoveredFloor, setHoveredFloor] = useState<number | null>(null);
+
+  const inspectFloor = hoveredFloor ?? selectedFloor;
+  const activeDossier = FLOOR_DOSSIERS[inspectFloor] ?? FLOOR_DOSSIERS[1];
 
   return (
-    <section className="relative min-h-[88vh] flex flex-col overflow-hidden citadel-backdrop">
-      {/* Top navigation */}
-      <header className="relative z-20 w-full max-w-7xl mx-auto px-6 sm:px-10 py-5 flex items-center justify-between gap-4">
-        <Link href="/" className="font-serif text-lg font-bold tracking-[0.22em] text-slate-100">
-          SPIRE<span className="text-solar">Fi</span>
-        </Link>
-
-        <nav className="hidden md:flex items-center gap-6 text-xs font-mono text-slate-300" aria-label="Landing sections">
-          <a href="#tower" className="hover:text-white transition-colors py-2">
-            The Tower
-          </a>
-          <a href="#economy" className="hover:text-white transition-colors py-2">
-            Economy
-          </a>
-          <a href="#boss-brain" className="hover:text-white transition-colors py-2">
-            Boss Brain
-          </a>
-          <Link href="/game/merchant#simulasi" className="text-frost hover:text-white transition-colors py-2">
-            Market Sim
+    <section className="relative w-full flex flex-col">
+      {/* Sticky Obsidian & Brass Navigation Bar */}
+      <header className="sticky top-0 z-40 border-b border-brass/20 bg-[#06060A]/85 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          <Link
+            href="/"
+            className="flex items-center gap-2.5 min-h-[44px] text-parchment font-serif font-bold tracking-[0.2em] text-base sm:text-lg"
+          >
+            <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-solar/15 border border-solar/45">
+              <Swords className="w-4 h-4 text-solar" aria-hidden="true" />
+            </span>
+            <span>
+              SPIRE<span className="text-solar">FI</span>
+            </span>
           </Link>
-        </nav>
 
-        <Link
-          href="/game/start"
-          className="min-h-[44px] px-4 py-2 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono text-xs font-bold uppercase tracking-widest inline-flex items-center gap-2 transition-colors elevation-panel"
-        >
-          Open Game
-          <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-        </Link>
-      </header>
-
-      {/* Hero stage */}
-      <div className="relative flex-1 w-full max-w-7xl mx-auto px-6 sm:px-10 py-8 grid grid-cols-1 lg:grid-cols-12 items-center gap-10">
-        {/* Left: editorial typography (no eyebrow kicker above H1) */}
-        <div className="relative z-10 lg:col-span-7 flex flex-col">
-          <motion.h1
-            initial={reduced ? false : { opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.1 }}
-            className="font-serif font-bold text-white leading-[0.94] tracking-[0.06em] text-[clamp(3.25rem,9vw,7.5rem)]"
+          <nav
+            aria-label="Protocol sections"
+            className="hidden md:flex items-center gap-7 text-xs font-semibold tracking-wide text-ash"
           >
-            SPIRE<span className="text-solar">Fi</span>
-          </motion.h1>
-
-          <motion.p
-            initial={reduced ? false : { opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.22 }}
-            className="mt-6 max-w-xl text-slate-200 text-base sm:text-lg leading-relaxed"
-          >
-            Signless dark-fantasy raid citadel on NEAR testnet. Three escalating boss floors,
-            adaptive elemental defense, and deterministic jackpot settlement on-chain.
-          </motion.p>
-
-          <motion.div
-            initial={reduced ? false : { opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.34 }}
-            className="mt-8 flex flex-wrap items-center gap-3"
-          >
-            <Link
-              href="/game/start"
-              className="min-h-[44px] px-6 py-3 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono text-xs font-bold uppercase tracking-widest inline-flex items-center gap-2 transition-colors elevation-panel"
-            >
-              Enter the Spire
-              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-            </Link>
+            <a href="#loop" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+              Game Loop
+            </a>
+            <a href="#tower" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+              Three-Floor Spire
+            </a>
+            <a href="#economy" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+              Ticket Conduit
+            </a>
+            <a href="#boss-brain" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+              Boss Brain &amp; TEE
+            </a>
             <Link
               href="/game/merchant#simulasi"
-              className="min-h-[44px] px-5 py-3 rounded-lg border border-frost/40 bg-frost/10 hover:bg-frost/20 text-frost font-mono text-xs font-bold uppercase tracking-widest inline-flex items-center gap-2 transition-colors"
+              className="text-frost hover:text-parchment transition-colors min-h-[44px] flex items-center"
             >
-              <Play className="w-3.5 h-3.5" aria-hidden="true" />
-              1-Week SIMULASI
+              1-Week Simulasi
             </Link>
-            <a
-              href="#tower"
-              className="min-h-[44px] px-5 py-3 rounded-lg border border-white/15 bg-white/[0.03] hover:bg-white/[0.08] text-slate-200 font-mono text-xs font-bold uppercase tracking-widest inline-flex items-center transition-colors"
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={togglePaused}
+              aria-pressed={paused}
+              aria-label={paused ? "Resume 3D motion" : "Pause 3D motion"}
+              className="min-h-[44px] px-3 rounded-lg border border-brass/25 bg-panel-dark/90 text-xs font-medium text-ash hover:text-parchment hover:border-brass/60 flex items-center gap-1.5 transition-colors"
             >
-              Protocol Specs
-            </a>
-          </motion.div>
+              {paused ? <Play className="w-3.5 h-3.5 text-solar" /> : <Pause className="w-3.5 h-3.5 text-frost" />}
+              <span className="hidden sm:inline">{paused ? "Resume FX" : "Pause FX"}</span>
+            </button>
 
-          {/* Compact protocol truth strip */}
-          <motion.div
-            initial={reduced ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.7, delay: 0.45 }}
-            className="mt-10 pt-5 border-t border-white/10 grid grid-cols-3 gap-4 max-w-lg font-mono"
-          >
-            <div>
-              <span className="text-[11px] text-slate-400 block">Standard</span>
-              <span className="text-xs font-bold text-slate-100">NEP-245 / NEP-171</span>
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 block">Auth Mode</span>
-              <span className="text-xs font-bold text-jackpot">Signless Access Key</span>
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 block">Resistance Cap</span>
-              <span className="text-xs font-bold text-frost font-mono-numbers">13,500 bps Pool</span>
-            </div>
-          </motion.div>
+            <Link
+              href="/game/start"
+              className="rpg-sheen inline-flex items-center gap-2 min-h-[44px] px-4 sm:px-5 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 text-oled font-bold text-xs uppercase tracking-wider border border-amber-300/60 hover:from-amber-300 hover:to-amber-500 transition-all"
+            >
+              <span>Open Game</span>
+              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+            </Link>
+          </div>
         </div>
+      </header>
 
-        {/* Right: procedural obsidian monolith tower */}
-        <div className="relative lg:col-span-5 h-[42vh] min-h-[300px] lg:h-[66vh]">
-          <motion.svg
-            initial={reduced ? false : { opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            viewBox="0 0 400 560"
-            className="absolute inset-0 h-full w-full"
+      {/* Full-Bleed Living 3D Panorama Stage */}
+      <div className="relative w-full lg:min-h-[760px] lg:h-[calc(100vh-4rem)] lg:max-h-[920px] flex flex-col lg:block overflow-hidden bg-oled">
+        {/* Desktop Full-Bleed WebGL World Layer (Hero Backdrop + 3D Valley + Spire + Optical Bloom) */}
+        <div className="relative h-[370px] sm:h-[460px] lg:h-full lg:absolute lg:inset-0 w-full z-0">
+          <CitadelDiorama
+            mode="showcase"
+            selectedFloor={selectedFloor}
+            onSelectFloor={setSelectedFloor}
+            externalHoveredFloor={hoveredFloor}
+            onHoverChange={(hovered, fNum) => {
+              if (fNum !== null) setHoveredFloor(fNum);
+              else if (!hovered) setHoveredFloor(null);
+            }}
+            dominantElement={activeDossier.elementIndex}
+            showFloorDock={false}
+            showControls={true}
+            className="w-full h-full"
+          />
+          {/* Left editorial legibility veil on wide viewports + bottom chasm mist fade */}
+          <div
             aria-hidden="true"
-          >
-            <defs>
-              <radialGradient id="towerGlowTop" cx="50%" cy="22%" r="42%">
-                <stop offset="0%" stopColor="#F59E0B" stopOpacity="0.18" />
-                <stop offset="100%" stopColor="#080B11" stopOpacity="0" />
-              </radialGradient>
-              <radialGradient id="towerGlowMid" cx="35%" cy="54%" r="38%">
-                <stop offset="0%" stopColor="#38BDF8" stopOpacity="0.14" />
-                <stop offset="100%" stopColor="#080B11" stopOpacity="0" />
-              </radialGradient>
-              <radialGradient id="towerGlowVoid" cx="68%" cy="76%" r="36%">
-                <stop offset="0%" stopColor="#A855F7" stopOpacity="0.16" />
-                <stop offset="100%" stopColor="#080B11" stopOpacity="0" />
-              </radialGradient>
-              <linearGradient id="stoneFace" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#161D33" />
-                <stop offset="100%" stopColor="#0F1424" />
-              </linearGradient>
-            </defs>
-
-            <rect width="400" height="560" fill="url(#towerGlowTop)" />
-            <rect width="400" height="560" fill="url(#towerGlowMid)" />
-            <rect width="400" height="560" fill="url(#towerGlowVoid)" />
-
-            {/* Star speckles */}
-            {Array.from({ length: 24 }, (_, i) => (
-              <circle
-                key={i}
-                cx={((i * 53) % 380) + 10}
-                cy={((i * 97) % 240) + 12}
-                r={(i % 3) * 0.4 + 0.45}
-                fill="#E2E8F0"
-                opacity={0.14 + (i % 4) * 0.06}
-              />
-            ))}
-
-            {/* Tiered obsidian spire */}
-            <g stroke="rgba(226,232,240,0.16)" strokeWidth="1">
-              <polygon points="200,38 214,72 186,72" fill="#F59E0B" opacity="0.92" />
-              <rect x="196" y="72" width="8" height="26" fill="#13192B" stroke="rgba(245,158,11,0.45)" />
-              {/* Tier 3: Apex Void/Enrage */}
-              <polygon points="200,98 232,120 232,190 168,190 168,120" fill="url(#stoneFace)" />
-              <line x1="168" y1="140" x2="232" y2="140" stroke="rgba(239,68,68,0.45)" />
-              {/* Tier 2: Frost Ward */}
-              <polygon points="200,190 252,222 252,318 148,318 148,222" fill="url(#stoneFace)" />
-              <line x1="148" y1="248" x2="252" y2="248" stroke="rgba(56,189,248,0.4)" />
-              <line x1="148" y1="284" x2="252" y2="284" stroke="rgba(226,232,240,0.1)" />
-              {/* Tier 1: Solar Foundation */}
-              <polygon points="200,318 276,356 276,470 124,470 124,356" fill="url(#stoneFace)" />
-              <line x1="124" y1="388" x2="276" y2="388" stroke="rgba(245,158,11,0.35)" />
-              <line x1="124" y1="426" x2="276" y2="426" stroke="rgba(226,232,240,0.08)" />
-              <line x1="124" y1="452" x2="276" y2="452" stroke="rgba(0,236,151,0.28)" />
-              {/* Base wall + Citadel Gate */}
-              <rect x="112" y="470" width="176" height="42" fill="#0F1424" stroke="rgba(226,232,240,0.14)" />
-              <polygon points="200,480 220,512 180,512" fill="#080B11" stroke="rgba(245,158,11,0.5)" />
-            </g>
-
-            {/* Architectural meridian seam */}
-            <line x1="200" y1="40" x2="200" y2="512" stroke="rgba(226,232,240,0.12)" strokeDasharray="3 6" />
-          </motion.svg>
-
-          {/* Drifting embers */}
-          {!reduced && (
-            <svg className="absolute inset-0 h-full w-full pointer-events-none" aria-hidden="true">
-              {EMBERS.map((e, i) => (
-                <motion.circle
-                  key={i}
-                  cx={`${e.x}%`}
-                  cy={e.y0}
-                  r={e.r}
-                  fill={e.color}
-                  opacity="0.45"
-                  animate={{ cy: [e.y0, e.y0 - e.drift * 6 - 10], opacity: [0.1, 0.5, 0.1] }}
-                  transition={{ duration: 7 + e.drift * 2, repeat: Infinity, delay: e.delay, ease: "easeInOut" }}
-                />
-              ))}
-            </svg>
-          )}
+            className="hidden lg:block pointer-events-none absolute inset-y-0 left-0 w-[56%]"
+            style={{
+              background:
+                "linear-gradient(90deg, rgba(6,6,10,0.88) 0%, rgba(6,6,10,0.68) 58%, rgba(6,6,10,0) 100%)",
+            }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-28 sm:h-36 citadel-mist-fade"
+          />
         </div>
-      </div>
 
-      {/* Bottom scroll cue */}
-      <div className="relative z-10 pb-5 text-center font-mono text-xs tracking-[0.25em] uppercase text-slate-400">
-        Scroll for Protocol Specs
+        {/* Left Floating Editorial Lockup & Synchronized Floor Scry Plaque */}
+        <div className="relative z-20 max-w-7xl mx-auto w-full px-4 sm:px-6 pb-12 pt-4 lg:py-0 lg:h-full flex items-center pointer-events-none">
+          <motion.div
+            initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full lg:max-w-[540px] flex flex-col items-start gap-5 pointer-events-auto"
+          >
+            <div className="w-full">
+              <h1 className="font-serif text-5xl sm:text-6xl xl:text-[4.5rem] font-extrabold tracking-[0.04em] leading-[1.0] text-parchment">
+                SPIRE<span className="text-solar">FI</span>
+              </h1>
+              <div className="engraved-rule w-48 my-3.5" aria-hidden="true" />
+              <p className="font-lore italic text-xl sm:text-2xl text-ash leading-snug max-w-lg">
+                &ldquo;A living citadel where crowded steel fuels the Boss, scarce blades pierce its heart, and the mountain settles every claim in gold.&rdquo;
+              </p>
+            </div>
+
+            <p className="text-sm sm:text-base text-ash max-w-lg leading-relaxed">
+              Gather ore, forge elemental steel, outmaneuver an adaptive boss that counters dominant weapons every epoch, and fight without wallet popups inside a three-tier raid economy.
+            </p>
+
+            {/* Primary & Secondary Actions */}
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+              <Link
+                href="/game/start"
+                className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-7 py-3 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 border border-amber-300/60 text-oled font-bold text-sm uppercase tracking-wider hover:from-amber-300 hover:to-amber-500 transition-all"
+              >
+                <span>Enter the Spire</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+              </Link>
+
+              <Link
+                href="/game/merchant#simulasi"
+                className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 rounded-lg bg-panel-dark/90 border border-frost/45 text-frost hover:bg-frost/15 hover:border-frost/75 font-mono text-xs font-bold uppercase tracking-wider transition-all"
+              >
+                <TrendingUp className="w-4 h-4" aria-hidden="true" />
+                <span>Watch 1-Week Simulasi</span>
+              </Link>
+            </div>
+
+            {/* Interactive Floor Scry Plaque synced with 3D Horizon & Bloom */}
+            <div
+              className={`obsidian-chamfer w-full p-4 sm:p-5 border-t ${activeDossier.accentBorder} backdrop-blur-sm transition-colors duration-300`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  {activeDossier.floor === 1 ? (
+                    <Flame className="w-4 h-4 text-solar" aria-hidden="true" />
+                  ) : activeDossier.floor === 2 ? (
+                    <Snowflake className="w-4 h-4 text-frost" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-void" aria-hidden="true" />
+                  )}
+                  <span className={`font-mono text-xs font-bold uppercase tracking-wider ${activeDossier.accentText}`}>
+                    Floor {activeDossier.roman} · {activeDossier.tierName}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 font-mono-numbers text-xs">
+                  <span className="px-2.5 py-0.5 rounded bg-white/5 border border-brass/20 text-parchment">
+                    {activeDossier.hp.toLocaleString("en-US")} HP
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded bg-solar/15 border border-solar/40 text-parchment font-semibold">
+                    {activeDossier.ticket.toFixed(2)} N
+                  </span>
+                </div>
+              </div>
+
+              <div className="font-serif text-lg sm:text-xl font-bold text-parchment mb-1">
+                {activeDossier.boss}
+              </div>
+              <p className="text-xs sm:text-sm text-ash leading-relaxed mb-3.5">
+                {activeDossier.rule}
+              </p>
+
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Focus Citadel Floor">
+                {[1, 2, 3].map((n) => {
+                  const isActive = inspectFloor === n;
+                  const meta = FLOOR_DOSSIERS[n];
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setSelectedFloor(n)}
+                      onMouseEnter={() => setHoveredFloor(n)}
+                      onMouseLeave={() => setHoveredFloor(null)}
+                      aria-pressed={selectedFloor === n}
+                      className={`min-h-[44px] px-2.5 py-2 rounded-lg border text-xs font-mono font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        isActive
+                          ? meta.activePill
+                          : "border-brass/20 bg-oled/80 text-ash hover:border-brass/50 hover:text-parchment"
+                      }`}
+                    >
+                      <span>Floor {meta.roman}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        </div>
       </div>
     </section>
   );

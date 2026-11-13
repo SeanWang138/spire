@@ -1,21 +1,38 @@
 import type { Metadata, Viewport } from "next";
-import { Cinzel, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import {
+  Cinzel,
+  Cormorant_Garamond,
+  Plus_Jakarta_Sans,
+  JetBrains_Mono,
+} from "next/font/google";
+import { AppProviders } from "@/lib/spire/motion";
 import "./globals.css";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
+  weight: ["600", "700", "800"],
   variable: "--font-serif",
+  display: "swap",
+});
+
+const cormorant = Cormorant_Garamond({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-lore",
   display: "swap",
 });
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
   display: "swap",
 });
 
 const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-mono",
   display: "swap",
 });
@@ -23,13 +40,13 @@ const jetbrains = JetBrains_Mono({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#080B11",
+  themeColor: "#06060A",
 };
 
 export const metadata: Metadata = {
-  title: "SpireFi | Dark-Fantasy GameFi Protocol on NEAR",
+  title: "SpireFi | The BossVault Raid Citadel on NEAR",
   description:
-    "Signless dark-fantasy raid citadel on NEAR testnet. Adaptive boss resistance, deterministic jackpot splits, and on-chain conqueror trophies.",
+    "Autonomous dark-fantasy raid citadel with self-balancing weapon economies, deterministic boss vaults, signless gameplay, and AI-proposed TEE governance.",
 };
 
 export default function RootLayout({
@@ -40,12 +57,14 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${cinzel.variable} ${jakarta.variable} ${jetbrains.variable}`}
+      className={`dark ${cinzel.variable} ${cormorant.variable} ${jakarta.variable} ${jetbrains.variable}`}
     >
-      <body className="bg-oled text-slate-200 font-sans min-h-screen selection:bg-solar/30 selection:text-white">
-        <main className="relative z-10 flex flex-col min-h-screen">
-          {children}
-        </main>
+      <body className="bg-oled text-parchment font-sans min-h-screen selection:bg-solar/30 selection:text-parchment">
+        <AppProviders>
+          <main className="relative z-10 flex flex-col min-h-screen">
+            {children}
+          </main>
+        </AppProviders>
       </body>
     </html>
   );

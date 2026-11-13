@@ -120,16 +120,16 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 sm:p-5 space-y-4">
+    <div className="citadel-stage p-4 sm:p-5 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Store className="w-4 h-4 text-solar" aria-hidden="true" />
-          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
+          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
             NPC Merchant Desk
           </h2>
         </div>
         <div className="flex items-center gap-1.5 text-xs font-mono">
-          <span className="text-slate-300">Cash Reserve:</span>
+          <span className="text-ash">Cash Reserve:</span>
           <span className={`font-bold font-mono-numbers ${isClosed ? "text-hp" : "text-emerald-400"}`}>
             {cashNear.toFixed(2)} NEAR
           </span>
@@ -142,7 +142,7 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
           <Lock className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div>
             <span className="font-bold uppercase tracking-wider block">Bazaar Closed (Liquidity Halt)</span>
-            <span className="text-xs text-slate-200 block mt-0.5 leading-relaxed">
+            <span className="text-xs text-rose-100 block mt-0.5 leading-relaxed">
               Merchant reserve fell below {MERCHANT_MIN_CASH_NEAR.toFixed(1)} NEAR. Trading pauses automatically until ticket inflow or a liquidity refill restores cash above 1.0 NEAR.
             </span>
           </div>
@@ -151,14 +151,14 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
 
       {/* Item selector */}
       <div>
-        <label htmlFor="merchant-item-select" className="text-xs font-mono uppercase text-slate-300 mb-1.5 block">
+        <label htmlFor="merchant-item-select" className="text-xs font-mono uppercase text-ash mb-1.5 block">
           Select Commodity or Weapon
         </label>
         <select
           id="merchant-item-select"
           value={selectedItem}
           onChange={(e) => setSelectedItem(e.target.value as ItemId)}
-          className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-xs font-mono text-white focus:outline-none focus:border-frost"
+          className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/20 text-xs font-mono text-parchment focus:outline-none focus:border-frost"
         >
           <optgroup label="Materials">
             {CATALOG.filter((c) => c.group === "Materials").map((c) => (
@@ -177,22 +177,48 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
         </select>
       </div>
 
+      {/* Live AMM Bonding Curve Gauge + Stock Ledger */}
+      <div className="rounded-lg border border-brass/20 bg-[#090A10]/90 p-3 space-y-2">
+        <div className="flex items-center justify-between text-xs font-mono text-ash">
+          <span>AMM Curve vs Target Stock ({MERCHANT_TARGET_STOCK})</span>
+          <span className="text-frost font-bold">{currentStock} units in vault</span>
+        </div>
+        <svg viewBox="0 0 320 68" className="w-full h-16" aria-label="Bonding curve stock pricing gauge">
+          <path
+            d="M 10 12 Q 110 22, 160 36 T 310 56"
+            fill="none"
+            stroke="#38BDF8"
+            strokeOpacity="0.65"
+            strokeWidth="2"
+          />
+          <line x1="160" y1="6" x2="160" y2="62" stroke="#E5A93B" strokeOpacity="0.4" strokeDasharray="3 3" />
+          <circle
+            cx={Math.max(14, Math.min(306, 160 + (currentStock - MERCHANT_TARGET_STOCK) * 1.4))}
+            cy={Math.max(12, Math.min(56, 36 + (currentStock - MERCHANT_TARGET_STOCK) * 0.19))}
+            r="5"
+            fill="#F2A63B"
+          />
+          <text x="12" y="62" fill="#CEC4B3" fontSize="10" fontFamily="monospace">Scarce (High Ask)</text>
+          <text x="225" y="18" fill="#CEC4B3" fontSize="10" fontFamily="monospace">Surplus (Low Bid)</text>
+        </svg>
+      </div>
+
       {/* Flat Telemetry Ledger */}
-      <dl className="rounded-lg bg-panel-dark divide-x divide-white/10 grid grid-cols-3 text-xs font-mono">
+      <dl className="rounded-lg bg-panel-dark divide-x divide-brass/15 grid grid-cols-3 text-xs font-mono">
         <div className="p-2.5 flex flex-col">
-          <dt className="text-[11px] text-slate-400">Stock</dt>
-          <dd className="font-mono-numbers text-white font-bold mt-0.5">{currentStock}</dd>
+          <dt className="text-[11px] text-pewter">Stock</dt>
+          <dd className="font-mono-numbers text-parchment font-bold mt-0.5">{currentStock}</dd>
         </div>
         <div className="p-2.5 flex flex-col">
-          <dt className="text-[11px] text-slate-400">Sellable</dt>
-          <dd className="font-mono-numbers text-white font-bold mt-0.5">
+          <dt className="text-[11px] text-pewter">Sellable</dt>
+          <dd className="font-mono-numbers text-parchment font-bold mt-0.5">
             {sellableBalance}
-            {lockedCount > 0 && <span className="text-[11px] text-slate-400 font-normal"> (+{lockedCount} locked)</span>}
+            {lockedCount > 0 && <span className="text-[11px] text-pewter font-normal"> (+{lockedCount} locked)</span>}
           </dd>
         </div>
         <div className="p-2.5 flex flex-col">
-          <dt className="text-[11px] text-slate-400">Target / Cap</dt>
-          <dd className="font-mono-numbers text-slate-200 font-bold mt-0.5">
+          <dt className="text-[11px] text-pewter">Target / Cap</dt>
+          <dd className="font-mono-numbers text-ash font-bold mt-0.5">
             {MERCHANT_TARGET_STOCK} · {MERCHANT_CAP_PER_ITEM_EPOCH}/ep
           </dd>
         </div>

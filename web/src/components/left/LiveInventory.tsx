@@ -54,7 +54,7 @@ export const LiveInventory: React.FC<LiveInventoryProps> = ({
   ];
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 sm:p-5 space-y-4">
+    <div className="obsidian-surface p-4 sm:p-5 space-y-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Backpack className="w-4 h-4 text-emerald-400" aria-hidden="true" />

@@ -245,10 +245,16 @@ export default function AiPage() {
     <div className="px-1 py-6 sm:py-8 flex flex-col gap-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-2">
-          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white tracking-wide">
-            Boss Brain TEE Oracle
-          </h1>
-          <p className="text-xs sm:text-sm font-mono text-slate-300">
+          <div className="flex items-center gap-3">
+            <span
+              className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-frost shadow-[0_0_10px_rgba(56,189,248,0.75)]"
+              aria-hidden="true"
+            />
+            <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
+              Boss Brain TEE Oracle
+            </h1>
+          </div>
+          <p className="text-xs sm:text-sm font-mono text-ash">
             Per-epoch TEE enclave proposals: elemental buyback multipliers, altar transmutation recipes, and boss taunts verified on-chain via Ed25519 signatures.
           </p>
           <FloorSelector floor={floor} setFloor={setFloor} />
@@ -256,7 +262,7 @@ export default function AiPage() {
       </div>
 
       {uncommittedProposal && !aiState.loading && (
-        <div className="px-4 py-3 rounded-xl bg-panel-card border border-frost/30 text-xs font-mono text-slate-200">
+        <div className="px-4 py-3 rounded-xl bg-panel-card border border-frost/30 text-xs font-mono text-ash">
           No TEE enclave proposal has been committed on Floor {floor} yet. Baseline 1.00x buyback quotes remain live on-chain via <code className="text-frost">get_buyback_quote()</code>.
         </div>
       )}
@@ -264,25 +270,25 @@ export default function AiPage() {
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
         {/* Left column: Boss Taunt, Enclave Proof & Canonical Preimage */}
         <div className="md:col-span-7 flex flex-col gap-4">
-          <section className="rounded-xl bg-panel-card border border-white/10 p-5 elevation-panel space-y-4">
+          <section className="citadel-stage p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <TerminalSquare className="w-4 h-4 text-solar" aria-hidden="true" />
-                <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
+                <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
                   Enclave Proclamation
                 </h2>
               </div>
-              <span className="text-[11px] font-mono text-slate-300">
+              <span className="text-[11px] font-mono text-ash">
                 Epoch {ai.epoch} · Nonce {ai.nonce}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-panel-dark/70 border border-void/30 text-xs font-mono leading-relaxed flex items-start gap-2.5">
-              <MessageSquareQuote className="w-4 h-4 text-void mt-0.5 flex-shrink-0" aria-hidden="true" />
-              <span className="text-slate-200">
-                {ai.taunt || "The enclave has not issued a taunt for this floor yet."}
+            <blockquote className="p-4 rounded-lg bg-[#090A10]/90 border-t border-void/45 flex items-start gap-3">
+              <MessageSquareQuote className="w-4 h-4 text-void mt-1 flex-shrink-0" aria-hidden="true" />
+              <span className="font-lore italic text-lg sm:text-xl text-parchment leading-snug">
+                {ai.taunt ? `“${ai.taunt}”` : "The enclave has not issued a taunt for this floor yet."}
               </span>
-            </div>
+            </blockquote>
 
             {/* Ed25519 Verification & Proposal Facts */}
             <div className="pt-3 border-t border-white/10 font-mono text-xs space-y-3">
@@ -375,7 +381,7 @@ export default function AiPage() {
 
         {/* Right column: Buyback Desk + Multiplier Meters + Altar Recipe Status */}
         <div className="md:col-span-5 flex flex-col gap-4">
-          <section className="rounded-xl bg-panel-card border border-void/35 p-5 elevation-panel space-y-4">
+          <section className="obsidian-surface border-t-void/40 p-5 space-y-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-void" aria-hidden="true" />
@@ -508,7 +514,7 @@ export default function AiPage() {
           </section>
 
           {/* Altar recipe status */}
-          <section className="rounded-xl bg-panel-card border border-frost/25 p-5 elevation-panel font-mono text-xs space-y-3">
+          <section className="obsidian-surface border-t-frost/35 p-5 font-mono text-xs space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-white">
               <Cpu className="w-4 h-4 text-frost" aria-hidden="true" />
               Altar Recipe Status

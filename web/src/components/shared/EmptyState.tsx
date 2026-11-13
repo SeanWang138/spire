@@ -27,7 +27,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
 }) => {
   return (
     <div
-      className={`rounded-xl border border-white/10 bg-panel-dark elevation-panel p-8 flex flex-col items-center justify-center text-center gap-3 ${className}`}
+      className={`obsidian-surface p-8 flex flex-col items-center justify-center text-center gap-3 ${className}`}
     >
       <Ghost className="w-8 h-8 text-slate-400" aria-hidden="true" />
       <span className="text-[11px] font-mono uppercase tracking-widest px-2.5 py-0.5 rounded border border-white/10 text-slate-300 bg-white/[0.03]">

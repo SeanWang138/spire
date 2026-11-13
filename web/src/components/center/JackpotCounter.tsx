@@ -8,6 +8,7 @@ import { calculateJackpotSplit } from "@/lib/simulation/pricing";
 interface JackpotCounterProps {
   jackpotYocto: string;
   playerDamage: number;
+  round?: number;
   /** Round total damage — straight from the floor state. */
   totalDamage?: number;
   loot?: [number, number, number];
@@ -18,6 +19,7 @@ interface JackpotCounterProps {
 export const JackpotCounter: React.FC<JackpotCounterProps> = ({
   jackpotYocto,
   playerDamage,
+  round,
   totalDamage = 0,
   loot = [0, 0, 0],
   onClaimPayout,
@@ -41,17 +43,25 @@ export const JackpotCounter: React.FC<JackpotCounterProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-jackpot/30 elevation-panel p-4 space-y-3">
+    <div className="obsidian-surface border-t-jackpot/40 p-4 sm:p-5 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Coins className="w-5 h-5 text-jackpot" aria-hidden="true" />
           <h2 className="text-xs uppercase font-bold tracking-widest font-mono text-slate-200">
-            Current Jackpot Pool
+            Floor Bounty Pool
           </h2>
         </div>
-        <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-jackpot/10 text-jackpot border border-jackpot/30">
-          90% Damage / 10% Kill
-        </span>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+          {typeof round === "number" && (
+            <span className="text-slate-300">
+              Your Round {round} DMG:{" "}
+              <strong className="font-mono-numbers text-white">{playerDamage}</strong>
+            </span>
+          )}
+          <span className="text-[11px] uppercase px-2 py-0.5 rounded bg-jackpot/10 text-jackpot border border-jackpot/30">
+            90% Damage / 10% Kill
+          </span>
+        </div>
       </div>
 
       {/* Main Jackpot Counter */}

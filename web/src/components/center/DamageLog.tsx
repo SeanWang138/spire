@@ -29,18 +29,18 @@ export const DamageLog: React.FC<DamageLogProps> = ({ logs }) => {
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 space-y-3">
+    <div className="obsidian-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Terminal className="w-4 h-4 text-emerald-400" aria-hidden="true" />
           <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
-            Combat Telemetry &amp; Strike Feed
+            Combat Chronicle &amp; Strike Feed
           </h2>
         </div>
         <span className="text-xs font-mono text-slate-300">Session Feed</span>
       </div>
 
-      <div className="h-44 overflow-y-auto rounded-lg bg-panel-dark divide-y divide-white/10 font-mono text-xs">
+      <div className="h-44 overflow-y-auto rounded-lg bg-oled divide-y divide-white/10 font-mono text-xs border border-white/10">
         {logs.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-300 text-xs px-4 text-center">
             No strikes dispatched this session. Launch an attack to record on-chain transactions.

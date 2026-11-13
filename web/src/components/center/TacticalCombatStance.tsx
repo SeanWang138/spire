@@ -5,6 +5,7 @@ import { Swords, RefreshCw, Flame, Snowflake, Sparkles, Shield, Feather, ArrowUp
 import { TacticalStance, STANCE_PROFILES, STANCE_IDS, calculateRaidDamage } from "@/lib/simulation/pricing";
 import { PlayerInventory, ElementIndex, StanceIndex } from "@/lib/contract";
 import { FLOOR_TICKET_COST_NEAR } from "@/lib/spire/constants";
+import { SpireTooltip } from "@/components/ui/SpireUi";
 
 const STANCE_ORDER: TacticalStance[] = ["aggressive", "feint", "pierce"];
 
@@ -112,31 +113,33 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 sm:p-5 space-y-4">
+    <div className="citadel-stage p-5 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Swords className="w-4 h-4 text-solar" aria-hidden="true" />
-          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
-            Raid Planner (1 Weapon x 3 Stances)
+          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
+            Command Deck · 3-Turn Strike Chain
           </h2>
         </div>
-        <span className="text-xs font-mono text-slate-300">
-          Ticket{" "}
-          <span className="text-frost font-bold font-mono-numbers">
+        <span className="text-xs font-mono text-ash">
+          Entry Ticket{" "}
+          <span className="text-solar font-bold font-mono-numbers">
             {FLOOR_TICKET_COST_NEAR[Math.min(floor, 3) - 1]?.toFixed(2) ?? "0.10"} NEAR
           </span>
         </span>
       </div>
 
-      {/* Weapon selector */}
+      {/* Weapon Socket Selector */}
       <div>
-        <span className="text-xs font-mono uppercase text-slate-300 block mb-2">
-          Armament: pick one element for all 3 strikes
+        <span className="text-xs font-mono uppercase text-ash block mb-2">
+          1. Socket Elemental Armament
         </span>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           {elements.map((el) => {
             const isSelected = weaponElement === el.index;
             const owned = el.count + el.locked > 0;
+            const riskWarning = resistances[el.index] >= 7000 && el.count > 0 && el.locked === 0;
+            const starterProtected = resistances[el.index] >= 7000 && el.locked > 0;
             return (
               <button
                 type="button"
@@ -144,18 +147,28 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
                 onClick={() => setWeaponElement(el.index)}
                 disabled={!owned}
                 aria-pressed={isSelected}
-                className={`min-h-[48px] p-2.5 rounded-lg border text-left transition-colors ${
+                className={`rpg-sheen min-h-[58px] p-3 rounded-lg border text-left transition-all ${
                   isSelected
-                    ? `${el.color} border-current bg-white/[0.06]`
-                    : "border-white/10 text-slate-300 hover:text-white hover:border-white/25"
+                    ? `${el.color} border-current bg-white/[0.09]`
+                    : "border-brass/20 bg-[#090A10]/90 text-ash hover:text-parchment hover:border-brass/45"
                 } ${!owned ? "opacity-40 cursor-not-allowed" : ""}`}
               >
-                <div className="flex items-center gap-1.5 text-xs font-bold">
-                  {el.icon}
-                  <span className="truncate">{el.name}</span>
+                <div className="flex items-center justify-between gap-1.5 text-xs font-bold">
+                  <span className="inline-flex items-center gap-1.5 truncate">
+                    {el.icon}
+                    <span className="truncate">{el.name}</span>
+                  </span>
+                  {riskWarning && (
+                    <AlertTriangle className="w-3.5 h-3.5 text-hp shrink-0" aria-label="Tribute hazard" />
+                  )}
                 </div>
-                <div className="text-[11px] font-mono mt-0.5 text-slate-300">
-                  {el.count} free{el.locked > 0 ? ` · ${el.locked} starter-locked` : ""}
+                <div className="text-xs font-mono mt-1 text-ash flex items-center justify-between gap-1">
+                  <span>
+                    {el.count} free{el.locked > 0 ? ` · ${el.locked} starter` : ""}
+                  </span>
+                  {starterProtected && (
+                    <span className="text-[11px] font-bold text-jackpot">Tribute Safe</span>
+                  )}
                 </div>
               </button>
             );
@@ -163,12 +176,12 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
         </div>
       </div>
 
-      {/* Stance per turn (flat divider ledger rows inside panel) */}
+      {/* Linked 3-Turn Stance Chain */}
       <div>
-        <span className="text-xs font-mono uppercase text-slate-300 block mb-2">
-          Stance Sequence (3 Turns)
+        <span className="text-xs font-mono uppercase text-ash block mb-2">
+          2. Configure Stance Sequence
         </span>
-        <div className="rounded-lg bg-panel-dark divide-y divide-white/10">
+        <div className="rounded-lg bg-oled/90 border border-brass/20 divide-y divide-brass/15">
           {([0, 1, 2] as const).map((turn) => {
             const projected = projectedTurns[turn];
             return (
@@ -176,7 +189,7 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
                 key={turn}
                 className="px-3 py-2.5 flex flex-wrap items-center justify-between gap-2"
               >
-                <span className="text-xs font-mono uppercase text-slate-300 font-semibold w-16 shrink-0">
+                <span className="text-xs font-mono uppercase text-slate-300 font-bold w-16 shrink-0">
                   Turn {turn + 1}
                 </span>
                 <div className="flex flex-wrap gap-1.5 flex-1 sm:justify-end">
@@ -184,21 +197,21 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
                     const profile = STANCE_PROFILES[st];
                     const isSelected = turnStances[turn] === st;
                     return (
-                      <button
-                        type="button"
-                        key={st}
-                        onClick={() => setTurnStance(turn, st)}
-                        aria-pressed={isSelected}
-                        className={`min-h-[38px] px-2.5 py-1 rounded font-mono text-[11px] inline-flex items-center gap-1.5 transition-colors ${
-                          isSelected
-                            ? "bg-white/15 text-white font-bold border border-white/30"
-                            : "text-slate-300 hover:text-white border border-transparent hover:bg-white/5"
-                        }`}
-                        title={profile.description}
-                      >
-                        {STANCE_ICON[st]}
-                        <span>{profile.name}</span>
-                      </button>
+                      <SpireTooltip key={st} content={profile.description}>
+                        <button
+                          type="button"
+                          onClick={() => setTurnStance(turn, st)}
+                          aria-pressed={isSelected}
+                          className={`min-h-[44px] px-3 py-1 rounded-md font-mono text-xs inline-flex items-center gap-1.5 transition-all ${
+                            isSelected
+                              ? "bg-solar/20 text-amber-200 font-bold border border-solar/50"
+                              : "text-slate-300 hover:text-white border border-transparent hover:bg-white/5"
+                          }`}
+                        >
+                          {STANCE_ICON[st]}
+                          <span>{profile.name}</span>
+                        </button>
+                      </SpireTooltip>
                     );
                   })}
                 </div>
@@ -215,17 +228,17 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
         </p>
       </div>
 
-      {/* Summary + Attack CTA */}
+      {/* Execute Primary Strike */}
       <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-white/10">
         <div className="text-xs font-mono space-y-1">
           <div>
-            <span className="text-slate-300">Projected damage: </span>
+            <span className="text-slate-300">Total Projected Strike: </span>
             <span className="font-bold text-white font-mono-numbers">~{totalProjected} DMG</span>
           </div>
           {anyConfiscated && (
-            <span className="text-hp text-[11px] flex items-center gap-1.5 font-semibold">
+            <span className="text-hp text-xs flex items-center gap-1.5 font-semibold">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              Tribute risk at &ge;7000 bps: non-starter weapon will be seized!
+              Tribute risk at &ge;7000 bps: unlocked weapon will be seized!
             </span>
           )}
         </div>
@@ -234,10 +247,10 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
           type="button"
           onClick={handleAttack}
           disabled={disabled || isRaiding || !ownsAnyWeapon}
-          className={`min-h-[44px] w-full sm:w-auto px-8 py-2.5 rounded-lg font-mono font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-colors ${
+          className={`min-h-[44px] w-full sm:w-auto px-7 py-2.5 rounded-lg font-mono font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-colors ${
             disabled || isRaiding || !ownsAnyWeapon
               ? "bg-white/5 text-slate-500 cursor-not-allowed border border-white/10"
-              : "bg-solar hover:bg-solar-dark text-oled elevation-panel"
+              : "bg-solar hover:bg-solar-dark text-oled"
           }`}
         >
           {isRaiding ? (
@@ -245,7 +258,7 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
           ) : (
             <Swords className="w-4 h-4 text-oled" aria-hidden="true" />
           )}
-          <span>{isRaiding ? "Executing..." : "Launch Attack"}</span>
+          <span>{isRaiding ? "Dispatched..." : "Launch Signless Strike"}</span>
         </button>
       </div>
 

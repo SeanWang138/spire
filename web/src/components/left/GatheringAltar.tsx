@@ -83,7 +83,7 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({ onHarvest, disab
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 space-y-3">
+    <div className="obsidian-surface p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Zap className="w-4 h-4 text-frost" aria-hidden="true" />

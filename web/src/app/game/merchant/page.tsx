@@ -160,7 +160,7 @@ export default function MerchantPage() {
           </div>
 
           <div className="lg:col-span-7">
-            <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 sm:p-5 space-y-4">
+            <div className="obsidian-surface p-4 sm:p-5 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Store className="w-4 h-4 text-frost" aria-hidden="true" />
@@ -196,9 +196,9 @@ export default function MerchantPage() {
               </div>
 
               {/* Flat split panels inside inspector */}
-              <div className="rounded-lg bg-panel-dark divide-y sm:divide-y-0 sm:divide-x divide-white/10 grid grid-cols-1 sm:grid-cols-2">
-                <div className="p-4 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase text-slate-300">
+              <div className="rounded-lg bg-panel-dark divide-y sm:divide-y-0 sm:divide-x divide-brass/15 grid grid-cols-1 sm:grid-cols-2">
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono uppercase text-ash">
                     <span>Buy Ask ({quoteQty}x)</span>
                     <ArrowUpRight className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
                   </div>
@@ -206,21 +206,21 @@ export default function MerchantPage() {
                     {quoteLoading ? "..." : quotes.buy ? formatNearAmount(quotes.buy.total_price, 4) : "N/A"}
                   </div>
                   {quotes.buy && (
-                    <div className="text-[11px] font-mono text-slate-300 font-mono-numbers">
+                    <div className="text-[11px] font-mono text-ash font-mono-numbers">
                       Unit: {formatNearAmount(quotes.buy.unit_price, 4)} · {quotes.buy.is_open ? "Open" : "Closed"}
                     </div>
                   )}
-                  <p className="pt-1 text-xs font-mono text-slate-300 leading-relaxed">
-                    {quotes.buy?.reason
+                  <blockquote className="pt-1 font-lore italic text-base text-parchment leading-snug">
+                    &ldquo;{quotes.buy?.reason
                       ? quotes.buy.reason
                       : quotes.buy
                       ? "No reason returned by contract."
-                      : "Quote temporarily unavailable."}
-                  </p>
+                      : "Quote temporarily unavailable."}&rdquo;
+                  </blockquote>
                 </div>
 
-                <div className="p-4 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase text-slate-300">
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono uppercase text-ash">
                     <span>Sell Bid ({quoteQty}x)</span>
                     <ArrowDownRight className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
                   </div>
@@ -228,24 +228,24 @@ export default function MerchantPage() {
                     {quoteLoading ? "..." : quotes.sell ? formatNearAmount(quotes.sell.total_price, 4) : "N/A"}
                   </div>
                   {quotes.sell && (
-                    <div className="text-[11px] font-mono text-slate-300 font-mono-numbers">
+                    <div className="text-[11px] font-mono text-ash font-mono-numbers">
                       Unit: {formatNearAmount(quotes.sell.unit_price, 4)} · {quotes.sell.is_open ? "Open" : "Closed"}
                     </div>
                   )}
-                  <p className="pt-1 text-xs font-mono text-slate-300 leading-relaxed">
-                    {quotes.sell?.reason
+                  <blockquote className="pt-1 font-lore italic text-base text-parchment leading-snug">
+                    &ldquo;{quotes.sell?.reason
                       ? quotes.sell.reason
                       : quotes.sell
                       ? "No reason returned by contract."
-                      : "Quote temporarily unavailable."}
-                  </p>
+                      : "Quote temporarily unavailable."}&rdquo;
+                  </blockquote>
                 </div>
               </div>
 
-              <div className="text-xs font-mono text-slate-300 border-t border-white/10 pt-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-mono text-ash border-t border-brass/20 pt-3 flex flex-wrap items-center justify-between gap-2">
                 <span>
                   On-Chain Reserve:{" "}
-                  <strong className="font-mono-numbers text-white">
+                  <strong className="font-mono-numbers text-parchment">
                     {yoctoToNear(merchant.data.cash).toFixed(2)} NEAR
                   </strong>
                 </span>

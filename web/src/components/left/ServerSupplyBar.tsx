@@ -18,7 +18,7 @@ export const ServerSupplyBar: React.FC<ServerSupplyBarProps> = ({ supplies }) =>
   const isDominant2 = p2 >= 50;
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 sm:p-5 space-y-3">
+    <div className="obsidian-surface p-4 sm:p-5 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <BarChart3 className="w-4 h-4 text-frost" aria-hidden="true" />

@@ -123,11 +123,11 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 space-y-3">
+    <div className="citadel-stage p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Hammer className="w-4 h-4 text-solar" aria-hidden="true" />
-          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
+          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
             Crafting Forge
           </h2>
         </div>
@@ -136,8 +136,8 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
           onClick={() => setIsReforgeMode(!isReforgeMode)}
           className={`min-h-[38px] flex items-center gap-1.5 text-xs font-mono px-3 py-1 rounded-md border transition-colors ${
             isReforgeMode
-              ? "bg-void/20 border-void/50 text-void font-bold"
-              : "bg-white/5 border-white/15 text-slate-200 hover:text-white"
+              ? "bg-void/20 border-void/50 text-purple-200 font-bold"
+              : "bg-panel-dark border-brass/25 text-ash hover:text-parchment"
           }`}
         >
           <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
@@ -161,7 +161,7 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
                   className={`min-h-[54px] flex flex-col items-center justify-center py-2 px-1 rounded-md text-xs font-mono transition-colors border ${
                     isSelected
                       ? `${item.bgBorder} ${item.elementColor} font-bold`
-                      : "border-transparent text-slate-300 hover:text-white hover:bg-white/5"
+                      : "border-transparent text-ash hover:text-parchment hover:bg-panel-elevated/60"
                   }`}
                 >
                   <Icon className="w-4 h-4 mb-1" aria-hidden="true" />
@@ -174,7 +174,7 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
           {/* Recipe Breakdown */}
           <div className={`p-3.5 rounded-lg border ${selectedRecipe.bgBorder}`}>
             <div className="flex items-center justify-between text-xs mb-2.5">
-              <span className="font-bold text-white">{selectedRecipe.name}</span>
+              <span className="font-bold text-parchment">{selectedRecipe.name}</span>
               <span className={`text-[11px] font-mono font-semibold ${selectedRecipe.elementColor}`}>
                 {selectedRecipe.element}
               </span>
@@ -182,13 +182,13 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
 
             <div className="space-y-1.5 text-xs font-mono">
               <div className="flex items-center justify-between">
-                <span className="text-slate-300">Iron Ore</span>
+                <span className="text-ash">Iron Ore</span>
                 <span className={`font-mono-numbers font-bold ${hasIron ? "text-emerald-400" : "text-hp"}`}>
                   {inventory.materials["ore:iron"]} / {selectedRecipe.req.iron} required
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-300">Elemental Essence</span>
+                <span className="text-ash">Elemental Essence</span>
                 <span className={`font-mono-numbers font-bold ${hasEssence ? "text-emerald-400" : "text-hp"}`}>
                   {inventory.materials[selectedRecipe.req.essenceType]} / {selectedRecipe.req.essence} required
                 </span>
@@ -200,10 +200,10 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
             type="button"
             onClick={handleCraft}
             disabled={!canCraft}
-            className={`min-h-[44px] w-full py-2.5 px-4 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${
+            className={`rpg-sheen min-h-[44px] w-full py-2.5 px-4 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
               canCraft
-                ? "bg-solar hover:bg-solar-dark text-oled"
-                : "bg-white/5 text-slate-500 cursor-not-allowed border border-white/10"
+                ? "bg-gradient-to-b from-amber-400 to-amber-600 hover:from-amber-300 hover:to-amber-500 text-oled border border-amber-300/60"
+                : "bg-panel-dark text-pewter cursor-not-allowed border border-brass/15"
             }`}
           >
             {isBusy ? (
@@ -216,7 +216,7 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
         </div>
       ) : (
         <div className="space-y-3 pt-1">
-          <p className="text-xs text-slate-300 font-mono leading-relaxed">
+          <p className="text-xs text-ash font-mono leading-relaxed">
             Burn non-starter weapons of an oversupplied (&ge;50% share) element into a rarer element.
           </p>
 
