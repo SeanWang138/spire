@@ -98,6 +98,31 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Restores an existing on-chain account session from a user-supplied
+   * Recovery / Secret Key (`ed25519:...`). Throws if the key format is invalid.
+   */
+  public importSession(accountId: string, secretKey: string): SessionData {
+    const trimmedKey = secretKey.trim();
+    const keyPair = KeyPair.fromString(
+      trimmedKey as Parameters<typeof KeyPair.fromString>[0]
+    );
+    const cleanId = accountId.trim();
+    const session: SessionData = {
+      accountId: cleanId,
+      publicKey: keyPair.getPublicKey().toString(),
+      secretKey: trimmedKey,
+      createdAt: Date.now(),
+      allowanceNear: 1.0,
+      provision: "confirmed",
+    };
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(session));
+    }
+    this.notifySessionChanged();
+    return session;
+  }
+
   public clearSession(): void {
     if (typeof window !== "undefined") {
       localStorage.removeItem(STORAGE_SESSION_KEY);

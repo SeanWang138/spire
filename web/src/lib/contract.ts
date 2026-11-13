@@ -800,6 +800,39 @@ export async function account_exists(accountId: string): Promise<boolean> {
   return Boolean(json?.result?.amount);
 }
 
+/**
+ * Verifies on-chain whether `publicKey` is an active access key for `accountId`.
+ */
+export async function verify_account_key(
+  accountId: string,
+  publicKey: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(RPC_ENDPOINTS[0], {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "spire",
+        method: "query",
+        params: {
+          request_type: "view_access_key_list",
+          finality: "final",
+          account_id: accountId,
+        },
+      }),
+    });
+    const json = (await res.json()) as {
+      result?: { keys?: Array<{ public_key?: string }> };
+    };
+    const keys = json?.result?.keys;
+    if (!Array.isArray(keys)) return false;
+    return keys.some((k) => k.public_key === publicKey);
+  } catch {
+    return false;
+  }
+}
+
 export async function provision_account(
   accountId: string,
   publicKey: string
