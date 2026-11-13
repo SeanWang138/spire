@@ -235,7 +235,7 @@ export const STANCE_PROFILES: Record<TacticalStance, StanceProfile> = {
   feint: {
     name: "Feint",
     damageMultiplier: 1.0,
-    description: "Standard power with a tighter 10000–11000 bps damage roll — steadier rounds.",
+    description: "Standard power with a tighter 10000-11000 bps damage roll for steadier rounds.",
   },
   pierce: {
     name: "Pierce",

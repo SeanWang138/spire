@@ -144,6 +144,19 @@ export interface ChangeResult {
   txHash: string;
 }
 
+export interface NftTokenMetadata {
+  title?: string | null;
+  description?: string | null;
+  media?: string | null;
+  issued_at?: number | null;
+}
+
+export interface NftToken {
+  token_id: string;
+  owner_id: string;
+  metadata: NftTokenMetadata | null;
+}
+
 // ---------------------------------------------------------------------------
 // Raw RPC plumbing
 // ---------------------------------------------------------------------------
@@ -264,8 +277,8 @@ function getMockViewFallback(method: string, args: Record<string, unknown> = {})
       };
     case "get_inventory":
       return {
-        weapons: [3, 2, 4],
-        starter_locked: [4, 1, 1],
+        weapons: [7, 3, 4],
+        starter_locked: [4, 1, 0],
         materials: {
           "ore:iron": 12,
           "essence:solar": 6,
@@ -332,6 +345,24 @@ function getMockViewFallback(method: string, args: Record<string, unknown> = {})
         chat_id: "chat_0x892a",
         signature_hex: "0x89f2c71eb5b655a5059868b7d0cea55509db90f25e451565",
       };
+    case "nft_total_supply":
+      return "1";
+    case "nft_token":
+      if (args.token_id === "spirefi-trophy-r1-f3") {
+        return {
+          token_id: "spirefi-trophy-r1-f3",
+          owner_id: "vanguard.spire.testnet",
+          metadata: {
+            title: "SpireFi Trophy - Floor 3 Round 1",
+            description:
+              "Conquest trophy awarded to vanguard.spire.testnet for conquering Floor 3 of SpireFi in Round 1.",
+            media:
+              "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 500 500\"><rect width=\"500\" height=\"500\" rx=\"20\" fill=\"#090d16\"/><rect x=\"20\" y=\"20\" width=\"460\" height=\"460\" rx=\"12\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2\"/><polygon points=\"250,65 290,145 210,145\" fill=\"#f59e0b\"/><text x=\"250\" y=\"195\" font-family=\"sans-serif\" font-size=\"22\" font-weight=\"bold\" fill=\"#f59e0b\" text-anchor=\"middle\">SPIREFI CONQUEROR</text><text x=\"250\" y=\"222\" font-family=\"sans-serif\" font-size=\"14\" fill=\"#94a3b8\" text-anchor=\"middle\">FLOOR 3 CLEARED · ROUND 1</text><text x=\"250\" y=\"290\" font-family=\"monospace\" font-size=\"15\" fill=\"#f8fafc\" text-anchor=\"middle\">vanguard.spire.testnet</text><text x=\"250\" y=\"350\" font-family=\"monospace\" font-size=\"16\" fill=\"#38bdf8\" text-anchor=\"middle\">12.00 NEAR JACKPOT</text></svg>",
+            issued_at: 1731500000000000000,
+          },
+        };
+      }
+      return null;
     default:
       return null;
   }
@@ -514,10 +545,11 @@ export async function get_buyback_quote(
   return { ...resp, floor: resp.floor + 1 };
 }
 
-export async function get_ai_state(floor: number): Promise<AiStateResponse> {
-  const resp = await rpcView<AiStateResponse>("get_ai_state", {
+export async function get_ai_state(floor: number): Promise<AiStateResponse | null> {
+  const resp = await rpcView<AiStateResponse | null>("get_ai_state", {
     floor: toOnchainFloor(floor),
   });
+  if (!resp) return null;
   return { ...resp, floor: resp.floor + 1 };
 }
 
@@ -542,6 +574,14 @@ export async function get_damage(
     floor: toOnchainFloor(floor),
     round,
   });
+}
+
+export async function nft_total_supply(): Promise<string> {
+  return rpcView<string>("nft_total_supply");
+}
+
+export async function nft_token(tokenId: string): Promise<NftToken | null> {
+  return rpcView<NftToken | null>("nft_token", { token_id: tokenId });
 }
 
 // ---------------------------------------------------------------------------
@@ -579,7 +619,15 @@ async function signedCall(
       ],
     });
 
-    return { txHash: result?.transaction_outcome?.id ?? "pending" };
+    const txHash = result?.transaction_outcome?.id ?? "pending";
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("spire:tx", {
+          detail: { method: methodName, txHash, at: Date.now() },
+        })
+      );
+    }
+    return { txHash };
   } catch (err: unknown) {
     console.error(`[SpireFi Client] On-chain call ${methodName} failed:`, err);
     throw err;

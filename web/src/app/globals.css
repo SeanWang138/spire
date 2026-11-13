@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: dark;
   --bg-oled: #080B11;
   --bg-panel: #0F1424;
   --bg-card: #13192B;
@@ -21,28 +22,59 @@
 body {
   background-color: var(--bg-oled);
   color: #E2E8F0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Native interactive pointer and visible keyboard focus indicators */
+button:not(:disabled),
+a[href],
+select:not(:disabled),
+summary,
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid #F59E0B;
+  outline-offset: 2px;
+}
+
+/* Honor reduced-motion preferences globally */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Tabular figures for numbers to eliminate layout shifts */
 .font-mono-numbers {
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Atmospheric borders and subtle directional depth */
+/* Atmospheric elevation rules — never zero-offset neon glow */
 .elevation-panel {
-  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.65);
 }
 
 .elevation-float {
-  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 10px 28px -4px rgba(0, 0, 0, 0.75);
 }
 
-/* Custom Cyberpunk Scrollbars */
+/* Pure obsidian ground without decorative grid-line tiling */
+.citadel-backdrop {
+  background: radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.06), transparent 60%);
+}
+
+/* Custom Obsidian Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -59,19 +91,4 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
-}
-
-/* Scanline visual texture overlay */
-.cyber-scanlines {
-  background: linear-gradient(
-    rgba(18, 16, 16, 0) 50%, 
-    rgba(0, 0, 0, 0.25) 50%
-  ), linear-gradient(
-    90deg,
-    rgba(255, 0, 0, 0.03),
-    rgba(0, 255, 0, 0.01),
-    rgba(0, 0, 255, 0.03)
-  );
-  background-size: 100% 3px, 6px 100%;
-  pointer-events: none;
 }

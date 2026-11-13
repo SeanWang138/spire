@@ -1,23 +1,21 @@
 import Link from "next/link";
 import {
+  ArrowRight,
   BrainCircuit,
   Coins,
   Hammer,
-  Heart,
   Lock,
+  Play,
   Shield,
-  Swords,
   Store,
-  TowerControl,
+  Swords,
   TrendingUp,
-  Vault as VaultIcon,
+  Trophy,
 } from "lucide-react";
 import { LandingHero } from "@/components/landing/LandingHero";
 import {
   FLOOR_MAX_HP,
   FLOOR_TICKET_COST_NEAR,
-  FROST_WARD_FLOOR,
-  ENRAGE_FLOOR,
   SPLIT_BACKER_BPS,
   SPLIT_BUYBACK_BPS,
   SPLIT_JACKPOT_BPS,
@@ -26,350 +24,369 @@ import {
   BUYBACK_MAX_BPS,
   TRIBUTE_THRESHOLD_BPS,
   MERCHANT_BASE_PRICE_NEAR,
+  MERCHANT_TARGET_STOCK,
+  MERCHANT_MIN_CASH_NEAR,
   STARTER_WEAPONS,
   STARTER_ORE,
   STARTER_ESSENCE,
   GATHER_AMOUNT,
+  CRAFT_ORE_COST,
+  CRAFT_ESSENCE_COST,
 } from "@/lib/spire/constants";
 
-// Static spec only — the landing page never talks to the contract.
+// Static protocol specification — renders at build/request time with zero contract dependency.
 
 const FLOORS = [
   {
-    n: 1,
-    hp: FLOOR_MAX_HP[0],
-    ticket: FLOOR_TICKET_COST_NEAR[0],
-    name: "Foundation Floor",
-    modifier: null as string | null,
-    deadline: "No deadline",
-    accent: "text-emerald-400",
-    border: "border-emerald-500/30",
+    n: 3,
+    tierLabel: "SUMMIT · ENRAGE",
+    boss: "Kaelen, Void Sovereign",
+    hp: FLOOR_MAX_HP[2],
+    ticket: FLOOR_TICKET_COST_NEAR[2],
+    modifier: "Boss regenerates 10% max HP every 5 minutes + mints Conqueror NEP-171 Trophy on kill.",
+    deadline: "20 min round timer",
+    accent: "text-hp",
+    border: "border-hp/30",
+    badge: "bg-hp/15 text-hp border-hp/30",
+    widthClass: "lg:w-[82%]",
   },
   {
     n: 2,
+    tierLabel: "MID CITADEL · FROST WARD",
+    boss: "Valkyr, Glacial Warden",
     hp: FLOOR_MAX_HP[1],
     ticket: FLOOR_TICKET_COST_NEAR[1],
-    name: "Warded Floor",
-    modifier: "Frost Ward — +1500 bps effective resistance vs Frost strikes",
-    deadline: "30 min deadline",
+    modifier: "Frost Ward adds +1,500 bps effective resistance against Frost strikes.",
+    deadline: "30 min round timer",
     accent: "text-frost",
     border: "border-frost/30",
+    badge: "bg-frost/15 text-frost border-frost/30",
+    widthClass: "lg:w-[91%]",
   },
   {
-    n: 3,
-    hp: FLOOR_MAX_HP[2],
-    ticket: FLOOR_TICKET_COST_NEAR[2],
-    name: "Enrage Floor",
-    modifier: "Enrage — boss regenerates 10% max HP every 5 minutes",
-    deadline: "20 min deadline",
-    accent: "text-hp",
-    border: "border-hp/30",
+    n: 1,
+    tierLabel: "FOUNDATION · UNLOCKED",
+    boss: "Malakor, Solar Sentinel",
+    hp: FLOOR_MAX_HP[0],
+    ticket: FLOOR_TICKET_COST_NEAR[0],
+    modifier: "Open arena for stance cadence calibration and first jackpot splits.",
+    deadline: "No round deadline",
+    accent: "text-solar",
+    border: "border-solar/30",
+    badge: "bg-solar/15 text-solar border-solar/30",
+    widthClass: "lg:w-full",
   },
 ];
 
 const ECONOMY_ROLES = [
   {
-    icon: <Swords className="w-5 h-5 text-solar" />,
+    icon: <Swords className="w-5 h-5 text-solar" aria-hidden="true" />,
     role: "Raider",
-    body: "Buy a raid ticket from the internal ledger, pick one weapon element and three stances — Aggressive, Feint or Pierce. Damage above the tribute threshold risks weapon confiscation.",
+    metric: "3 Stances · Signless",
+    body: "Enter with internal NEAR ledger tickets. Choose Aggressive (+20% damage), Feint (10000-11000 bps steady roll), or Pierce (-1500 bps armor bypass) while dodging Boss Tribute confiscations.",
   },
   {
-    icon: <Hammer className="w-5 h-5 text-frost" />,
+    icon: <Hammer className="w-5 h-5 text-frost" aria-hidden="true" />,
     role: "Artisan & Blacksmith",
-    body: `Claim the starter kit (${STARTER_WEAPONS[0]}× solar / ${STARTER_WEAPONS[1]}× frost / ${STARTER_WEAPONS[2]}× void + ${STARTER_ORE} ore + ${STARTER_ESSENCE} essence), gather ${GATHER_AMOUNT} units per node, craft elemental weapons and trade them through the NPC merchant's bonding curve.`,
+    metric: `${CRAFT_ORE_COST} Ore + ${CRAFT_ESSENCE_COST} Essence`,
+    body: `Claim a starter kit (${STARTER_WEAPONS[0]}x Solar, ${STARTER_WEAPONS[1]}x Frost, ${STARTER_ORE} Ore, ${STARTER_ESSENCE} Essence), gather +${GATHER_AMOUNT} units per node (30s cooldown), forge NEP-245 weapons, or trade the Merchant curve.`,
   },
   {
-    icon: <Shield className="w-5 h-5 text-jackpot" />,
-    role: "Backer",
-    body: `Back a floor's Boss Vault with NEAR. Every ticket on that floor routes ${SPLIT_BACKER_BPS / 100}% straight into the backer dividend pool — claimable per cycle, proportional to your shares.`,
+    icon: <Shield className="w-5 h-5 text-jackpot" aria-hidden="true" />,
+    role: "Vault Backer",
+    metric: `${SPLIT_BACKER_BPS / 100}% Ticket Flow`,
+    body: "Back a specific floor's Boss Vault in NEAR. Every raid ticket purchased on that floor routes dividends into the backer pool for cycle-by-cycle claiming, deepening buyback liquidity.",
   },
 ];
-
-const PILLARS = [
-  {
-    icon: <Swords className="w-5 h-5 text-solar" />,
-    title: "Sentinel",
-    body: "Three parallel floors with per-floor deadlines, jackpot drip (10% rolls down on defeat) and deterministic 90/10 payout splits between the proportional damage pool and the last attacker.",
-  },
-  {
-    icon: <BrainCircuit className="w-5 h-5 text-frost" />,
-    title: "Boss Brain",
-    body: "A TEE-signed AI proposal sets per-element buyback multipliers and activates altar recipes. The contract verifies the Ed25519 signature before any state shift — the AI proposes, the chain disposes.",
-  },
-  {
-    icon: <Shield className="w-5 h-5 text-jackpot" />,
-    title: "Backer",
-    body: "The Boss Vault holds backer stakes per floor. Backers earn ticket dividends every cycle, while their stake deepens the buyback reserve that keeps weapon liquidity alive.",
-  },
-];
-
-function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
-  return (
-    <div className="mb-10">
-      <p className="font-mono text-[11px] tracking-[0.3em] text-slate-500 uppercase mb-3">
-        {eyebrow}
-      </p>
-      <h2 className="font-serif text-3xl sm:text-4xl font-bold text-white tracking-wide">
-        {title}
-      </h2>
-    </div>
-  );
-}
 
 export default function LandingPage() {
   return (
     <div className="relative min-h-screen bg-oled text-slate-200">
       <LandingHero />
 
-      {/* The Tower */}
-      <section id="tower" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/5">
-        <SectionHeading eyebrow="Spec // tower floors" title="The Tower" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Section 1: Stepped Citadel Elevation */}
+      <section id="tower" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/10">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+          <h2 className="font-serif text-3xl sm:text-4xl font-bold text-white tracking-wide">
+            Three-Floor Ascension
+          </h2>
+          <p className="text-xs font-mono text-slate-300 max-w-md">
+            10% of each defeated floor&apos;s jackpot drips upward to seed the next tier. All floors run parallel rounds.
+          </p>
+        </div>
+
+        <div className="flex flex-col items-end gap-4">
           {FLOORS.map((floor) => (
             <div
               key={floor.n}
-              className={`p-6 rounded-xl bg-panel-dark border ${floor.border} elevation-panel flex flex-col gap-4`}
+              className={`w-full ${floor.widthClass} rounded-xl bg-panel-dark border ${floor.border} elevation-panel p-5 sm:p-6 transition-colors hover:border-white/20`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TowerControl className={`w-5 h-5 ${floor.accent}`} />
-                  <span className="font-mono text-sm font-bold uppercase tracking-widest text-white">
-                    Floor {floor.n}
-                  </span>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="space-y-1.5 max-w-xl">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${floor.badge}`}>
+                      Floor {floor.n}
+                    </span>
+                    <span className="text-xs font-mono text-slate-300 uppercase tracking-wider">
+                      {floor.tierLabel}
+                    </span>
+                    <span className="text-xs font-mono text-slate-400">{floor.deadline}</span>
+                  </div>
+                  <h3 className="font-serif text-xl font-bold text-white">{floor.boss}</h3>
+                  <p className="text-sm text-slate-300 leading-relaxed">{floor.modifier}</p>
                 </div>
-                <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 bg-white/5 text-slate-400">
-                  {floor.deadline}
-                </span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <Heart className={`w-4 h-4 ${floor.accent} self-center`} />
-                <span className={`text-3xl font-black font-mono-numbers ${floor.accent}`}>
-                  {floor.hp}
-                </span>
-                <span className="text-xs font-mono text-slate-500 uppercase">Boss HP</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <Coins className="w-4 h-4 text-solar self-center" />
-                <span className="text-2xl font-bold font-mono-numbers text-solar">
-                  {floor.ticket.toFixed(2)}
-                </span>
-                <span className="text-xs font-mono text-slate-500 uppercase">NEAR ticket</span>
-              </div>
-              {floor.modifier ? (
-                <p className="text-[11px] font-mono text-slate-400 leading-relaxed border-t border-white/5 pt-3">
-                  {floor.modifier}
-                </p>
-              ) : (
-                <p className="text-[11px] font-mono text-slate-500 leading-relaxed border-t border-white/5 pt-3">
-                  Standard encounter — a clean arena to learn the stance cadence.
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
 
-      {/* The Economy */}
-      <section id="economy" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/5">
-        <SectionHeading eyebrow="Spec // roles & flows" title="The Economy" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          {ECONOMY_ROLES.map((role) => (
-            <div
-              key={role.role}
-              className="p-6 rounded-xl bg-panel-dark border border-white/10 elevation-panel flex flex-col gap-3"
-            >
-              <div className="w-10 h-10 rounded-lg bg-panel-card border border-white/10 flex items-center justify-center">
-                {role.icon}
+                <div className="flex items-center gap-6 sm:gap-8 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-white/10">
+                  <div>
+                    <span className="text-[11px] font-mono text-slate-400 uppercase block">Boss HP</span>
+                    <span className={`text-2xl font-bold font-mono-numbers ${floor.accent}`}>
+                      {floor.hp.toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-mono text-slate-400 uppercase block">Raid Ticket</span>
+                    <span className="text-2xl font-bold font-mono-numbers text-solar">
+                      {floor.ticket.toFixed(2)} NEAR
+                    </span>
+                  </div>
+                </div>
               </div>
-              <h3 className="font-mono text-sm font-bold uppercase tracking-widest text-white">
-                {role.role}
-              </h3>
-              <p className="text-sm text-slate-400 leading-relaxed">{role.body}</p>
             </div>
           ))}
         </div>
 
-        {/* Ticket split bar — straight from the contract constants */}
-        <div className="rounded-xl bg-panel-card border border-white/10 p-5 elevation-panel">
-          <div className="flex items-center justify-between mb-3">
-            <span className="font-mono text-xs font-bold uppercase tracking-widest text-slate-300">
-              Where every ticket goes
-            </span>
-            <span className="font-mono text-[11px] text-slate-500">deterministic bps split</span>
+        <div className="mt-6 px-4 py-3 rounded-lg bg-panel-dark border border-hp/30 text-xs font-mono text-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <span>
+            <strong className="text-hp">Tribute Rule:</strong> Striking an element whose on-chain resistance is at or above{" "}
+            <span className="font-mono-numbers font-bold text-white">{TRIBUTE_THRESHOLD_BPS} bps</span> confiscates your weapon unless it is starter-locked.
+          </span>
+          <Link href="/game/raid" className="text-solar hover:underline font-bold">
+            Inspect Live Radar &rarr;
+          </Link>
+        </div>
+      </section>
+
+      {/* Section 2: Circular Game Economy */}
+      <section id="economy" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/10">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+          <h2 className="font-serif text-3xl sm:text-4xl font-bold text-white tracking-wide">
+            Circular Economy &amp; Ticket Routing
+          </h2>
+          <span className="text-xs font-mono text-slate-300">
+            Deterministic bps split locked in contract constants
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Roles ledger list */}
+          <div className="lg:col-span-6 rounded-xl bg-panel-dark border border-white/10 elevation-panel divide-y divide-white/10">
+            {ECONOMY_ROLES.map((item) => (
+              <div key={item.role} className="p-5 flex items-start gap-4">
+                <div className="w-10 h-10 rounded-lg bg-panel-elevated flex items-center justify-center shrink-0">
+                  {item.icon}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-serif text-lg font-bold text-white">{item.role}</h3>
+                    <span className="text-xs font-mono text-slate-300 font-semibold">{item.metric}</span>
+                  </div>
+                  <p className="mt-1.5 text-sm text-slate-300 leading-relaxed">{item.body}</p>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="h-4 rounded-full overflow-hidden bg-panel-dark flex border border-white/10 p-0.5">
-            <div style={{ width: `${SPLIT_JACKPOT_BPS / 100}%` }} className="h-full bg-jackpot" title={`Jackpot ${SPLIT_JACKPOT_BPS / 100}%`} />
-            <div style={{ width: `${SPLIT_BACKER_BPS / 100}%` }} className="h-full bg-frost" title={`Backers ${SPLIT_BACKER_BPS / 100}%`} />
-            <div style={{ width: `${SPLIT_BUYBACK_BPS / 100}%` }} className="h-full bg-void" title={`Buyback ${SPLIT_BUYBACK_BPS / 100}%`} />
-            <div style={{ width: `${SPLIT_MERCHANT_BPS / 100}%` }} className="h-full bg-solar" title={`Merchant ${SPLIT_MERCHANT_BPS / 100}%`} />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-[11px] font-mono">
-            <div className="p-2 rounded bg-panel-dark border border-jackpot/20 flex justify-between">
-              <span className="text-slate-400">Jackpot</span>
-              <span className="font-bold text-jackpot">{SPLIT_JACKPOT_BPS / 100}%</span>
+
+          {/* Ticket split breakdown + Crafting spec (no nested rounded bordered cards) */}
+          <div className="lg:col-span-6 rounded-xl bg-panel-card border border-white/10 elevation-panel p-6 space-y-6">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-mono text-xs font-bold uppercase tracking-wider text-slate-200">
+                  Per-Ticket NEAR Allocation
+                </span>
+                <span className="font-mono text-xs font-bold text-jackpot font-mono-numbers">100% On-Chain</span>
+              </div>
+
+              <div className="h-5 rounded-full overflow-hidden bg-oled flex border border-white/10">
+                <div
+                  style={{ width: `${SPLIT_JACKPOT_BPS / 100}%` }}
+                  className="h-full bg-jackpot"
+                  title={`Jackpot ${SPLIT_JACKPOT_BPS / 100}%`}
+                />
+                <div
+                  style={{ width: `${SPLIT_BACKER_BPS / 100}%` }}
+                  className="h-full bg-frost"
+                  title={`Backers ${SPLIT_BACKER_BPS / 100}%`}
+                />
+                <div
+                  style={{ width: `${SPLIT_BUYBACK_BPS / 100}%` }}
+                  className="h-full bg-void"
+                  title={`Buyback ${SPLIT_BUYBACK_BPS / 100}%`}
+                />
+                <div
+                  style={{ width: `${SPLIT_MERCHANT_BPS / 100}%` }}
+                  className="h-full bg-solar"
+                  title={`Merchant ${SPLIT_MERCHANT_BPS / 100}%`}
+                />
+              </div>
+
+              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-4 border-t border-white/10 font-mono">
+                <div>
+                  <dt className="text-xs text-slate-400">Jackpot Pool</dt>
+                  <dd className="text-lg font-bold text-jackpot font-mono-numbers">{SPLIT_JACKPOT_BPS / 100}%</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-400">Vault Backers</dt>
+                  <dd className="text-lg font-bold text-frost font-mono-numbers">{SPLIT_BACKER_BPS / 100}%</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-400">Boss Buyback</dt>
+                  <dd className="text-lg font-bold text-void font-mono-numbers">{SPLIT_BUYBACK_BPS / 100}%</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-400">NPC Float</dt>
+                  <dd className="text-lg font-bold text-solar font-mono-numbers">{SPLIT_MERCHANT_BPS / 100}%</dd>
+                </div>
+              </dl>
             </div>
-            <div className="p-2 rounded bg-panel-dark border border-frost/20 flex justify-between">
-              <span className="text-slate-400">Backers</span>
-              <span className="font-bold text-frost">{SPLIT_BACKER_BPS / 100}%</span>
-            </div>
-            <div className="p-2 rounded bg-panel-dark border border-void/20 flex justify-between">
-              <span className="text-slate-400">Buyback</span>
-              <span className="font-bold text-void">{SPLIT_BUYBACK_BPS / 100}%</span>
-            </div>
-            <div className="p-2 rounded bg-panel-dark border border-solar/20 flex justify-between">
-              <span className="text-slate-400">Merchant</span>
-              <span className="font-bold text-solar">{SPLIT_MERCHANT_BPS / 100}%</span>
+
+            <div className="pt-5 border-t border-white/10 space-y-2">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-300 font-bold uppercase tracking-wider">Payout &amp; Supply Rules</span>
+                <span className="text-slate-400">Verified in contract/src/lib.rs</span>
+              </div>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Boss defeat payouts settle 90% proportionally by total damage plus 10% directly to the killing strike. Unclaimed rewards wait safely in the internal ledger across epochs.
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* The Boss Brain */}
-      <section id="boss-brain" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/5">
-        <SectionHeading eyebrow="Spec // AI TEE" title="The Boss Brain" />
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          <div className="lg:col-span-7 flex flex-col gap-4">
-            <p className="text-slate-300 text-sm leading-relaxed max-w-xl">
-              An off-chain AI enclave watches the tower and signs one canonical proposal per
-              epoch: per-element buyback multipliers, an optional taunt for the raid log, and
-              the altar recipe it wants to activate. The relayer posts
-              <span className="font-mono text-frost"> apply_ai_proposal </span>
-              with the payload, chat id and Ed25519 signature — the contract verifies the
-              pinned TEE key on-chain before accepting anything.
+      {/* Section 3: AI Boss Brain & Market Simulation */}
+      <section id="boss-brain" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left: Verifiable AI Enclave */}
+          <div className="lg:col-span-6 space-y-5">
+            <h2 className="font-serif text-3xl sm:text-4xl font-bold text-white tracking-wide">
+              TEE Boss Brain &amp; Ed25519 Verification
+            </h2>
+            <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+              Every epoch, an enclave agent reads tower supply skew and signs one deterministic proposal.
+              Before mutating any multiplier or altar transmutation, the NEAR contract verifies the Ed25519 signature against its pinned TEE key.
             </p>
-            <div className="p-3 rounded-lg bg-panel-dark border border-frost/30 font-mono text-[11px] text-frost overflow-x-auto">
+
+            <div className="p-4 rounded-lg bg-panel-dark border border-frost/30 font-mono text-xs text-frost overflow-x-auto">
               spire/floor={"{floor}"}/epoch={"{epoch}"}/buyback={"{m0}-{m1}-{m2}"}/recipe={"{recipe|none}"}/nonce={"{nonce}"}
             </div>
-            <p className="text-[11px] font-mono text-slate-500">
-              The exact message bytes the enclave signs. One format, no fallbacks — a tampered
-              proposal is rejected on-chain, not trusted.
-            </p>
+
+            <div className="rounded-xl bg-panel-dark border border-white/10 divide-y divide-white/10 font-mono text-xs">
+              <div className="p-4 flex items-start justify-between gap-4">
+                <div className="flex items-center gap-2 text-white font-bold">
+                  <TrendingUp className="w-4 h-4 text-void" aria-hidden="true" />
+                  <span>Buyback Multipliers</span>
+                </div>
+                <span className="text-slate-300 text-right">
+                  {BUYBACK_MIN_BPS / 10000}.0x to {BUYBACK_MAX_BPS / 10000}.0x per element
+                </span>
+              </div>
+              <div className="p-4 flex items-start justify-between gap-4">
+                <div className="flex items-center gap-2 text-white font-bold">
+                  <Lock className="w-4 h-4 text-frost" aria-hidden="true" />
+                  <span>Altar Transmutations</span>
+                </div>
+                <span className="text-slate-300 text-right">
+                  2-to-1 / 3-to-2 gated by AI &amp; &ge;50% supply share
+                </span>
+              </div>
+              <div className="p-4 flex items-start justify-between gap-4">
+                <div className="flex items-center gap-2 text-white font-bold">
+                  <BrainCircuit className="w-4 h-4 text-hp" aria-hidden="true" />
+                  <span>Canonical Taunt</span>
+                </div>
+                <span className="text-slate-300 text-right">
+                  Signed payload stored &amp; displayed in Arena
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="lg:col-span-5 grid grid-cols-1 gap-3">
-            <div className="p-4 rounded-xl bg-panel-card border border-void/30 flex items-start gap-3">
-              <TrendingUp className="w-4 h-4 text-void mt-0.5" />
-              <div>
-                <span className="text-xs font-bold uppercase font-mono tracking-wide text-white block">
-                  Buyback multiplier
-                </span>
-                <p className="text-[11px] font-mono text-slate-400 leading-relaxed mt-1">
-                  Clamped between {(BUYBACK_MIN_BPS / 100).toFixed(0)}× base and{" "}
-                  {(BUYBACK_MAX_BPS / 100).toFixed(0)}× base per element — the AI decides which
-                  weapons the boss overpays for this epoch.
+
+          {/* Right: Vault, NPC Bonding Curve & SIMULASI CTA */}
+          <div className="lg:col-span-6 rounded-xl bg-panel-card border border-white/10 elevation-panel p-6 space-y-6">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-serif text-2xl font-bold text-white">NPC Bazaar &amp; Trophy Vault</h3>
+              <Link
+                href="/game/merchant#simulasi"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-frost/15 hover:bg-frost/25 border border-frost/40 text-frost font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 transition-colors"
+              >
+                <Play className="w-3.5 h-3.5" aria-hidden="true" />
+                Open SIMULASI
+              </Link>
+            </div>
+
+            <div className="space-y-4 text-sm text-slate-300 leading-relaxed">
+              <div className="flex items-start gap-3">
+                <Store className="w-5 h-5 text-solar shrink-0 mt-0.5" aria-hidden="true" />
+                <p>
+                  <strong className="text-white">Bonding-Curve Merchant:</strong> Starts at{" "}
+                  <span className="font-mono font-mono-numbers text-solar">{MERCHANT_BASE_PRICE_NEAR.toFixed(2)} NEAR</span>{" "}
+                  around a {MERCHANT_TARGET_STOCK}-unit stock target with a 10% spread. Every quote carries an explicit mathematical reason, and the bazaar halts below{" "}
+                  <span className="font-mono font-mono-numbers text-hp">{MERCHANT_MIN_CASH_NEAR.toFixed(1)} NEAR</span>{" "}
+                  cash reserve until funded.
+                </p>
+              </div>
+              <div className="flex items-start gap-3">
+                <Trophy className="w-5 h-5 text-jackpot shrink-0 mt-0.5" aria-hidden="true" />
+                <p>
+                  <strong className="text-white">On-Chain Conqueror NFTs:</strong> Defeating Floor 3 mints a dynamic NEP-171/NEP-177 SVG trophy encoding the final round resistance, jackpot won, and killer account ID directly in contract storage.
+                </p>
+              </div>
+              <div className="flex items-start gap-3">
+                <Coins className="w-5 h-5 text-frost shrink-0 mt-0.5" aria-hidden="true" />
+                <p>
+                  <strong className="text-white">1-Week Fast-Forward Workbench:</strong> Stress-test 168 hours of raids, merchant bank runs, and adaptive boss resistance shifts inside a 60-second client simulation labeled{" "}
+                  <span className="font-mono font-bold text-frost">SIMULASI</span>.
                 </p>
               </div>
             </div>
-            <div className="p-4 rounded-xl bg-panel-card border border-frost/30 flex items-start gap-3">
-              <Lock className="w-4 h-4 text-frost mt-0.5" />
-              <div>
-                <span className="text-xs font-bold uppercase font-mono tracking-wide text-white block">
-                  Altar recipe
-                </span>
-                <p className="text-[11px] font-mono text-slate-400 leading-relaxed mt-1">
-                  Reforge transmutations (2→1 / 3→2) only unlock while the Boss Brain keeps the
-                  recipe active. No recipe, no transmutation.
-                </p>
-              </div>
-            </div>
-            <div className="p-4 rounded-xl bg-panel-card border border-hp/30 flex items-start gap-3">
-              <BrainCircuit className="w-4 h-4 text-hp mt-0.5" />
-              <div>
-                <span className="text-xs font-bold uppercase font-mono tracking-wide text-white block">
-                  Taunt
-                </span>
-                <p className="text-[11px] font-mono text-slate-400 leading-relaxed mt-1">
-                  Optional signed trash-talk stored with the proposal and surfaced in the Boss
-                  Brain console.
-                </p>
-              </div>
+
+            <div className="pt-4 border-t border-white/10 flex flex-wrap gap-3">
+              <Link
+                href="/game/merchant#simulasi"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-white font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 transition-colors"
+              >
+                Run Market Simulation
+                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+              </Link>
+              <Link
+                href="/game/vault"
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-white/10 hover:border-white/25 text-slate-300 hover:text-white font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center transition-colors"
+              >
+                View Vault &amp; Trophies
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* The Vault */}
-      <section id="vault" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/5">
-        <SectionHeading eyebrow="Spec // internal ledger" title="The Vault" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-6 rounded-xl bg-panel-dark border border-jackpot/30 elevation-panel flex flex-col gap-3">
-            <Coins className="w-5 h-5 text-jackpot" />
-            <h3 className="font-mono text-sm font-bold uppercase tracking-widest text-white">
-              Deposit & Withdraw
-            </h3>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              The internal ledger holds your raid funds off the wire: deposit NEAR in, withdraw
-              out (or everything at once with a null amount), and spend tickets signlessly.
-            </p>
-          </div>
-          <div className="p-6 rounded-xl bg-panel-dark border border-solar/30 elevation-panel flex flex-col gap-3">
-            <VaultIcon className="w-5 h-5 text-solar" />
-            <h3 className="font-mono text-sm font-bold uppercase tracking-widest text-white">
-              Jackpot claims
-            </h3>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              When a floor boss falls, the round&apos;s jackpot is split proportionally by damage
-              with a 10% last-strike bonus. Claim per (floor, round) — unclaimed pots wait in the
-              ledger, they never vanish.
-            </p>
-          </div>
-          <div className="p-6 rounded-xl bg-panel-dark border border-frost/30 elevation-panel flex flex-col gap-3">
-            <Store className="w-5 h-5 text-frost" />
-            <h3 className="font-mono text-sm font-bold uppercase tracking-widest text-white">
-              Merchant float
-            </h3>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              A base price of {MERCHANT_BASE_PRICE_NEAR.toFixed(2)} NEAR on a stock-target curve
-              of 100 units, with a 10% two-way spread. The merchant closes automatically when its
-              cash reserve drops under 1.0 NEAR.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 p-3 rounded-lg bg-panel-dark border border-white/10 text-[11px] font-mono text-slate-500">
-          Tribute hazard: strike an element at resistance ≥ {TRIBUTE_THRESHOLD_BPS} bps and the
-          boss confiscates your weapon — unless it is starter-locked.
-        </div>
-      </section>
-
-      {/* The Spire — tail pillars */}
-      <section id="spire" className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/5">
-        <SectionHeading eyebrow="Architecture" title="SpireFi" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {PILLARS.map((pillar) => (
-            <div
-              key={pillar.title}
-              className="p-6 rounded-xl bg-panel-card border border-white/10 elevation-panel flex flex-col gap-3"
-            >
-              <div className="w-10 h-10 rounded-lg bg-panel-dark border border-white/10 flex items-center justify-center">
-                {pillar.icon}
-              </div>
-              <h3 className="font-mono text-sm font-bold uppercase tracking-widest text-white">
-                {pillar.title}
-              </h3>
-              <p className="text-sm text-slate-400 leading-relaxed">{pillar.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* CTA + footer */}
-      <section className="w-full px-6 sm:px-10 py-24 max-w-7xl mx-auto border-t border-white/5 text-center flex flex-col items-center gap-6">
-        <h2 className="font-serif text-3xl sm:text-5xl font-bold text-white tracking-[0.08em]">
-          The spire is waiting
+      {/* Bottom CTA + Footer */}
+      <section className="w-full px-6 sm:px-10 py-20 max-w-7xl mx-auto border-t border-white/10 text-center flex flex-col items-center gap-5">
+        <h2 className="font-serif text-3xl sm:text-5xl font-bold text-white tracking-wide">
+          Step Into the Obsidian Citadel
         </h2>
-        <p className="text-slate-400 text-sm max-w-lg font-mono">
-          Create your <span className="text-slate-200">&lt;name&gt;.spire.testnet</span> signless
-          session and take your first swing — the starter kit is free to claim.
+        <p className="text-slate-300 text-sm sm:text-base max-w-lg">
+          Provision a signless <span className="font-mono text-white">&lt;name&gt;.spire.testnet</span> session key and claim your starter kit for free.
         </p>
         <Link
           href="/game/start"
-          className="px-8 py-3.5 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono text-xs font-bold uppercase tracking-widest transition-colors shadow-lg shadow-solar/20"
+          className="min-h-[44px] px-8 py-3.5 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono text-xs font-bold uppercase tracking-widest inline-flex items-center gap-2 transition-colors elevation-panel"
         >
           Enter the Spire
+          <ArrowRight className="w-4 h-4" aria-hidden="true" />
         </Link>
 
-        <footer className="mt-10 pt-6 border-t border-white/5 w-full flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] font-mono text-slate-600">
-          <span>SpireFi — NEAR Testnet</span>
-          <span>v3.1 · signless Function Call combat · adaptive resistance</span>
+        <footer className="mt-12 pt-6 border-t border-white/10 w-full flex flex-col sm:flex-row items-center justify-between gap-2 text-xs font-mono text-slate-400">
+          <span>SpireFi on NEAR Testnet</span>
+          <span>v3.1 · Signless Function Call Combat · Adaptive Resistance</span>
         </footer>
       </section>
     </div>

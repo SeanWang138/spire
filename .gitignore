@@ -34,10 +34,19 @@ relayer/.env
 !web/.env.example
 !relayer/.env.example
 
-# Agent Tools, Workspaces & System-Generated Directories
+# Agent Tools, Workspaces, Skills & System-Generated Directories
 .agents/
+.agent/
+_agents/
+_agent/
 .gemini/
+.claude/
+.cursor/
+.codex/
+.opencode/
 .system_generated/
+skills-lock.json
+graphify-out/
 
 # Logs & Debugging
 logs/

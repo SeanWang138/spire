@@ -24,3 +24,18 @@ export function truncateAccountId(accountId: string, maxLen: number = 18): strin
   const half = Math.floor((maxLen - 3) / 2);
   return `${accountId.slice(0, half)}...${accountId.slice(-half)}`;
 }
+
+export function getExplorerTxUrl(txHash?: string | null): string | null {
+  if (!txHash || txHash === "pending") return null;
+  return `https://testnet.nearblocks.io/txns/${encodeURIComponent(txHash)}`;
+}
+
+/** Ensures raw inline SVG data URIs escape hash characters so hex fills render in img tags. */
+export function normalizeSvgDataUri(uri?: string | null): string | null {
+  if (!uri) return null;
+  if (uri.startsWith("data:image/svg+xml;utf8,")) {
+    const body = uri.slice("data:image/svg+xml;utf8,".length);
+    return `data:image/svg+xml;utf8,${body.replace(/#/g, "%23")}`;
+  }
+  return uri;
+}

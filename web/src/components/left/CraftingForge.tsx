@@ -3,24 +3,29 @@
 import React, { useState } from "react";
 import { Hammer, Flame, Snowflake, Sparkles, RefreshCw, Check, Lock, LockOpen } from "lucide-react";
 import { PlayerInventory } from "@/lib/contract";
-import { ALTAR_RECIPE_2_TO_1, ALTAR_RECIPE_3_TO_2 } from "@/lib/spire/constants";
+import {
+  ALTAR_RECIPE_2_TO_1,
+  ALTAR_RECIPE_3_TO_2,
+  CRAFT_ORE_COST,
+  CRAFT_ESSENCE_COST,
+} from "@/lib/spire/constants";
 
 interface CraftingForgeProps {
   inventory: PlayerInventory;
+  supplies?: [number, number, number];
   onCraft: (weaponType: "weapon:solar" | "weapon:frost" | "weapon:void") => Promise<void>;
-  /** recipe: which altar recipe is active (from the Boss Brain's signed proposal). */
   onReforge: (
     recipe: typeof ALTAR_RECIPE_2_TO_1 | typeof ALTAR_RECIPE_3_TO_2,
     burnElement: number,
     receiveElement: number
   ) => Promise<void>;
-  /** Altar recipe id currently activated by the AI (empty = none yet). */
   activeRecipe?: string;
   disabled?: boolean;
 }
 
 export const CraftingForge: React.FC<CraftingForgeProps> = ({
   inventory,
+  supplies,
   onCraft,
   onReforge,
   activeRecipe = "",
@@ -29,8 +34,8 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
   const [selectedWeapon, setSelectedWeapon] = useState<"weapon:solar" | "weapon:frost" | "weapon:void">("weapon:solar");
   const [isReforgeMode, setIsReforgeMode] = useState(false);
   const [recipe, setRecipe] = useState<typeof ALTAR_RECIPE_2_TO_1 | typeof ALTAR_RECIPE_3_TO_2>(ALTAR_RECIPE_2_TO_1);
-  const [reforgeBurn, setReforgeBurn] = useState<number>(0); // Solar
-  const [reforgeTarget, setReforgeTarget] = useState<number>(1); // Frost
+  const [reforgeBurn, setReforgeBurn] = useState<number>(0);
+  const [reforgeTarget, setReforgeTarget] = useState<number>(1);
   const [isBusy, setIsBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -40,27 +45,24 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
       element: "Solar (Amber)",
       elementColor: "text-solar",
       bgBorder: "border-solar/40 bg-solar/5",
-      glowColor: "glow-solar",
       icon: Flame,
-      req: { iron: 1, essence: 2, essenceType: "essence:solar" as const },
+      req: { iron: CRAFT_ORE_COST, essence: CRAFT_ESSENCE_COST, essenceType: "essence:solar" as const },
     },
     "weapon:frost": {
       name: "Frost Spear",
       element: "Frost (Cyan)",
       elementColor: "text-frost",
       bgBorder: "border-frost/40 bg-frost/5",
-      glowColor: "glow-frost",
       icon: Snowflake,
-      req: { iron: 1, essence: 2, essenceType: "essence:frost" as const },
+      req: { iron: CRAFT_ORE_COST, essence: CRAFT_ESSENCE_COST, essenceType: "essence:frost" as const },
     },
     "weapon:void": {
       name: "Void Scythe",
       element: "Void (Purple)",
       elementColor: "text-void",
       bgBorder: "border-void/40 bg-void/5",
-      glowColor: "glow-void",
       icon: Sparkles,
-      req: { iron: 1, essence: 2, essenceType: "essence:void" as const },
+      req: { iron: CRAFT_ORE_COST, essence: CRAFT_ESSENCE_COST, essenceType: "essence:void" as const },
     },
   };
 
@@ -75,7 +77,7 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
     setFeedback(null);
     try {
       await onCraft(selectedWeapon);
-      setFeedback(`Forged 1x ${selectedRecipe.name}!`);
+      setFeedback(`Forged 1x ${selectedRecipe.name}`);
       setTimeout(() => setFeedback(null), 3000);
     } catch (err: unknown) {
       setFeedback(err instanceof Error ? err.message : "Crafting failed");
@@ -84,22 +86,23 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
     }
   };
 
-  const weaponKeys: ("weapon:solar" | "weapon:frost" | "weapon:void")[] = [
-    "weapon:solar",
-    "weapon:frost",
-    "weapon:void",
-  ];
-
-  // Recipe gating: 2→1 is the default altar plan; 3→2 must be activated by the AI.
   const burnRequired = recipe === ALTAR_RECIPE_2_TO_1 ? 2 : 3;
   const recipeActive =
     recipe === ALTAR_RECIPE_2_TO_1
       ? activeRecipe === "" || activeRecipe === ALTAR_RECIPE_2_TO_1
       : activeRecipe === ALTAR_RECIPE_3_TO_2;
-  const burnCount = inventory.weapons[reforgeBurn] || 0;
+  const burnableCount = Math.max(
+    0,
+    (inventory.weapons[reforgeBurn] || 0) - (inventory.starter_locked[reforgeBurn] || 0)
+  );
+  const totalSupply = supplies ? supplies[0] + supplies[1] + supplies[2] : 0;
+  const sourceSupplyPct = supplies && totalSupply > 0 ? (supplies[reforgeBurn] / totalSupply) * 100 : null;
+  const shareEligible = sourceSupplyPct === null || sourceSupplyPct >= 50;
+
   const canReforge =
     recipeActive &&
-    burnCount >= burnRequired &&
+    shareEligible &&
+    burnableCount >= burnRequired &&
     reforgeBurn !== reforgeTarget &&
     !isBusy &&
     !disabled;
@@ -110,7 +113,7 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
     setFeedback(null);
     try {
       await onReforge(recipe, reforgeBurn, reforgeTarget);
-      setFeedback("Reforge transmutation complete!");
+      setFeedback("Reforge transmutation complete");
       setTimeout(() => setFeedback(null), 3000);
     } catch (err: unknown) {
       setFeedback(err instanceof Error ? err.message : "Reforge failed");
@@ -120,108 +123,107 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-panel-card border border-white/10 p-4 shadow-xl">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Hammer className="w-4 h-4 text-solar" />
+          <Hammer className="w-4 h-4 text-solar" aria-hidden="true" />
           <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
             Crafting Forge
           </h2>
         </div>
         <button
+          type="button"
           onClick={() => setIsReforgeMode(!isReforgeMode)}
-          className={`flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded border transition-colors ${
+          className={`min-h-[38px] flex items-center gap-1.5 text-xs font-mono px-3 py-1 rounded-md border transition-colors ${
             isReforgeMode
               ? "bg-void/20 border-void/50 text-void font-bold"
-              : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
+              : "bg-white/5 border-white/15 text-slate-200 hover:text-white"
           }`}
         >
-          <RefreshCw className="w-3 h-3" />
-          <span>{isReforgeMode ? "Forge Mode" : "Reforge"}</span>
+          <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>{isReforgeMode ? "Switch to Forge" : "Altar Reforge"}</span>
         </button>
       </div>
 
       {!isReforgeMode ? (
-        /* Crafting Mode */
         <div className="space-y-3">
-          {/* Weapon Selector Tabs */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-panel-dark border border-white/5">
+          {/* Weapon Selector Tabs (segmented strip, no card-in-card borders) */}
+          <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-panel-dark">
             {Object.entries(recipes).map(([key, item]) => {
               const Icon = item.icon;
               const isSelected = selectedWeapon === key;
               return (
                 <button
+                  type="button"
                   key={key}
                   onClick={() => setSelectedWeapon(key as "weapon:solar" | "weapon:frost" | "weapon:void")}
-                  className={`flex flex-col items-center py-2 px-1 rounded-md text-xs font-mono transition-all ${
+                  aria-pressed={isSelected}
+                  className={`min-h-[54px] flex flex-col items-center justify-center py-2 px-1 rounded-md text-xs font-mono transition-colors border ${
                     isSelected
-                      ? `${item.bgBorder} ${item.elementColor} font-bold shadow-md`
-                      : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                      ? `${item.bgBorder} ${item.elementColor} font-bold`
+                      : "border-transparent text-slate-300 hover:text-white hover:bg-white/5"
                   }`}
                 >
-                  <Icon className="w-4 h-4 mb-1" />
+                  <Icon className="w-4 h-4 mb-1" aria-hidden="true" />
                   <span className="truncate text-[11px]">{item.name}</span>
                 </button>
               );
             })}
           </div>
 
-          {/* Recipe Details */}
-          <div className={`p-3 rounded-lg border ${selectedRecipe.bgBorder} transition-all`}>
-            <div className="flex items-center justify-between text-xs mb-2">
+          {/* Recipe Breakdown */}
+          <div className={`p-3.5 rounded-lg border ${selectedRecipe.bgBorder}`}>
+            <div className="flex items-center justify-between text-xs mb-2.5">
               <span className="font-bold text-white">{selectedRecipe.name}</span>
-              <span className={`text-[11px] font-mono ${selectedRecipe.elementColor}`}>
+              <span className={`text-[11px] font-mono font-semibold ${selectedRecipe.elementColor}`}>
                 {selectedRecipe.element}
               </span>
             </div>
 
             <div className="space-y-1.5 text-xs font-mono">
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">Iron Ore:</span>
-                <span className={hasIron ? "text-emerald-400" : "text-hp"}>
-                  {inventory.materials["ore:iron"]} / {selectedRecipe.req.iron} req
+                <span className="text-slate-300">Iron Ore</span>
+                <span className={`font-mono-numbers font-bold ${hasIron ? "text-emerald-400" : "text-hp"}`}>
+                  {inventory.materials["ore:iron"]} / {selectedRecipe.req.iron} required
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">Elemental Essence:</span>
-                <span className={hasEssence ? "text-emerald-400" : "text-hp"}>
-                  {inventory.materials[selectedRecipe.req.essenceType]} / {selectedRecipe.req.essence} req
+                <span className="text-slate-300">Elemental Essence</span>
+                <span className={`font-mono-numbers font-bold ${hasEssence ? "text-emerald-400" : "text-hp"}`}>
+                  {inventory.materials[selectedRecipe.req.essenceType]} / {selectedRecipe.req.essence} required
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Craft Button */}
           <button
+            type="button"
             onClick={handleCraft}
             disabled={!canCraft}
-            className={`w-full py-2.5 px-4 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+            className={`min-h-[44px] w-full py-2.5 px-4 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${
               canCraft
-                ? "bg-gradient-to-r from-solar/80 to-solar hover:from-solar hover:to-solar/90 text-oled shadow-lg shadow-solar/20 active:scale-[0.99]"
-                : "bg-white/5 text-slate-500 cursor-not-allowed border border-white/5"
+                ? "bg-solar hover:bg-solar-dark text-oled"
+                : "bg-white/5 text-slate-500 cursor-not-allowed border border-white/10"
             }`}
           >
             {isBusy ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
+              <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" />
             ) : (
-              <Hammer className="w-4 h-4" />
+              <Hammer className="w-4 h-4" aria-hidden="true" />
             )}
             <span>{isBusy ? "Forging Weapon..." : `Forge ${selectedRecipe.name}`}</span>
           </button>
         </div>
       ) : (
-        /* Reforge Chamber */
-        <div className="space-y-3 p-3 rounded-lg bg-panel-dark border border-void/30">
-          <div className="text-xs text-slate-300 font-mono flex items-center gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5 text-void" />
-            <span>Altar Reforge — burn weapons of one element, receive another</span>
-          </div>
+        <div className="space-y-3 pt-1">
+          <p className="text-xs text-slate-300 font-mono leading-relaxed">
+            Burn non-starter weapons of an oversupplied (&ge;50% share) element into a rarer element.
+          </p>
 
-          {/* Recipe selector with AI activation state */}
           <div className="grid grid-cols-2 gap-2">
             {([
-              { id: ALTAR_RECIPE_2_TO_1, label: "Reforge 2 → 1", req: "burn 2" },
-              { id: ALTAR_RECIPE_3_TO_2, label: "Reforge 3 → 2", req: "burn 3" },
+              { id: ALTAR_RECIPE_2_TO_1, label: "Reforge 2 to 1", req: "burn 2" },
+              { id: ALTAR_RECIPE_3_TO_2, label: "Reforge 3 to 2", req: "burn 3" },
             ] as { id: typeof ALTAR_RECIPE_2_TO_1 | typeof ALTAR_RECIPE_3_TO_2; label: string; req: string }[]).map((r) => {
               const isActive = recipe === r.id;
               const aiActive =
@@ -230,24 +232,26 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
                   : activeRecipe === ALTAR_RECIPE_3_TO_2;
               return (
                 <button
+                  type="button"
                   key={r.id}
                   onClick={() => setRecipe(r.id)}
-                  className={`p-2 rounded-lg border text-left transition-all ${
+                  aria-pressed={isActive}
+                  className={`min-h-[52px] p-2.5 rounded-lg border text-left transition-colors ${
                     isActive
-                      ? "border-void/50 bg-void/10"
-                      : "border-white/10 hover:border-white/25"
+                      ? "border-void/60 bg-void/15"
+                      : "border-white/10 bg-panel-dark hover:border-white/25"
                   }`}
                 >
                   <div className="flex items-center justify-between text-xs font-mono font-bold text-white">
                     <span>{r.label}</span>
                     {aiActive ? (
-                      <LockOpen className="w-3.5 h-3.5 text-jackpot" />
+                      <LockOpen className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
                     ) : (
-                      <Lock className="w-3.5 h-3.5 text-slate-500" />
+                      <Lock className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
                     )}
                   </div>
-                  <div className={`text-[10px] font-mono mt-0.5 ${aiActive ? "text-jackpot" : "text-slate-500"}`}>
-                    {aiActive ? `AI recipe active · ${r.req}` : `locked — needs AI activation · ${r.req}`}
+                  <div className={`text-[11px] font-mono mt-0.5 ${aiActive ? "text-jackpot" : "text-slate-400"}`}>
+                    {aiActive ? `Active · ${r.req}` : `Locked by AI · ${r.req}`}
                   </div>
                 </button>
               );
@@ -256,27 +260,29 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
 
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
             <div>
-              <label className="text-[10px] text-slate-400 uppercase">
-                  Burn ({burnRequired} required)
-                </label>
+              <label htmlFor="reforge-burn-select" className="text-[11px] text-slate-300 uppercase block mb-1">
+                Burn ({burnRequired} free req)
+              </label>
               <select
+                id="reforge-burn-select"
                 value={reforgeBurn}
                 onChange={(e) => setReforgeBurn(Number(e.target.value))}
-                className="w-full mt-1 p-1.5 rounded bg-panel-card border border-white/10 text-white text-xs focus:outline-none focus:border-void"
+                className="w-full min-h-[44px] p-2 rounded-lg bg-panel-dark border border-white/15 text-white text-xs focus:outline-none focus:border-void"
               >
-                <option value={0}>Solar Blade ({inventory.weapons[0]})</option>
-                <option value={1}>Frost Spear ({inventory.weapons[1]})</option>
-                <option value={2}>Void Scythe ({inventory.weapons[2]})</option>
+                <option value={0}>Solar ({Math.max(0, inventory.weapons[0] - inventory.starter_locked[0])} free)</option>
+                <option value={1}>Frost ({Math.max(0, inventory.weapons[1] - inventory.starter_locked[1])} free)</option>
+                <option value={2}>Void ({Math.max(0, inventory.weapons[2] - inventory.starter_locked[2])} free)</option>
               </select>
             </div>
             <div>
-              <label className="text-[10px] text-slate-400 uppercase">
-                  Receive ({recipe === ALTAR_RECIPE_3_TO_2 ? 2 : 1})
-                </label>
+              <label htmlFor="reforge-target-select" className="text-[11px] text-slate-300 uppercase block mb-1">
+                Receive ({recipe === ALTAR_RECIPE_3_TO_2 ? 2 : 1})
+              </label>
               <select
+                id="reforge-target-select"
                 value={reforgeTarget}
                 onChange={(e) => setReforgeTarget(Number(e.target.value))}
-                className="w-full mt-1 p-1.5 rounded bg-panel-card border border-white/10 text-white text-xs focus:outline-none focus:border-void"
+                className="w-full min-h-[44px] p-2 rounded-lg bg-panel-dark border border-white/15 text-white text-xs focus:outline-none focus:border-void"
               >
                 <option value={0}>Solar Blade</option>
                 <option value={1}>Frost Spear</option>
@@ -285,29 +291,39 @@ export const CraftingForge: React.FC<CraftingForgeProps> = ({
             </div>
           </div>
 
+          {sourceSupplyPct !== null && !shareEligible && (
+            <p className="text-[11px] font-mono text-amber-300 bg-solar/10 border border-solar/30 rounded px-2.5 py-1.5">
+              Source element holds {sourceSupplyPct.toFixed(1)}% of realm supply (requires &ge;50% to burn).
+            </p>
+          )}
+
           <button
+            type="button"
             onClick={handleReforge}
             disabled={!canReforge}
-            className={`w-full py-2 px-3 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+            className={`min-h-[44px] w-full py-2.5 px-3 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${
               canReforge
-                ? "bg-void hover:bg-void/90 text-white shadow-lg shadow-void/20"
-                : "bg-white/5 text-slate-500 cursor-not-allowed border border-white/5"
+                ? "bg-void hover:bg-void-dark text-white"
+                : "bg-white/5 text-slate-500 cursor-not-allowed border border-white/10"
             }`}
           >
             {isBusy ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
             ) : (
-              <Sparkles className="w-3.5 h-3.5" />
+              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
             )}
             <span>Transmute Weapons</span>
           </button>
         </div>
       )}
 
-      {/* Feedback banner */}
       {feedback && (
-        <div className="mt-2 text-xs font-mono text-center text-emerald-400 bg-emerald-400/10 border border-emerald-400/30 rounded py-1 flex items-center justify-center gap-1.5 animate-fadeIn">
-          <Check className="w-3.5 h-3.5" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="text-xs font-mono text-center text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg py-1.5 px-2 flex items-center justify-center gap-1.5"
+        >
+          <Check className="w-3.5 h-3.5" aria-hidden="true" />
           <span>{feedback}</span>
         </div>
       )}

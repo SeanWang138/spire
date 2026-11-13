@@ -105,6 +105,9 @@ export const GATHER_AMOUNT = 2;
 export const GATHER_COOLDOWN_NS = 30_000_000_000; // 30 s
 export const GATHER_EPOCH_CAP = 20; // units per account per epoch
 
+export const CRAFT_ORE_COST = 2;
+export const CRAFT_ESSENCE_COST = 3;
+
 // --- Altar recipes (AI-activated reforge plans) -------------------------------
 
 export const ALTAR_RECIPE_2_TO_1 = "reforge_2_to_1";

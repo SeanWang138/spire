@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Coins, Timer, Trophy } from "lucide-react";
+import { Coins, Timer, Trophy, Lock, ExternalLink } from "lucide-react";
 import { BossArena } from "@/components/center/BossArena";
 import { LiveHpBar } from "@/components/center/LiveHpBar";
 import { MetaRadar } from "@/components/center/MetaRadar";
@@ -20,6 +19,7 @@ import {
   attack,
   claim_payout,
   resolve_expired,
+  update_meta,
 } from "@/lib/contract";
 import type {
   ElementIndex,
@@ -31,6 +31,7 @@ import {
   calculateRaidDamage,
   type TacticalStance,
 } from "@/lib/simulation/pricing";
+import { getExplorerTxUrl } from "@/lib/utils/cn";
 import { FLOOR_MAX_HP, FLOOR_TICKET_COST_NEAR, FROST_WARD_FLOOR, ENRAGE_FLOOR } from "@/lib/spire/constants";
 
 export default function RaidPage() {
@@ -47,8 +48,9 @@ export default function RaidPage() {
   const [selectedFloor, setSelectedFloor] = useState(1);
   const [shakeSeq, setShakeSeq] = useState(0);
   const [lastDamage, setLastDamage] = useState<number | null>(null);
-  const [busy, setBusy] = useState<"attack" | "claim" | "resolve" | null>(null);
+  const [busy, setBusy] = useState<"attack" | "claim" | "resolve" | "meta" | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [statusBanner, setStatusBanner] = useState<{ text: string; txHash?: string } | null>(null);
 
   const floors = tower.data?.floors ?? [];
   const floorData: FloorResponse | undefined =
@@ -86,8 +88,7 @@ export default function RaidPage() {
     if (!floorData || !session) return;
     setBusy("attack");
     try {
-      await attack(floor, weaponElement, stances);
-      // Visual feedback: deterministic midpoint mirror of the contract math.
+      const res = await attack(floor, weaponElement, stances);
       const STANCE_BY_ID: Record<number, TacticalStance> = {
         0: "aggressive",
         1: "feint",
@@ -107,12 +108,16 @@ export default function RaidPage() {
       if (!reduced) setShakeSeq((s) => s + 1);
       setLastDamage(projected);
       setTimeout(() => setLastDamage(null), 1400);
+      setStatusBanner({ text: `Strike sent to Floor ${floor}`, txHash: res.txHash });
       pushLog({
         accountId,
         element: (["solar", "frost", "void"] as const)[weaponElement],
         damage: projected,
         remainingHp: Math.max(0, floorData.hp - projected),
-        isConfiscated: resistances[weaponElement] >= 7000,
+        isConfiscated:
+          resistances[weaponElement] >= 7000 &&
+          (inventory.data?.starter_locked[weaponElement] ?? 0) === 0,
+        txHash: res.txHash,
       });
       tower.reload();
       if (inventory.data) inventory.reload();
@@ -126,13 +131,19 @@ export default function RaidPage() {
     if (!floorData || !session || busy) return;
     setBusy("claim");
     try {
-      await claim_payout(floorData.floor, round);
+      const res = await claim_payout(floorData.floor, round);
+      setStatusBanner({
+        text: `Payout claimed for Floor ${floorData.floor} Round ${round}`,
+        txHash: res.txHash,
+      });
       damage.reload();
       pushLog({
         accountId,
         element: "void",
         damage: 0,
-        remainingHp: 0,
+        remainingHp: floorData.hp,
+        note: "Jackpot payout claimed",
+        txHash: res.txHash,
       });
     } finally {
       setBusy(null);
@@ -143,8 +154,21 @@ export default function RaidPage() {
     if (!floorData || !session || busy) return;
     setBusy("resolve");
     try {
-      await resolve_expired(floorData.floor);
+      const res = await resolve_expired(floorData.floor);
+      setStatusBanner({ text: `Resolved expired Floor ${floorData.floor} round`, txHash: res.txHash });
       tower.reload();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleUpdateMeta = async () => {
+    if (!session || busy) return;
+    setBusy("meta");
+    try {
+      const res = await update_meta();
+      setStatusBanner({ text: "Epoch resistance shift submitted", txHash: res.txHash });
+      meta.reload();
     } finally {
       setBusy(null);
     }
@@ -152,32 +176,26 @@ export default function RaidPage() {
 
   if (!session) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-4xl mx-auto px-4 py-8">
         <EmptyState
           title="Signless session not started"
-          hint="Create your Spire account on the title screen first: your Function Call Key is generated in the browser, no wallet popups."
+          hint="Create your Spire account on the Session Key screen first so your browser generates a signless Function Call Key."
+          actionHref="/game/start"
+          actionLabel="Go to Session Key"
         />
-        <div className="mt-3 text-center">
-          <Link
-            href="/game/start"
-            className="px-4 py-2 rounded-lg bg-solar hover:bg-solar-dark text-oled text-xs font-mono font-bold uppercase tracking-wider transition-colors"
-          >
-            To Title Screen
-          </Link>
-        </div>
       </div>
     );
   }
 
   if (!contractLive || !floorData) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-4xl mx-auto px-4 py-8">
         <EmptyState
           title="Boss arena unavailable"
           hint={
             tower.error || meta.error
-              ? "Unable to connect to the Boss Arena telemetry on NEAR Testnet. Please verify your connection or reload."
-              : "Loading arena..."
+              ? "Unable to connect to Boss Arena telemetry on NEAR Testnet. Check your connection or reload."
+              : "Loading live floor and meta resistance data..."
           }
           onReload={() => {
             tower.reload();
@@ -190,121 +208,160 @@ export default function RaidPage() {
 
   const bossDown = floorData.hp === 0;
   const playerDamage = damage.data ?? 0;
-  const floorLabel = Math.min(Math.max(floorData.floor, 1), 3);
+  const txLink = getExplorerTxUrl(statusBanner?.txHash);
 
   return (
     <motion.section
       key={shakeSeq}
-      animate={{ x: [0, -5, 5, -2, 0] }}
-      transition={{ duration: 0.3 }}
+      animate={reduced ? undefined : { x: [0, -4, 4, -2, 0] }}
+      transition={{ duration: 0.25 }}
       className="px-1 py-6 flex flex-col gap-4"
     >
-      {/* Damage number pop */}
+      {/* Floating Damage Readout */}
       <AnimatePresence>
-        {lastDamage !== null && (
+        {lastDamage !== null && !reduced && (
           <motion.div
             key="dmg"
-            initial={{ opacity: 0, scale: 0.6, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: -18 }}
-            exit={{ opacity: 0, scale: 0.9, y: -40 }}
-            transition={{ type: "spring", stiffness: 400, damping: 18 }}
-            className="fixed top-24 left-1/2 z-50 -translate-x-1/2 font-mono text-4xl font-black text-solar drop-shadow-lg pointer-events-none"
+            initial={{ opacity: 0, scale: 0.7, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: -16 }}
+            exit={{ opacity: 0, scale: 0.9, y: -36 }}
+            transition={{ type: "spring", stiffness: 380, damping: 20 }}
+            className="fixed top-24 left-1/2 z-50 -translate-x-1/2 font-mono text-4xl font-black text-solar pointer-events-none"
           >
             -{lastDamage} DMG
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Floor picker — get_tower() returns all 3 parallel floors */}
-      <div className="grid grid-cols-3 gap-2">
-        {floors.length > 0
-          ? floors.map((f) => {
-              const idx = Math.min(Math.max(f.floor, 1), 3) - 1;
-              const isActive = f.floor === floorData.floor;
-              return (
-                <button
-                  key={f.floor}
-                  onClick={() => setSelectedFloor(f.floor)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
-                    isActive
-                      ? "bg-panel-card border-solar/50 shadow-lg shadow-solar/10"
-                      : "bg-panel-dark border-white/10 hover:border-white/25"
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className={`font-bold uppercase tracking-wider ${isActive ? "text-solar" : "text-slate-300"}`}>
-                      Floor {f.floor}
+      {/* Floor Selector Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        {floors.map((f) => {
+          const idx = Math.min(Math.max(f.floor, 1), 3) - 1;
+          const isActive = f.floor === floorData.floor;
+          return (
+            <button
+              type="button"
+              key={f.floor}
+              onClick={() => setSelectedFloor(f.floor)}
+              aria-pressed={isActive}
+              className={`min-h-[76px] p-3.5 rounded-xl border text-left transition-colors ${
+                isActive
+                  ? "bg-panel-card border-solar/60 elevation-panel"
+                  : "bg-panel-dark border-white/10 hover:border-white/25"
+              }`}
+            >
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className={`font-bold uppercase tracking-wider ${isActive ? "text-solar" : "text-slate-200"}`}>
+                  Floor {f.floor}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {!f.unlocked && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-amber-300">
+                      <Lock className="w-3 h-3" aria-hidden="true" /> Locked
                     </span>
-                    {f.expired && (
-                      <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                        <Timer className="w-3 h-3" /> expired
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[11px] font-mono text-slate-400">
-                    HP{" "}
-                    <span className="font-mono-numbers text-white font-bold">
-                      {f.hp}/{FLOOR_MAX_HP[idx]}
+                  )}
+                  {f.expired && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-slate-300">
+                      <Timer className="w-3 h-3" aria-hidden="true" /> Expired
                     </span>
-                  </div>
-                  <div className="text-[11px] font-mono text-slate-400">
-                    Ticket{" "}
-                    <span className="font-mono-numbers text-frost font-bold">
-                      {FLOOR_TICKET_COST_NEAR[idx].toFixed(2)} NEAR
-                    </span>
-                  </div>
-                  <div className="mt-1 flex gap-1">
-                    {f.floor === FROST_WARD_FLOOR && (
-                      <span className="text-[9px] px-1 rounded bg-frost/10 text-frost border border-frost/20">Frost Ward</span>
-                    )}
-                    {f.floor === ENRAGE_FLOOR && (
-                      <span className="text-[9px] px-1 rounded bg-hp/10 text-hp border border-hp/20">Enrage</span>
-                    )}
-                  </div>
-                </button>
-              );
-            })
-          : [1, 2, 3].map((n) => (
-              <div key={n} className="p-3 rounded-xl bg-panel-dark border border-white/10 opacity-50">
-                <span className="text-xs font-mono font-bold text-slate-500">Floor {n}</span>
+                  )}
+                </div>
               </div>
-            ))}
+              <div className="mt-1.5 flex items-baseline justify-between text-xs font-mono text-slate-300">
+                <span>
+                  HP{" "}
+                  <strong className="font-mono-numbers text-white">
+                    {f.hp}/{FLOOR_MAX_HP[idx]}
+                  </strong>
+                </span>
+                <span>
+                  Ticket{" "}
+                  <strong className="font-mono-numbers text-frost">
+                    {FLOOR_TICKET_COST_NEAR[idx].toFixed(2)} N
+                  </strong>
+                </span>
+              </div>
+              {(f.floor === FROST_WARD_FLOOR || f.floor === ENRAGE_FLOOR) && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {f.floor === FROST_WARD_FLOOR && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-frost/10 text-frost border border-frost/25">
+                      Frost Ward
+                    </span>
+                  )}
+                  {f.floor === ENRAGE_FLOOR && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-hp/10 text-hp border border-hp/25">
+                      Enrage
+                    </span>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Boss down / expired action strip */}
-      {bossDown && (
-        <div className="p-3 rounded-xl bg-jackpot/10 border border-jackpot/40 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-mono text-jackpot font-bold">
-            <Trophy className="w-4 h-4" />
-            Boss down on floor {floorData.floor} — round {round}. Claim your payout (damage:{" "}
-            <span className="font-mono-numbers">{playerDamage}</span>).
-          </div>
-          <button
-            onClick={handleClaimPayout}
-            disabled={busy !== null || playerDamage === 0}
-            className="px-4 py-1.5 rounded-lg bg-jackpot hover:bg-jackpot/90 text-oled text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40 active:scale-95"
-          >
-            {busy === "claim" ? "Sending…" : "Claim Payout"}
-          </button>
+      {/* Status Receipt Banner */}
+      {statusBanner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="px-4 py-2.5 rounded-lg bg-panel-card border border-jackpot/30 text-xs font-mono flex flex-wrap items-center justify-between gap-2"
+        >
+          <span className="text-jackpot font-semibold">{statusBanner.text}</span>
+          {txLink && (
+            <a
+              href={txLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-frost hover:underline inline-flex items-center gap-1 font-bold"
+            >
+              Inspect on NearBlocks <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+            </a>
+          )}
         </div>
       )}
-      {floorData.expired && !bossDown && (
-        <div className="p-3 rounded-xl bg-panel-dark border border-hp/40 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-mono text-hp font-bold">
-            <Timer className="w-4 h-4" />
-            Deadline for round {round} missed — anyone can resolve this round.
+
+      {/* Boss Down / Expired Banners */}
+      {bossDown && (
+        <div className="p-3.5 rounded-xl bg-jackpot/10 border border-jackpot/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-mono text-jackpot font-bold">
+            <Trophy className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>
+              Boss defeated on Floor {floorData.floor} (Round {round}). Your logged damage:{" "}
+              <span className="font-mono-numbers">{playerDamage}</span>.
+            </span>
           </div>
           <button
-            onClick={handleResolveExpired}
-            disabled={busy !== null}
-            className="px-4 py-1.5 rounded-lg bg-hp hover:bg-hp/80 text-white text-xs font-mono font-bold uppercase tracking-wider transition-all disabled:opacity-40 active:scale-95"
+            type="button"
+            onClick={handleClaimPayout}
+            disabled={busy !== null || playerDamage === 0}
+            className="min-h-[44px] px-4 py-2 rounded-lg bg-jackpot hover:bg-jackpot/90 text-oled text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
           >
-            {busy === "resolve" ? "Mengirim…" : "Resolve Expired"}
+            {busy === "claim" ? "Claiming..." : "Claim Payout"}
           </button>
         </div>
       )}
 
-      {/* Top: arena & live bars / jackpot */}
+      {floorData.expired && !bossDown && (
+        <div className="p-3.5 rounded-xl bg-panel-dark border border-hp/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-mono text-hp font-bold">
+            <Timer className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>
+              Deadline for Round {round} expired. Anyone can trigger settlement to reset the arena.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleResolveExpired}
+            disabled={busy !== null}
+            className="min-h-[44px] px-4 py-2 rounded-lg bg-hp hover:bg-hp/85 text-white text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
+          >
+            {busy === "resolve" ? "Resolving..." : "Resolve Expired"}
+          </button>
+        </div>
+      )}
+
+      {/* Top Grid: Boss + Jackpot */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3">
           <BossArena
@@ -313,6 +370,7 @@ export default function RaidPage() {
             expired={floorData.expired}
             enrage={floorData.enrage}
             wardElement={floorData.ward_element}
+            locked={!floorData.unlocked}
           />
           <LiveHpBar
             currentHp={floorData.hp}
@@ -325,24 +383,25 @@ export default function RaidPage() {
           />
         </div>
         <div className="lg:col-span-5 flex flex-col gap-3">
-          <div className="rounded-xl bg-panel-card border border-white/10 p-4 shadow-xl flex items-center justify-between text-xs font-mono">
-            <div className="flex items-center gap-2 text-slate-400">
-              <Coins className="w-4 h-4 text-jackpot" />
-              <span>Round damage-mu</span>
+          <div className="rounded-xl bg-panel-card border border-white/10 elevation-panel p-4 flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-2 text-slate-300">
+              <Coins className="w-4 h-4 text-jackpot" aria-hidden="true" />
+              <span>Your Round {round} Damage</span>
             </div>
-            <span className="font-mono-numbers text-white font-bold text-base">{playerDamage}</span>
+            <span className="font-mono-numbers text-white font-bold text-lg">{playerDamage}</span>
           </div>
           <JackpotCounter
             jackpotYocto={floorData.jackpot ?? "0"}
             playerDamage={playerDamage}
             totalDamage={Number(floorData.total_damage ?? "0")}
+            loot={floorData.loot}
             onClaimPayout={handleClaimPayout}
             disabled={busy !== null || playerDamage === 0 || !bossDown}
           />
         </div>
       </div>
 
-      {/* Bottom: combat planner / meta radar + damage feed */}
+      {/* Bottom Grid: Combat Stance Planner + Meta Radar */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         <div className="lg:col-span-8">
           <TacticalCombatStance
@@ -350,17 +409,21 @@ export default function RaidPage() {
             resistances={resistances}
             floor={floorData.floor}
             onAttack={handleAttack}
-            disabled={busy !== null || bossDown || floorData.expired}
+            disabled={busy !== null || bossDown || floorData.expired || !floorData.unlocked}
           />
         </div>
-        <div className="lg:col-span-4 flex flex-col gap-3">
-          <MetaRadar resistances={resistances} />
+        <div className="lg:col-span-4">
+          <MetaRadar
+            resistances={resistances}
+            epoch={meta.data?.epoch}
+            nextEpochInNs={meta.data?.next_epoch_in_ns}
+            onUpdateMeta={handleUpdateMeta}
+            updatingMeta={busy === "meta"}
+          />
         </div>
       </div>
 
-      <div>
-        <DamageLog logs={logs} />
-      </div>
+      <DamageLog logs={logs} />
     </motion.section>
   );
 }
