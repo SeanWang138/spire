@@ -2,14 +2,15 @@ import * as THREE from "three";
 
 export interface PbrMapSet {
   map: THREE.CanvasTexture;
-  bumpMap: THREE.CanvasTexture;
+  normalMap: THREE.CanvasTexture;
   roughnessMap: THREE.CanvasTexture;
+  aoMap: THREE.CanvasTexture;
   emissiveMap: THREE.CanvasTexture;
 }
 
 export interface SimplePbrMaps {
   map: THREE.CanvasTexture;
-  bumpMap: THREE.CanvasTexture;
+  normalMap: THREE.CanvasTexture;
   roughnessMap: THREE.CanvasTexture;
 }
 
@@ -29,10 +30,10 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-function createCanvas(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+function createCanvas(size: number, height = size): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const canvas = document.createElement("canvas");
   canvas.width = size;
-  canvas.height = size;
+  canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     throw new Error("Unable to acquire 2D context for procedural citadel texture.");
@@ -85,7 +86,6 @@ function strokeWrappedPolyline(
 
 function generateFractureBranch(
   rand: () => number,
-  size: number,
   startX: number,
   startY: number,
   baseAngle: number,
@@ -106,79 +106,161 @@ function generateFractureBranch(
 }
 
 /**
- * Generates seamless tileable PBR texture sets tailored per Citadel tier:
- * - Tier 1: Heavy staggered Volcanic Basalt ashlar blocks with branching molten magma veins.
- * - Tier 2: Vertical Glacial Slate masonry laced with glossy frost rime fractures.
- * - Tier 3: Glossy Void Obsidian monolithic plates etched with arcane circuit channels.
+ * Converts a scalar height canvas into a seamless toroidal Sobel tangent-space Normal map
+ * paired with a crevice Ambient Occlusion canvas. OpenGL tangent space (+X right, +Y up).
+ */
+function buildNormalAndAoCanvases(
+  heightCanvas: HTMLCanvasElement,
+  strength: number,
+  minAo = 0.42
+): { normalCanvas: HTMLCanvasElement; aoCanvas: HTMLCanvasElement } {
+  const w = heightCanvas.width;
+  const h = heightCanvas.height;
+  const hCtx = heightCanvas.getContext("2d")!;
+  const src = hCtx.getImageData(0, 0, w, h).data;
+
+  const [normalCanvas, nCtx] = createCanvas(w, h);
+  const [aoCanvas, aCtx] = createCanvas(w, h);
+  const nImg = nCtx.createImageData(w, h);
+  const aImg = aCtx.createImageData(w, h);
+  const nOut = nImg.data;
+  const aOut = aImg.data;
+
+  const sampleH = (x: number, y: number): number => {
+    const wx = ((x % w) + w) % w;
+    const wy = ((y % h) + h) % h;
+    return src[(wy * w + wx) * 4] / 255;
+  };
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const tl = sampleH(x - 1, y - 1);
+      const t = sampleH(x, y - 1);
+      const tr = sampleH(x + 1, y - 1);
+      const l = sampleH(x - 1, y);
+      const c = sampleH(x, y);
+      const r = sampleH(x + 1, y);
+      const bl = sampleH(x - 1, y + 1);
+      const b = sampleH(x, y + 1);
+      const br = sampleH(x + 1, y + 1);
+
+      // Sobel finite differences in Canvas orientation (y down -> v up)
+      const dx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+      const dy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+
+      let nx = -dx * strength;
+      let ny = dy * strength;
+      let nz = 1.0;
+      const invLen = 1 / Math.hypot(nx, ny, nz);
+      nx *= invLen;
+      ny *= invLen;
+      nz *= invLen;
+
+      const idx = (y * w + x) * 4;
+      nOut[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+      nOut[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      nOut[idx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      nOut[idx + 3] = 255;
+
+      // Local concavity + mortar depth for subtle crevice ambient occlusion
+      const avgNb = (tl + t + tr + l + r + bl + b + br) / 8;
+      const cavity = Math.max(0, avgNb - c) * 2.2;
+      const heightTerm = Math.max(0, Math.min(1, (c - 0.14) / 0.58));
+      const ao = Math.max(minAo, Math.min(1, minAo + (1 - minAo) * heightTerm - cavity * 0.35));
+      const aoByte = Math.round(ao * 255);
+      aOut[idx] = aoByte;
+      aOut[idx + 1] = aoByte;
+      aOut[idx + 2] = aoByte;
+      aOut[idx + 3] = 255;
+    }
+  }
+
+  nCtx.putImageData(nImg, 0, 0);
+  aCtx.putImageData(aImg, 0, 0);
+  return { normalCanvas, aoCanvas };
+}
+
+/**
+ * Generates high-definition 512px seamless tileable PBR texture sets tailored per Citadel tier:
+ * - Tier 1: Monumental staggered Volcanic Basalt ashlar blocks with branching molten magma veins.
+ * - Tier 2: Crisp vertical Glacial Slate masonry laced with glossy frost rime fractures.
+ * - Tier 3: Mirror-glossy Void Obsidian monolithic plates etched with arcane circuit channels.
  */
 export function createTierPbrTextures(
   tier: 1 | 2 | 3,
-  regTex: TextureRegistry
+  regTex: TextureRegistry,
+  repeatOverride?: { x: number; y: number }
 ): PbrMapSet {
-  const S = 256;
+  const S = 512;
   const rand = mulberry32(tier * 1337 + 97);
 
   const [colCan, colCtx] = createCanvas(S);
-  const [bumpCan, bumpCtx] = createCanvas(S);
+  const [heightCan, heightCtx] = createCanvas(S);
   const [roughCan, roughCtx] = createCanvas(S);
   const [emissCan, emissCtx] = createCanvas(S);
 
   const palette =
     tier === 1
       ? {
-          bg: "#131015",
-          stoneMin: [28, 22, 24] as const,
-          stoneVar: [18, 13, 12] as const,
-          rim: "rgba(92, 64, 42, 0.36)",
+          bg: "#100f14",
+          stoneMin: [30, 29, 34] as const,
+          stoneVar: [18, 17, 19] as const,
+          rim: "rgba(116, 108, 102, 0.32)",
           rows: 6,
           cols: 4,
-          roughBase: 184,
+          roughBase: 192,
           roughMin: 145,
-          recessRough: 238,
-          bumpBase: 192,
-          veinCount: 11,
+          recessRough: 242,
+          heightBase: 196,
+          normalStrength: 2.35,
+          minAo: 0.44,
+          veinCount: 14,
           veinSpread: 0.72,
-          repeatX: 4,
-          repeatY: 2,
+          repeatX: repeatOverride?.x ?? 3,
+          repeatY: repeatOverride?.y ?? 1.5,
         }
       : tier === 2
         ? {
-            bg: "#0e121c",
-            stoneMin: [22, 28, 42] as const,
-            stoneVar: [14, 18, 24] as const,
-            rim: "rgba(130, 184, 224, 0.28)",
+            bg: "#0c111a",
+            stoneMin: [22, 29, 43] as const,
+            stoneVar: [14, 19, 25] as const,
+            rim: "rgba(145, 196, 232, 0.28)",
             rows: 4,
             cols: 6,
-            roughBase: 188,
-            roughMin: 34, // Sharp specular frost fractures
-            recessRough: 95,
-            bumpBase: 186,
-            veinCount: 15,
+            roughBase: 186,
+            roughMin: 34,
+            recessRough: 96,
+            heightBase: 192,
+            normalStrength: 2.25,
+            minAo: 0.48,
+            veinCount: 16,
             veinSpread: 0.48,
-            repeatX: 4,
-            repeatY: 2,
+            repeatX: repeatOverride?.x ?? 2,
+            repeatY: repeatOverride?.y ?? 1.5,
           }
         : {
-            bg: "#090812",
-            stoneMin: [15, 13, 25] as const,
-            stoneVar: [10, 9, 18] as const,
-            rim: "rgba(148, 108, 212, 0.24)",
+            bg: "#080710",
+            stoneMin: [14, 12, 24] as const,
+            stoneVar: [9, 8, 16] as const,
+            rim: "rgba(154, 114, 218, 0.26)",
             rows: 3,
             cols: 8,
-            roughBase: 54, // Glossy dark obsidian glass panels
-            roughMin: 36,
+            roughBase: 52,
+            roughMin: 34,
             recessRough: 168,
-            bumpBase: 205,
+            heightBase: 208,
+            normalStrength: 2.1,
+            minAo: 0.5,
             veinCount: 12,
             veinSpread: 0.14,
-            repeatX: 4,
-            repeatY: 2,
+            repeatX: repeatOverride?.x ?? 2,
+            repeatY: repeatOverride?.y ?? 2,
           };
 
   colCtx.fillStyle = palette.bg;
   colCtx.fillRect(0, 0, S, S);
-  bumpCtx.fillStyle = "rgb(28,28,28)";
-  bumpCtx.fillRect(0, 0, S, S);
+  heightCtx.fillStyle = "rgb(26,26,26)";
+  heightCtx.fillRect(0, 0, S, S);
   roughCtx.fillStyle = `rgb(${palette.recessRough},${palette.recessRough},${palette.recessRough})`;
   roughCtx.fillRect(0, 0, S, S);
   emissCtx.fillStyle = "#000000";
@@ -186,7 +268,7 @@ export function createTierPbrTextures(
 
   const rowH = S / palette.rows;
   const colW = S / palette.cols;
-  const mortar = tier === 1 ? 3.5 : tier === 2 ? 2.8 : 2.2;
+  const mortar = tier === 1 ? 7 : tier === 2 ? 5.5 : 4.5;
 
   for (let r = 0; r < palette.rows; r++) {
     const stagger = tier === 1 && r % 2 === 1 ? colW * 0.5 : 0;
@@ -201,121 +283,130 @@ export function createTierPbrTextures(
       const cg = Math.round(palette.stoneMin[1] + shade * palette.stoneVar[1]);
       const cb = Math.round(palette.stoneMin[2] + shade * palette.stoneVar[2]);
 
+      const x0 = bx + mortar * 0.5;
+      const y0 = by + mortar * 0.5;
+
       colCtx.fillStyle = `rgb(${cr},${cg},${cb})`;
-      colCtx.fillRect(bx + mortar * 0.5, by + mortar * 0.5, bw, bh);
+      colCtx.fillRect(x0, y0, bw, bh);
 
-      // Subtle chiseled top/left bevel gleam
+      // Chiseled edge highlight & bottom/right shadow bevel on albedo
       colCtx.strokeStyle = palette.rim;
-      colCtx.lineWidth = 1.4;
-      colCtx.strokeRect(bx + mortar * 0.5 + 1, by + mortar * 0.5 + 1, bw - 2, bh - 2);
+      colCtx.lineWidth = 2;
+      colCtx.strokeRect(x0 + 1.5, y0 + 1.5, bw - 3, bh - 3);
+      colCtx.strokeStyle = "rgba(0,0,0,0.42)";
+      colCtx.lineWidth = 2;
+      colCtx.strokeRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1);
 
-      // Bump height block
-      const bVal = Math.round(palette.bumpBase + (shade - 0.5) * 34);
-      bumpCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
-      bumpCtx.fillRect(bx + mortar * 0.5, by + mortar * 0.5, bw, bh);
-      bumpCtx.strokeStyle = "rgba(95,95,95,0.85)";
-      bumpCtx.lineWidth = 2;
-      bumpCtx.strokeRect(bx + mortar * 0.5 + 0.5, by + mortar * 0.5 + 0.5, bw - 1, bh - 1);
+      // Dual-step chamfered ashlar relief heightfield
+      const bVal = Math.round(palette.heightBase + (shade - 0.5) * 32);
+      heightCtx.fillStyle = `rgb(${bVal},${bVal},${bVal})`;
+      heightCtx.fillRect(x0, y0, bw, bh);
+      heightCtx.strokeStyle = "rgb(112,112,112)";
+      heightCtx.lineWidth = 4;
+      heightCtx.strokeRect(x0 + 1.5, y0 + 1.5, bw - 3, bh - 3);
+      heightCtx.strokeStyle = "rgb(72,72,72)";
+      heightCtx.lineWidth = 2;
+      heightCtx.strokeRect(x0, y0, bw, bh);
 
       // Roughness per block
       const rVal = Math.round(palette.roughBase + (shade - 0.5) * 28);
       roughCtx.fillStyle = `rgb(${rVal},${rVal},${rVal})`;
-      roughCtx.fillRect(bx + mortar * 0.5, by + mortar * 0.5, bw, bh);
+      roughCtx.fillRect(x0, y0, bw, bh);
     }
   }
 
-  // Fine mineral grain speckles wrapped across edges
-  const speckCount = tier === 1 ? 650 : tier === 2 ? 520 : 280;
+  // Fine mineral grain pits & horizontal masonry striation
+  const speckCount = tier === 1 ? 1800 : tier === 2 ? 1400 : 750;
   for (let i = 0; i < speckCount; i++) {
     const px = rand() * S;
     const py = rand() * S;
-    const ps = 1 + rand() * 2.2;
-    const bright = rand() > 0.5;
-    colCtx.fillStyle = bright ? "rgba(255,255,255,0.035)" : "rgba(0,0,0,0.18)";
+    const ps = 1.4 + rand() * 3.4;
+    const bright = rand() > 0.52;
+    colCtx.fillStyle = bright ? "rgba(255,255,255,0.036)" : "rgba(0,0,0,0.22)";
     colCtx.fillRect(px, py, ps, ps);
 
-    const bm = bright ? 218 : 112;
-    bumpCtx.fillStyle = `rgba(${bm},${bm},${bm},0.35)`;
-    bumpCtx.fillRect(px, py, ps, ps);
+    const bm = bright ? 222 : 108;
+    heightCtx.fillStyle = `rgba(${bm},${bm},${bm},0.34)`;
+    heightCtx.fillRect(px, py, ps, ps);
   }
 
-  // Elemental fractures / icy rime fissures / void arcane circuitry (neutral white emissive mask
-  // so MeshStandardMaterial.emissive color seamlessly follows any tier color cascade!)
+  // Neutral monochrome glow channels so shader-driven uWaveColor / uTierIdleColor sweeps cleanly
   emissCtx.lineCap = "round";
   emissCtx.lineJoin = "round";
 
   if (tier === 3) {
-    // Crisp geometric vertical Void Sanctum circuit traces & node junctions
     for (let i = 0; i < palette.cols; i++) {
       const cx = i * colW + colW * 0.5;
       if (i % 2 === 0) {
+        const shift = i % 4 === 0 ? 14 : -14;
         const circuitPts: Array<[number, number]> = [
           [cx, 0],
           [cx, S * 0.28],
-          [cx + (i % 4 === 0 ? 7 : -7), S * 0.36],
-          [cx + (i % 4 === 0 ? 7 : -7), S * 0.64],
+          [cx + shift, S * 0.36],
+          [cx + shift, S * 0.64],
           [cx, S * 0.72],
           [cx, S],
         ];
-        emissCtx.strokeStyle = "rgba(185, 185, 185, 0.34)";
-        emissCtx.lineWidth = 3.2;
+        emissCtx.strokeStyle = "rgba(185, 185, 185, 0.32)";
+        emissCtx.lineWidth = 5.5;
         strokeWrappedPolyline(emissCtx, S, circuitPts);
-        emissCtx.strokeStyle = "rgba(255, 255, 255, 0.78)";
-        emissCtx.lineWidth = 1.1;
+        emissCtx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+        emissCtx.lineWidth = 2.0;
         strokeWrappedPolyline(emissCtx, S, circuitPts);
 
-        // Etched channel groove in bump & matte channel in roughness
-        bumpCtx.strokeStyle = "rgb(55, 55, 55)";
-        bumpCtx.lineWidth = 2.4;
-        strokeWrappedPolyline(bumpCtx, S, circuitPts);
+        heightCtx.strokeStyle = "rgb(52, 52, 52)";
+        heightCtx.lineWidth = 4.2;
+        strokeWrappedPolyline(heightCtx, S, circuitPts);
 
-        // Diamond glyph node midpoint
         emissCtx.fillStyle = "rgba(255,255,255,0.92)";
-        emissCtx.beginPath();
         const ny = S * 0.5;
-        const nx = cx + (i % 4 === 0 ? 7 : -7);
-        emissCtx.moveTo(nx, ny - 5);
-        emissCtx.lineTo(nx + 4.5, ny);
-        emissCtx.lineTo(nx, ny + 5);
-        emissCtx.lineTo(nx - 4.5, ny);
+        const nx = cx + shift;
+        emissCtx.beginPath();
+        emissCtx.moveTo(nx, ny - 10);
+        emissCtx.lineTo(nx + 9, ny);
+        emissCtx.lineTo(nx, ny + 10);
+        emissCtx.lineTo(nx - 9, ny);
         emissCtx.closePath();
         emissCtx.fill();
       }
     }
   } else {
-    // Tier 1 magma fissures & Tier 2 jagged ice rime veins
     for (let v = 0; v < palette.veinCount; v++) {
       const sx = rand() * S;
-      const sy = tier === 1 ? S * (0.35 + rand() * 0.6) : rand() * S;
-      const baseAngle = tier === 1 ? -Math.PI * 0.5 + (rand() - 0.5) * palette.veinSpread : rand() * Math.PI * 2;
-      const pts = generateFractureBranch(rand, S, sx, sy, baseAngle, 8 + Math.floor(rand() * 5), 11);
+      const sy = tier === 1 ? S * (0.3 + rand() * 0.66) : rand() * S;
+      const baseAngle =
+        tier === 1 ? -Math.PI * 0.5 + (rand() - 0.5) * palette.veinSpread : rand() * Math.PI * 2;
+      const pts = generateFractureBranch(rand, sx, sy, baseAngle, 9 + Math.floor(rand() * 5), 21);
 
-      // Soft outer halo on emissive mask
-      emissCtx.strokeStyle = tier === 1 ? "rgba(180, 180, 180, 0.38)" : "rgba(170, 170, 170, 0.32)";
-      emissCtx.lineWidth = tier === 1 ? 4.2 : 3.2;
+      emissCtx.strokeStyle = tier === 1 ? "rgba(175, 175, 175, 0.36)" : "rgba(165, 165, 165, 0.32)";
+      emissCtx.lineWidth = tier === 1 ? 7.2 : 5.6;
       strokeWrappedPolyline(emissCtx, S, pts);
 
-      // Razor bright vein core
-      emissCtx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-      emissCtx.lineWidth = tier === 1 ? 1.35 : 1.05;
+      emissCtx.strokeStyle = "rgba(255, 255, 255, 0.88)";
+      emissCtx.lineWidth = tier === 1 ? 2.4 : 1.9;
       strokeWrappedPolyline(emissCtx, S, pts);
 
-      // Deepened crack on bump map + specular glint on ice veins (Tier 2)
-      bumpCtx.strokeStyle = tier === 1 ? "rgb(30,30,30)" : "rgb(245,245,245)";
-      bumpCtx.lineWidth = 2.0;
-      strokeWrappedPolyline(bumpCtx, S, pts);
+      heightCtx.strokeStyle = tier === 1 ? "rgb(34,34,34)" : "rgb(238,238,238)";
+      heightCtx.lineWidth = 3.8;
+      strokeWrappedPolyline(heightCtx, S, pts);
 
       roughCtx.strokeStyle = `rgb(${palette.roughMin},${palette.roughMin},${palette.roughMin})`;
-      roughCtx.lineWidth = tier === 2 ? 3.0 : 2.2;
+      roughCtx.lineWidth = tier === 2 ? 5.2 : 4.0;
       strokeWrappedPolyline(roughCtx, S, pts);
 
       if (tier === 2) {
-        colCtx.strokeStyle = "rgba(180, 224, 255, 0.22)";
-        colCtx.lineWidth = 1.8;
+        colCtx.strokeStyle = "rgba(180, 224, 255, 0.2)";
+        colCtx.lineWidth = 3.2;
         strokeWrappedPolyline(colCtx, S, pts);
       }
     }
   }
+
+  const { normalCanvas, aoCanvas } = buildNormalAndAoCanvases(
+    heightCan,
+    palette.normalStrength,
+    palette.minAo
+  );
 
   return {
     map: toTexture(colCan, regTex, {
@@ -323,11 +414,15 @@ export function createTierPbrTextures(
       repeatY: palette.repeatY,
       srgb: true,
     }),
-    bumpMap: toTexture(bumpCan, regTex, {
+    normalMap: toTexture(normalCanvas, regTex, {
       repeatX: palette.repeatX,
       repeatY: palette.repeatY,
     }),
     roughnessMap: toTexture(roughCan, regTex, {
+      repeatX: palette.repeatX,
+      repeatY: palette.repeatY,
+    }),
+    aoMap: toTexture(aoCanvas, regTex, {
       repeatX: palette.repeatX,
       repeatY: palette.repeatY,
     }),
@@ -340,67 +435,67 @@ export function createTierPbrTextures(
 }
 
 /**
- * Generates brushed hammered bronze maps for architectural cornices, collars, and astrolabes.
+ * Generates brushed hammered bronze maps with Sobel normal relief for architectural cornices and armillaries.
  */
 export function createHammeredBrassMaps(regTex: TextureRegistry): Omit<SimplePbrMaps, "map"> {
-  const S = 128;
+  const S = 256;
   const rand = mulberry32(4207);
-  const [bumpCan, bumpCtx] = createCanvas(S);
+  const [heightCan, heightCtx] = createCanvas(S);
   const [roughCan, roughCtx] = createCanvas(S);
 
-  bumpCtx.fillStyle = "rgb(140,140,140)";
-  bumpCtx.fillRect(0, 0, S, S);
-  roughCtx.fillStyle = "rgb(82,82,82)";
+  heightCtx.fillStyle = "rgb(140,140,140)";
+  heightCtx.fillRect(0, 0, S, S);
+  roughCtx.fillStyle = "rgb(78,78,78)";
   roughCtx.fillRect(0, 0, S, S);
 
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 190; i++) {
     const cx = rand() * S;
     const cy = rand() * S;
-    const rad = 4 + rand() * 8;
-    const v = Math.round(115 + rand() * 60);
-    bumpCtx.fillStyle = `rgba(${v},${v},${v},0.35)`;
-    bumpCtx.beginPath();
-    bumpCtx.arc(cx, cy, rad, 0, Math.PI * 2);
-    bumpCtx.fill();
+    const rad = 6 + rand() * 14;
+    const v = Math.round(112 + rand() * 68);
+    heightCtx.fillStyle = `rgba(${v},${v},${v},0.36)`;
+    heightCtx.beginPath();
+    heightCtx.arc(cx, cy, rad, 0, Math.PI * 2);
+    heightCtx.fill();
 
-    const rv = Math.round(64 + rand() * 64);
-    roughCtx.fillStyle = `rgba(${rv},${rv},${rv},0.4)`;
+    const rv = Math.round(58 + rand() * 62);
+    roughCtx.fillStyle = `rgba(${rv},${rv},${rv},0.38)`;
     roughCtx.beginPath();
     roughCtx.arc(cx, cy, rad * 0.9, 0, Math.PI * 2);
     roughCtx.fill();
   }
 
-  // Brushed horizontal grain lines
   for (let y = 0; y < S; y += 2) {
-    const shade = Math.round(120 + rand() * 55);
+    const shade = Math.round(118 + rand() * 56);
     roughCtx.fillStyle = `rgba(${shade},${shade},${shade},0.16)`;
     roughCtx.fillRect(0, y, S, 1);
   }
 
+  const { normalCanvas } = buildNormalAndAoCanvases(heightCan, 1.45, 0.7);
   return {
-    bumpMap: toTexture(bumpCan, regTex, { repeatX: 6, repeatY: 1 }),
+    normalMap: toTexture(normalCanvas, regTex, { repeatX: 6, repeatY: 1 }),
     roughnessMap: toTexture(roughCan, regTex, { repeatX: 6, repeatY: 1 }),
   };
 }
 
 /**
- * Generates fractured volcanic basalt cliff rock maps for mountain ridges and viaduct bridge.
+ * Generates fractured volcanic basalt cliff rock maps for mountain ridges and ruined viaduct bridge.
  */
 export function createCliffRockMaps(regTex: TextureRegistry): SimplePbrMaps {
   const S = 256;
   const rand = mulberry32(9913);
   const [colCan, colCtx] = createCanvas(S);
-  const [bumpCan, bumpCtx] = createCanvas(S);
+  const [heightCan, heightCtx] = createCanvas(S);
   const [roughCan, roughCtx] = createCanvas(S);
 
   colCtx.fillStyle = "#12121a";
   colCtx.fillRect(0, 0, S, S);
-  bumpCtx.fillStyle = "rgb(125,125,125)";
-  bumpCtx.fillRect(0, 0, S, S);
+  heightCtx.fillStyle = "rgb(125,125,125)";
+  heightCtx.fillRect(0, 0, S, S);
   roughCtx.fillStyle = "rgb(208,208,208)";
   roughCtx.fillRect(0, 0, S, S);
 
-  for (let i = 0; i < 220; i++) {
+  for (let i = 0; i < 240; i++) {
     const x = rand() * S;
     const y = rand() * S;
     const w = 14 + rand() * 34;
@@ -410,25 +505,26 @@ export function createCliffRockMaps(regTex: TextureRegistry): SimplePbrMaps {
     colCtx.fillStyle = `rgba(${shade},${shade},${shade + 7},0.55)`;
     colCtx.fillRect(x, y, w, h);
 
-    const b = Math.round(80 + val * 115);
-    bumpCtx.fillStyle = `rgba(${b},${b},${b},0.45)`;
-    bumpCtx.fillRect(x, y, w, h);
+    const b = Math.round(78 + val * 116);
+    heightCtx.fillStyle = `rgba(${b},${b},${b},0.46)`;
+    heightCtx.fillRect(x, y, w, h);
 
-    const r = Math.round(170 + val * 65);
+    const r = Math.round(168 + val * 68);
     roughCtx.fillStyle = `rgba(${r},${r},${r},0.5)`;
     roughCtx.fillRect(x, y, w, h);
   }
 
   for (let c = 0; c < 14; c++) {
-    const pts = generateFractureBranch(rand, S, rand() * S, rand() * S, rand() * Math.PI * 2, 7, 14);
-    bumpCtx.strokeStyle = "rgb(35,35,35)";
-    bumpCtx.lineWidth = 2.2;
-    strokeWrappedPolyline(bumpCtx, S, pts);
+    const pts = generateFractureBranch(rand, rand() * S, rand() * S, rand() * Math.PI * 2, 7, 14);
+    heightCtx.strokeStyle = "rgb(35,35,35)";
+    heightCtx.lineWidth = 2.4;
+    strokeWrappedPolyline(heightCtx, S, pts);
   }
 
+  const { normalCanvas } = buildNormalAndAoCanvases(heightCan, 2.1, 0.55);
   return {
     map: toTexture(colCan, regTex, { repeatX: 14, repeatY: 10, srgb: true }),
-    bumpMap: toTexture(bumpCan, regTex, { repeatX: 14, repeatY: 10 }),
+    normalMap: toTexture(normalCanvas, regTex, { repeatX: 14, repeatY: 10 }),
     roughnessMap: toTexture(roughCan, regTex, { repeatX: 14, repeatY: 10 }),
   };
 }
@@ -466,7 +562,6 @@ export function createIceGlintTexture(regTex: TextureRegistry): THREE.CanvasText
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, S, S);
 
-  // Horizontal & vertical crisp star needle flare
   ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
   for (const [rx, ry] of [
     [c * 0.88, 2.8],
@@ -492,7 +587,6 @@ export function createArcaneDialTexture(regTex: TextureRegistry): THREE.CanvasTe
   ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
   ctx.lineCap = "round";
 
-  // Concentric calibration rings
   for (const [rad, lw] of [
     [236, 2.4],
     [214, 1.3],
@@ -505,7 +599,6 @@ export function createArcaneDialTexture(regTex: TextureRegistry): THREE.CanvasTe
     ctx.stroke();
   }
 
-  // Degree tick marks & cardinal rune notches
   for (let i = 0; i < 48; i++) {
     const a = (i * Math.PI * 2) / 48;
     const major = i % 4 === 0;
@@ -518,7 +611,6 @@ export function createArcaneDialTexture(regTex: TextureRegistry): THREE.CanvasTe
     ctx.stroke();
   }
 
-  // Dual interlocking rotated squares (sacred geometry seal)
   ctx.lineWidth = 1.6;
   for (const rot of [0, Math.PI / 4]) {
     ctx.save();
@@ -530,4 +622,74 @@ export function createArcaneDialTexture(regTex: TextureRegistry): THREE.CanvasTe
   }
 
   return toTexture(canvas, regTex, { srgb: true, clamp: true });
+}
+
+/**
+ * Generates a tileable engraved geometric rune filigree banner for orbital belts & cascade rings.
+ */
+export function createGlyphRibbonTexture(regTex: TextureRegistry): THREE.CanvasTexture {
+  const W = 512;
+  const H = 128;
+  const [canvas, ctx] = createCanvas(W, H);
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.88)";
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // Top & bottom filigree rails
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(0, 22);
+  ctx.lineTo(W, 22);
+  ctx.moveTo(0, H - 22);
+  ctx.lineTo(W, H - 22);
+  ctx.stroke();
+
+  const segments = 16;
+  const segW = W / segments;
+  for (let i = 0; i < segments; i++) {
+    const cx = i * segW + segW * 0.5;
+    const cy = H * 0.5;
+
+    // Alternating diamond runes & alchemical chevrons
+    if (i % 2 === 0) {
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 22);
+      ctx.lineTo(cx + 12, cy);
+      ctx.lineTo(cx, cy + 22);
+      ctx.lineTo(cx - 12, cy);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, cy - 15);
+      ctx.lineTo(cx, cy - 24);
+      ctx.lineTo(cx + 10, cy - 15);
+      ctx.moveTo(cx - 10, cy + 15);
+      ctx.lineTo(cx, cy + 24);
+      ctx.lineTo(cx + 10, cy + 15);
+      ctx.moveTo(cx, cy - 12);
+      ctx.lineTo(cx, cy + 12);
+      ctx.stroke();
+    }
+
+    // Rail notches
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(i * segW, 14);
+    ctx.lineTo(i * segW, 30);
+    ctx.moveTo(i * segW, H - 30);
+    ctx.lineTo(i * segW, H - 14);
+    ctx.stroke();
+  }
+
+  return toTexture(canvas, regTex, { repeatX: 2, repeatY: 1, srgb: true });
 }

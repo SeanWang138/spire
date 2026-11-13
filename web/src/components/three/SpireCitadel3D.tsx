@@ -24,6 +24,7 @@ import {
   createArcaneDialTexture,
   createBokehSparkTexture,
   createCliffRockMaps,
+  createGlyphRibbonTexture,
   createHammeredBrassMaps,
   createIceGlintTexture,
   createTierPbrTextures,
@@ -226,9 +227,9 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
 
       bloomPass = new UnrealBloomPass(
         new THREE.Vector2(initW, initH),
-        0.66,
-        0.72,
-        0.78
+        0.54,
+        0.64,
+        0.82
       );
       composer.addPass(bloomPass);
 
@@ -237,6 +238,54 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     } catch {
       composer = null;
       bloomPass = null;
+    }
+
+    // Procedural Twilight Mountain Studio IBL so hammered brass, beveled ashlar, and obsidian catch 360deg reflections
+    let envRenderTarget: THREE.WebGLRenderTarget | null = null;
+    try {
+      const pmremGen = new THREE.PMREMGenerator(renderer);
+      pmremGen.compileEquirectangularShader();
+      const iblScene = new THREE.Scene();
+      const iblGeo = new THREE.SphereGeometry(10, 24, 16);
+      const iblMat = new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        vertexShader: `
+          varying vec3 vDir;
+          void main() {
+            vDir = normalize(position);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vDir;
+          void main() {
+            float y = vDir.y;
+            vec3 nadir = vec3(0.05, 0.04, 0.07);
+            vec3 horizonWarm = vec3(0.42, 0.24, 0.12);
+            vec3 skyCool = vec3(0.12, 0.2, 0.36);
+            vec3 zenith = vec3(0.03, 0.04, 0.08);
+            vec3 col = y < 0.0
+              ? mix(horizonWarm, nadir, clamp(-y * 2.2, 0.0, 1.0))
+              : mix(horizonWarm, skyCool, smoothstep(0.0, 0.36, y));
+            col = mix(col, zenith, smoothstep(0.32, 0.92, y));
+            float keySpot = pow(max(dot(normalize(vDir), normalize(vec3(-0.6, 0.55, 0.65))), 0.0), 10.0);
+            float rimSpot = pow(max(dot(normalize(vDir), normalize(vec3(0.7, 0.35, -0.65))), 0.0), 10.0);
+            float fillSpot = pow(max(dot(normalize(vDir), normalize(vec3(0.55, 0.45, 0.72))), 0.0), 8.0);
+            col += vec3(0.95, 0.76, 0.48) * (keySpot * 0.85 + fillSpot * 0.38) + vec3(0.42, 0.72, 1.0) * rimSpot * 0.65;
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `,
+      });
+      const iblMesh = new THREE.Mesh(iblGeo, iblMat);
+      iblScene.add(iblMesh);
+      envRenderTarget = pmremGen.fromScene(iblScene, 0.04);
+      scene.environment = envRenderTarget.texture;
+      scene.environmentIntensity = 0.76;
+      iblGeo.dispose();
+      iblMat.dispose();
+      pmremGen.dispose();
+    } catch {
+      envRenderTarget = null;
     }
 
     const disposables: {
@@ -359,110 +408,187 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     scene.add(skySphere);
 
     // =========================================================================
-    // 2. THREE-POINT + ENVIRONMENTAL BOUNCE LIGHTING
+    // 2. THREE-POINT + SYMMETRICAL 360-DEGREE CITADEL BOUNCE LIGHTING
     // =========================================================================
-    const hemiLight = new THREE.HemisphereLight(0x8899bb, 0x0a080d, 0.72);
+    const hemiLight = new THREE.HemisphereLight(0x9ab0d4, 0x16121c, 0.88);
     scene.add(hemiLight);
 
-    const moonKey = new THREE.DirectionalLight(0xf6ead6, 1.35);
+    const moonKey = new THREE.DirectionalLight(0xf6ead6, 1.05);
     moonKey.position.set(-7, 11, 8);
     scene.add(moonKey);
 
-    const rimLight = new THREE.DirectionalLight(0x7dd3fc, 0.85);
-    rimLight.position.set(10, 6, -12);
+    const rimLight = new THREE.DirectionalLight(0x7dd3fc, 0.92);
+    rimLight.position.set(10, 6, -11);
     scene.add(rimLight);
 
-    // Dynamic floor & environmental bounce lights that wash surrounding cliffs & viaduct
-    const keepCoreLight = new THREE.PointLight(0xffb02e, 9.0, 24, 1.45);
-    keepCoreLight.position.set(0, -1.75, 0.8);
+    // Symmetrical core + twin keep bounce fills so Floor 1 ashlar illuminated uniformly on every bay
+    const keepCoreLight = new THREE.PointLight(0xffb02e, 7.5, 22, 1.45);
+    keepCoreLight.position.set(0, -1.75, 0);
     scene.add(keepCoreLight);
 
-    const bastionCoreLight = new THREE.PointLight(0x38bdf8, 8.0, 22, 1.45);
-    bastionCoreLight.position.set(0, 0.4, 0.8);
+    const keepFillFront = new THREE.PointLight(0xffb02e, 4.2, 18, 1.4);
+    keepFillFront.position.set(-2.4, -1.85, 3.0);
+    scene.add(keepFillFront);
+
+    const keepFillRear = new THREE.PointLight(0xffb02e, 4.2, 18, 1.4);
+    keepFillRear.position.set(2.4, -1.85, -3.0);
+    scene.add(keepFillRear);
+
+    const bastionCoreLight = new THREE.PointLight(0x38bdf8, 6.8, 22, 1.45);
+    bastionCoreLight.position.set(0, 0.4, 0);
     scene.add(bastionCoreLight);
 
-    const valleyWashLight = new THREE.PointLight(0xffb02e, 5.5, 38, 1.25);
-    valleyWashLight.position.set(0, 1.4, 2.4);
+    const valleyWashLight = new THREE.PointLight(0xffb02e, 5.2, 38, 1.25);
+    valleyWashLight.position.set(0, 1.4, 2.8);
     scene.add(valleyWashLight);
 
-    const apexAuraLight = new THREE.PointLight(0xa855f7, 8.5, 24, 1.38);
-    apexAuraLight.position.set(0, 3.6, 0.8);
+    const apexAuraLight = new THREE.PointLight(0xa855f7, 7.2, 24, 1.38);
+    apexAuraLight.position.set(0, 3.5, 0);
     scene.add(apexAuraLight);
 
     // =========================================================================
-    // 3. PROCEDURAL PBR MASONRY TEXTURES, ELEMENTAL STONE & FRESNEL BLOOMS
+    // 3. PROCEDURAL NORMAL/AO PBR MASONRY, WAVE SHADERS & LEADED CORE GLAZING
     // =========================================================================
-    const f1Maps = createTierPbrTextures(1, regTex);
-    const f2Maps = createTierPbrTextures(2, regTex);
-    const f3Maps = createTierPbrTextures(3, regTex);
+    const f1Maps = createTierPbrTextures(1, regTex, { x: 3, y: 1.5 });
+    const f2Maps = createTierPbrTextures(2, regTex, { x: 2, y: 1.5 });
+    const f3Maps = createTierPbrTextures(3, regTex, { x: 2, y: 2 });
     const brassMaps = createHammeredBrassMaps(regTex);
     const cliffMaps = createCliffRockMaps(regTex);
     const bokehSparkTex = createBokehSparkTexture(regTex);
     const iceGlintTex = createIceGlintTexture(regTex);
     const arcaneDialTex = createArcaneDialTexture(regTex);
+    const glyphRibbonTex = createGlyphRibbonTexture(regTex);
+
+    const waveShaderState = {
+      uWaveRadius: { value: 0 },
+      uWaveOriginY: { value: -2.0 },
+      uWaveDir: { value: 1 },
+      uWaveMix: { value: 0 },
+      uWaveColor: { value: new THREE.Color(0xffb02e) },
+      uWaveCrestIntensity: { value: 1.25 },
+    };
+
+    const applyCascadeWaveShader = (mat: THREE.MeshStandardMaterial) => {
+      mat.customProgramCacheKey = () => "citadel-stone-cascade-v2";
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uWaveRadius = waveShaderState.uWaveRadius;
+        shader.uniforms.uWaveOriginY = waveShaderState.uWaveOriginY;
+        shader.uniforms.uWaveDir = waveShaderState.uWaveDir;
+        shader.uniforms.uWaveMix = waveShaderState.uWaveMix;
+        shader.uniforms.uWaveColor = waveShaderState.uWaveColor;
+        shader.uniforms.uWaveCrestIntensity = waveShaderState.uWaveCrestIntensity;
+
+        shader.vertexShader = shader.vertexShader
+          .replace(
+            "#include <common>",
+            "#include <common>\nvarying vec3 vCitadelWorldPos;"
+          )
+          .replace(
+            "#include <project_vertex>",
+            "#include <project_vertex>\nvCitadelWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;"
+          );
+
+        shader.fragmentShader = shader.fragmentShader
+          .replace(
+            "#include <common>",
+            `#include <common>
+            varying vec3 vCitadelWorldPos;
+            uniform float uWaveRadius;
+            uniform float uWaveOriginY;
+            uniform float uWaveDir;
+            uniform float uWaveMix;
+            uniform vec3 uWaveColor;
+            uniform float uWaveCrestIntensity;`
+          )
+          .replace(
+            "#include <emissivemap_fragment>",
+            `#include <emissivemap_fragment>
+            if (uWaveMix > 0.001) {
+              float distAlong = uWaveDir > 0.5
+                ? (vCitadelWorldPos.y - uWaveOriginY)
+                : (uWaveDir < -0.5 ? (uWaveOriginY - vCitadelWorldPos.y) : abs(vCitadelWorldPos.y - uWaveOriginY));
+              distAlong = max(0.0, distAlong);
+              float passed = smoothstep(uWaveRadius + 0.55, uWaveRadius - 0.55, distAlong) * uWaveMix;
+              float crest = exp(-pow((distAlong - uWaveRadius) / 0.48, 2.0)) * uWaveMix;
+              float veinMask = clamp(max(totalEmissiveRadiance.r, max(totalEmissiveRadiance.g, totalEmissiveRadiance.b)), 0.0, 2.0);
+              vec3 sweepCol = uWaveColor * (0.62 + crest * uWaveCrestIntensity);
+              totalEmissiveRadiance = mix(totalEmissiveRadiance, sweepCol * veinMask, passed);
+            }`
+          );
+      };
+    };
 
     const f1StoneMat = regMat(
       new THREE.MeshStandardMaterial({
-        color: 0xc6c8d2,
+        color: 0xd4d6de,
         map: f1Maps.map,
-        bumpMap: f1Maps.bumpMap,
-        bumpScale: 0.055,
+        normalMap: f1Maps.normalMap,
+        normalScale: new THREE.Vector2(1.1, 1.1),
+        aoMap: f1Maps.aoMap,
+        aoMapIntensity: 0.85,
         roughnessMap: f1Maps.roughnessMap,
-        roughness: 0.9,
-        metalness: 0.24,
+        roughness: 0.88,
+        metalness: 0.26,
         emissive: new THREE.Color(0xffb02e),
         emissiveMap: f1Maps.emissiveMap,
-        emissiveIntensity: 0.55,
-        flatShading: true,
+        emissiveIntensity: 0.62,
       })
     );
+    applyCascadeWaveShader(f1StoneMat);
+
     const f2StoneMat = regMat(
       new THREE.MeshStandardMaterial({
-        color: 0xd6e6f5,
+        color: 0xd8e6f4,
         map: f2Maps.map,
-        bumpMap: f2Maps.bumpMap,
-        bumpScale: 0.055,
+        normalMap: f2Maps.normalMap,
+        normalScale: new THREE.Vector2(1.05, 1.05),
+        aoMap: f2Maps.aoMap,
+        aoMapIntensity: 0.85,
         roughnessMap: f2Maps.roughnessMap,
-        roughness: 0.92,
+        roughness: 0.9,
         metalness: 0.34,
         emissive: new THREE.Color(0x38bdf8),
         emissiveMap: f2Maps.emissiveMap,
-        emissiveIntensity: 0.5,
-        flatShading: true,
+        emissiveIntensity: 0.55,
       })
     );
+    applyCascadeWaveShader(f2StoneMat);
+
     const f3StoneMat = regMat(
       new THREE.MeshStandardMaterial({
-        color: 0xdad0f2,
+        color: 0xdcd4f0,
         map: f3Maps.map,
-        bumpMap: f3Maps.bumpMap,
-        bumpScale: 0.048,
+        normalMap: f3Maps.normalMap,
+        normalScale: new THREE.Vector2(0.95, 0.95),
+        aoMap: f3Maps.aoMap,
+        aoMapIntensity: 0.85,
         roughnessMap: f3Maps.roughnessMap,
-        roughness: 0.85,
-        metalness: 0.52,
+        roughness: 0.84,
+        metalness: 0.54,
         emissive: new THREE.Color(0xa855f7),
         emissiveMap: f3Maps.emissiveMap,
         emissiveIntensity: 0.62,
-        flatShading: true,
       })
     );
+    applyCascadeWaveShader(f3StoneMat);
+
     const cryoFacetMat = regMat(
       new THREE.MeshPhysicalMaterial({
         color: 0x8cdbff,
         emissive: new THREE.Color(0x1b6ca8),
-        emissiveIntensity: 0.55,
+        emissiveIntensity: 0.48,
         roughness: 0.14,
-        metalness: 0.28,
-        clearcoat: 0.85,
-        clearcoatRoughness: 0.12,
+        metalness: 0.3,
+        clearcoat: 0.88,
+        clearcoatRoughness: 0.1,
         flatShading: true,
       })
     );
     const stoneDarkMat = regMat(
       new THREE.MeshStandardMaterial({
         color: 0x161722,
-        bumpMap: cliffMaps.bumpMap,
-        bumpScale: 0.045,
+        normalMap: cliffMaps.normalMap,
+        normalScale: new THREE.Vector2(0.65, 0.65),
         roughnessMap: cliffMaps.roughnessMap,
         roughness: 0.78,
         metalness: 0.28,
@@ -473,8 +599,8 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       new THREE.MeshStandardMaterial({
         color: 0xd2d4e0,
         map: cliffMaps.map,
-        bumpMap: cliffMaps.bumpMap,
-        bumpScale: 0.09,
+        normalMap: cliffMaps.normalMap,
+        normalScale: new THREE.Vector2(1.2, 1.2),
         roughnessMap: cliffMaps.roughnessMap,
         roughness: 0.9,
         metalness: 0.18,
@@ -483,15 +609,56 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     );
     const brassTrimMat = regMat(
       new THREE.MeshStandardMaterial({
-        color: 0xc28f3a,
-        bumpMap: brassMaps.bumpMap,
-        bumpScale: 0.032,
+        color: 0xc89540,
+        normalMap: brassMaps.normalMap,
+        normalScale: new THREE.Vector2(0.55, 0.55),
         roughnessMap: brassMaps.roughnessMap,
-        roughness: 0.36,
-        metalness: 0.86,
-        flatShading: true,
+        roughness: 0.34,
+        metalness: 0.88,
       })
     );
+
+    // Recessed Gothic stained-furnace pane shader with iron frame vignette, mullion shadows, & live plasma flow
+    const createEmissiveCoreShaderMat = (hex: number) =>
+      regMat(
+        new THREE.ShaderMaterial({
+          toneMapped: false,
+          uniforms: {
+            uTime: { value: 0 },
+            uColor: { value: new THREE.Color(hex) },
+            uIntensity: { value: 1.25 },
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform float uTime;
+            uniform vec3 uColor;
+            uniform float uIntensity;
+            varying vec2 vUv;
+            void main() {
+              float edgeX = smoothstep(0.02, 0.26, vUv.x) * smoothstep(0.98, 0.74, vUv.x);
+              float edgeY = smoothstep(0.02, 0.14, vUv.y) * smoothstep(0.98, 0.86, vUv.y);
+              float mask = edgeX * edgeY;
+              float mullion = 1.0 - 0.62 * (exp(-pow((vUv.y - 0.33) * 34.0, 2.0)) + exp(-pow((vUv.y - 0.67) * 34.0, 2.0)));
+              float flow = 0.78 + 0.22 * sin(vUv.y * 15.0 - uTime * 2.2 + sin(vUv.x * 6.283));
+              float heat = mask * mullion * flow;
+              vec3 darkLead = vec3(0.03, 0.03, 0.05);
+              vec3 warmCore = mix(uColor, vec3(1.0, 0.96, 0.9), 0.26 * pow(heat, 1.8));
+              vec3 col = mix(darkLead, uColor * (0.45 + 1.05 * uIntensity * heat) + warmCore * 0.28 * uIntensity * heat, mask);
+              gl_FragColor = vec4(col, 1.0);
+            }
+          `,
+        })
+      );
+
+    const f1WindowMat = createEmissiveCoreShaderMat(0xffb02e);
+    const f2WindowMat = createEmissiveCoreShaderMat(0x38bdf8);
+    const f3WindowMat = createEmissiveCoreShaderMat(0xa855f7);
 
     const createFresnelMat = (hex: number, power: number, intensity: number) =>
       regMat(
@@ -524,41 +691,41 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
             varying vec3 vViewDir;
             void main() {
               float fresnel = pow(clamp(1.0 - abs(dot(normalize(vNormalView), normalize(vViewDir))), 0.0, 1.0), uPower);
-              float alpha = clamp(fresnel * uIntensity, 0.0, 0.9);
-              gl_FragColor = vec4(uColor * (0.95 + uIntensity * 0.65), alpha);
+              float alpha = clamp(fresnel * uIntensity, 0.0, 0.75);
+              gl_FragColor = vec4(uColor * (0.88 + uIntensity * 0.55), alpha);
             }
           `,
         })
       );
 
-    // Calibrated HDR Emitters (toneMapped: false so slits, fissures, and rings weave silky HDR bloom)
+    // Calibrated HDR Emitters for thin filigree inlays, crystal gems, & orbital motes (non-whiteout)
     const f1GlowMat = regMat(
       new THREE.MeshBasicMaterial({
-        color: makeHdrColor(0xf2a63b, 1.85),
+        color: makeHdrColor(0xf2a63b, 1.45),
         toneMapped: false,
       })
     );
     const f2GlowMat = regMat(
       new THREE.MeshBasicMaterial({
-        color: makeHdrColor(0x38bdf8, 1.85),
+        color: makeHdrColor(0x38bdf8, 1.4),
         toneMapped: false,
       })
     );
     const f3GlowMat = regMat(
       new THREE.MeshBasicMaterial({
-        color: makeHdrColor(0xa855f7, 1.95),
+        color: makeHdrColor(0xa855f7, 1.55),
         toneMapped: false,
       })
     );
     const apexCoreMat = regMat(
       new THREE.MeshBasicMaterial({
-        color: makeHdrColor(0xc084fc, 2.35),
+        color: makeHdrColor(0xc084fc, 1.95),
         toneMapped: false,
       })
     );
     const pylonGlowMat = regMat(
       new THREE.MeshBasicMaterial({
-        color: makeHdrColor(0xf2a63b, 2.0),
+        color: makeHdrColor(0xf2a63b, 1.65),
         toneMapped: false,
       })
     );
@@ -603,10 +770,10 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       const terrainMesh = new THREE.Mesh(terrainGeo, cliffRockMat);
       worldRoot.add(terrainMesh);
 
-      // Foreground Ruined Stone Viaduct leading toward the Citadel Keep Gate
+      // Foreground Ruined Stone Viaduct aligned cleanly with Floor 1 Bay #7 Portal Gatehouse
       const viaductGroup = new THREE.Group();
       viaductGroup.position.set(0, -3.52, 0);
-      viaductGroup.rotation.y = -0.36;
+      viaductGroup.rotation.y = -Math.PI / 8;
       worldRoot.add(viaductGroup);
 
       const deckGeo = regGeo(new THREE.BoxGeometry(1.75, 0.28, 11.4));
@@ -747,15 +914,15 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     citadelRoot.position.y = -0.25;
     worldRoot.add(citadelRoot);
 
-    // Stepped Cliff Pedestal & Delicate Arcane Summoning Circle
+    // Stepped Cliff Pedestal, Arcane Ground Dial & Keep Gatehouse Integration
     const pedestalGroup = new THREE.Group();
     pedestalGroup.position.y = -3.35;
     citadelRoot.add(pedestalGroup);
 
-    const daisBase = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(3.05, 3.45, 0.52, 12)), stoneDarkMat);
+    const daisBase = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(3.05, 3.45, 0.52, 8)), stoneDarkMat);
     pedestalGroup.add(daisBase);
 
-    const daisUpper = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(2.55, 2.88, 0.26, 12)), f1StoneMat);
+    const daisUpper = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(2.55, 2.88, 0.28, 8)), f1StoneMat);
     daisUpper.position.y = 0.36;
     pedestalGroup.add(daisUpper);
 
@@ -825,7 +992,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     magicDialMesh.position.y = 0.525;
     pedestalGroup.add(magicDialMesh);
 
-    // 4 Floating Perimeter Obelisks around Pedestal
+    // 4 Floating Perimeter Obelisks strictly outside dais perimeter (r = 3.62)
     const pylonsGroup = new THREE.Group();
     pedestalGroup.add(pylonsGroup);
     const obeliskGeo = regGeo(new THREE.ConeGeometry(0.16, 1.15, 4));
@@ -833,7 +1000,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     for (let i = 0; i < 4; i++) {
       const ang = (i * Math.PI) / 2 + Math.PI / 4;
       const holder = new THREE.Group();
-      holder.position.set(Math.cos(ang) * 3.15, 0.98, Math.sin(ang) * 3.15);
+      holder.position.set(Math.cos(ang) * 3.62, 0.98, Math.sin(ang) * 3.62);
       const stoneObelisk = new THREE.Mesh(obeliskGeo, f1StoneMat);
       stoneObelisk.rotation.x = Math.PI;
       const gem = new THREE.Mesh(obeliskGemGeo, pylonGlowMat);
@@ -842,7 +1009,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       pylonsGroup.add(holder);
     }
 
-    // Fine Central Skyward Light Conduit Beam
+    // Summit-Only Skyward Conduit Beam rising strictly ABOVE the apex relic (no tower penetration)
     const conduitBeamMat = regMat(
       new THREE.ShaderMaterial({
         transparent: true,
@@ -865,19 +1032,19 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
           uniform float uBoost;
           varying vec2 vUv;
           void main() {
-            float fadeY = smoothstep(0.0, 0.25, vUv.y) * (1.0 - smoothstep(0.5, 1.0, vUv.y));
+            float fadeY = smoothstep(0.0, 0.16, vUv.y) * (1.0 - smoothstep(0.45, 1.0, vUv.y));
             float edge = sin(vUv.x * 3.14159);
-            float a = fadeY * pow(edge, 2.0) * (0.14 + uBoost * 0.28);
+            float a = fadeY * pow(edge, 2.2) * (0.14 + uBoost * 0.28);
             gl_FragColor = vec4(uColor, a);
           }
         `,
       })
     );
     const conduitBeam = new THREE.Mesh(
-      regGeo(new THREE.CylinderGeometry(0.08, 0.42, 13.0, 16, 1, true)),
+      regGeo(new THREE.CylinderGeometry(0.05, 0.28, 8.5, 16, 1, true)),
       conduitBeamMat
     );
-    conduitBeam.position.y = 3.6;
+    conduitBeam.position.y = 10.1;
     citadelRoot.add(conduitBeam);
 
     // Gapless Tier Hitboxes (invisible to render & bloom, exact vertical tier bands for clean raycasting)
@@ -904,34 +1071,91 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     registerHitbox(1.88, 2.30, 2.03, 0.275, 2);
     registerHitbox(1.42, 1.80, 5.18, 3.88, 3);
 
-    // --- FLOOR 1: Foundation Keep (Volcanic Ashlar Basalt + Parapet Braziers + Magma Aura) ---
+    // Helper: Build a flush, wall-batter-aligned recessed Gothic lancet bay (0 Z-fighting, 0 coplanar faces)
+    const addFlushGothicWindow = (
+      parent: THREE.Group,
+      wallRadiusMid: number,
+      wallSlope: number,
+      paneW: number,
+      paneH: number,
+      paneMat: THREE.Material
+    ) => {
+      const slopeWrap = new THREE.Group();
+      slopeWrap.position.set(0, 0.02, wallRadiusMid);
+      slopeWrap.rotation.x = -wallSlope;
+
+      const jambW = 0.055;
+      const jambH = paneH + 0.14;
+      const jambGeo = regGeo(new THREE.BoxGeometry(jambW, jambH, 0.1));
+      const leftJamb = new THREE.Mesh(jambGeo, stoneDarkMat);
+      leftJamb.position.set(-(paneW * 0.5 + jambW * 0.5), 0, 0.045);
+      const rightJamb = new THREE.Mesh(jambGeo, stoneDarkMat);
+      rightJamb.position.set(paneW * 0.5 + jambW * 0.5, 0, 0.045);
+
+      const hoodGeo = regGeo(new THREE.ConeGeometry(paneW * 0.85, 0.2, 4));
+      const hood = new THREE.Mesh(hoodGeo, brassTrimMat);
+      hood.rotation.y = Math.PI / 4;
+      hood.position.set(0, jambH * 0.5 + 0.07, 0.045);
+
+      const sillGeo = regGeo(new THREE.BoxGeometry(paneW + jambW * 2.2, 0.055, 0.12));
+      const sill = new THREE.Mesh(sillGeo, brassTrimMat);
+      sill.position.set(0, -jambH * 0.5 - 0.01, 0.05);
+
+      const backing = new THREE.Mesh(
+        regGeo(new THREE.BoxGeometry(paneW + 0.02, paneH + 0.04, 0.02)),
+        stoneDarkMat
+      );
+      backing.position.set(0, 0, 0.024);
+
+      const glassPane = new THREE.Mesh(regGeo(new THREE.PlaneGeometry(paneW, paneH)), paneMat);
+      glassPane.position.set(0, 0, 0.046);
+
+      const mullionVert = new THREE.Mesh(
+        regGeo(new THREE.BoxGeometry(0.018, paneH, 0.024)),
+        brassTrimMat
+      );
+      mullionVert.position.set(0, 0, 0.068);
+
+      slopeWrap.add(leftJamb, rightJamb, hood, sill, backing, glassPane, mullionVert);
+      parent.add(slopeWrap);
+    };
+
+    // --- FLOOR 1: Foundation Keep (Symmetrical 8-Bay Volcanic Basalt + Keep Gatehouse Portal + Parapet Braziers) ---
     const floor1Group = new THREE.Group();
     floor1Group.position.y = -1.85;
     citadelRoot.add(floor1Group);
 
-    const f1Body = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.48, 1.92, 2.25, 12)), f1StoneMat);
+    const f1Body = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.48, 1.92, 2.25, 8)), f1StoneMat);
     floor1Group.add(f1Body);
 
-    const f1FresnelMat = createFresnelMat(0xffb02e, 2.7, 0.42);
+    const f1Skirt = new THREE.Mesh(
+      regGeo(new THREE.CylinderGeometry(1.92, 2.18, 0.36, 8)),
+      stoneDarkMat
+    );
+    f1Skirt.position.y = -0.98;
+    floor1Group.add(f1Skirt);
+
+    const f1FresnelMat = createFresnelMat(0xffb02e, 3.0, 0.28);
     const f1FresnelShell = new THREE.Mesh(
-      regGeo(new THREE.CylinderGeometry(1.56, 2.02, 2.24, 16, 1, true)),
+      regGeo(new THREE.CylinderGeometry(1.52, 1.97, 2.22, 16, 1, true)),
       f1FresnelMat
     );
     floor1Group.add(f1FresnelShell);
 
-    const f1Cornice = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.66, 1.56, 0.18, 12)), brassTrimMat);
+    const f1Cornice = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.66, 1.54, 0.18, 8)), brassTrimMat);
     f1Cornice.position.y = 1.08;
     floor1Group.add(f1Cornice);
 
-    // 8 Gothic Ribbed Flying Buttresses, Recessed Furnace Lancets & Parapet Forge Braziers
-    const buttressPierGeo = regGeo(new THREE.BoxGeometry(0.24, 1.95, 0.54));
-    const buttressArchGeo = regGeo(new THREE.BoxGeometry(0.18, 0.95, 0.24));
-    const lancetFrameGeo = regGeo(new THREE.BoxGeometry(0.24, 1.18, 0.14));
-    const lancetSlitGeo = regGeo(new THREE.BoxGeometry(0.075, 0.96, 0.06));
-    const spireletGeo = regGeo(new THREE.ConeGeometry(0.13, 0.56, 4));
+    // 8 Symmetric Corner Buttresses + Wall-Batter-Aligned Recessed Forge Embrasures + Viaduct Gatehouse
+    const buttressPierGeo = regGeo(new THREE.BoxGeometry(0.24, 1.98, 0.48));
+    const buttressArchGeo = regGeo(new THREE.BoxGeometry(0.18, 0.92, 0.22));
+    const spireletGeo = regGeo(new THREE.ConeGeometry(0.125, 0.52, 4));
     const brazierBowlGeo = regGeo(new THREE.CylinderGeometry(0.11, 0.06, 0.12, 6));
-    const brazierFlameGeo = regGeo(new THREE.OctahedronGeometry(0.075, 0));
+    const brazierFlameGeo = regGeo(new THREE.OctahedronGeometry(0.068, 0));
     const f1BrazierGems: THREE.Mesh[] = [];
+
+    const f1FaceMidR = 1.7 * Math.cos(Math.PI / 8); // exact apothem on 8-gon at y=0
+    const f1WallSlope = Math.atan2((1.92 - 1.48) * Math.cos(Math.PI / 8), 2.25);
 
     for (let i = 0; i < 8; i++) {
       const ang = (i * Math.PI * 2) / 8;
@@ -939,65 +1163,114 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       bWrap.rotation.y = ang;
 
       const outerPier = new THREE.Mesh(buttressPierGeo, stoneDarkMat);
-      outerPier.position.set(0, -0.18, 1.92);
+      outerPier.position.set(0, -0.18, 1.9);
       const pinnacle = new THREE.Mesh(spireletGeo, f1StoneMat);
-      pinnacle.position.set(0, 1.08, 1.92);
+      pinnacle.rotation.y = Math.PI / 4;
+      pinnacle.position.set(0, 1.07, 1.9);
       const archStrut = new THREE.Mesh(buttressArchGeo, f1StoneMat);
-      archStrut.position.set(0, 0.35, 1.65);
-      archStrut.rotation.x = -0.45;
+      archStrut.position.set(0, 0.36, 1.66);
+      archStrut.rotation.x = -0.44;
       bWrap.add(outerPier, pinnacle, archStrut);
 
-      // Recessed molten furnace lancet + parapet forge brazier between buttresses
       const wWrap = new THREE.Group();
       wWrap.rotation.y = ang + Math.PI / 8;
-      const frame = new THREE.Mesh(lancetFrameGeo, stoneDarkMat);
-      frame.position.set(0, 0.04, 1.68);
-      const slit = new THREE.Mesh(lancetSlitGeo, f1GlowMat);
-      slit.position.set(0, 0.04, 1.72);
+
+      if (i === 7) {
+        // Grand Fortress Portal Gatehouse directly receiving the ruined stone viaduct bridge
+        const gateTowerGeo = regGeo(new THREE.BoxGeometry(0.26, 1.65, 0.42));
+        const leftTower = new THREE.Mesh(gateTowerGeo, stoneDarkMat);
+        leftTower.position.set(-0.38, -0.3, 1.95);
+        const rightTower = new THREE.Mesh(gateTowerGeo, stoneDarkMat);
+        rightTower.position.set(0.38, -0.3, 1.95);
+
+        const archLint = new THREE.Mesh(regGeo(new THREE.BoxGeometry(1.04, 0.16, 0.48)), stoneDarkMat);
+        archLint.position.set(0, 0.5, 1.98);
+        const archTrim = new THREE.Mesh(regGeo(new THREE.BoxGeometry(1.1, 0.06, 0.52)), brassTrimMat);
+        archTrim.position.set(0, 0.6, 1.98);
+        const gateGable = new THREE.Mesh(regGeo(new THREE.ConeGeometry(0.46, 0.38, 4)), f1StoneMat);
+        gateGable.rotation.y = Math.PI / 4;
+        gateGable.position.set(0, 0.82, 1.96);
+        const portalBacking = new THREE.Mesh(
+          regGeo(new THREE.BoxGeometry(0.56, 1.18, 0.04)),
+          stoneDarkMat
+        );
+        portalBacking.position.set(0, -0.48, 1.84);
+        const portalGlow = new THREE.Mesh(regGeo(new THREE.PlaneGeometry(0.46, 1.02)), f1WindowMat);
+        portalGlow.position.set(0, -0.48, 1.88);
+        for (const barX of [-0.15, 0, 0.15]) {
+          const bar = new THREE.Mesh(regGeo(new THREE.BoxGeometry(0.032, 1.04, 0.035)), brassTrimMat);
+          bar.position.set(barX, -0.48, 1.92);
+          wWrap.add(bar);
+        }
+        const gateApron = new THREE.Mesh(
+          regGeo(new THREE.BoxGeometry(1.16, 0.24, 0.72)),
+          f1StoneMat
+        );
+        gateApron.position.set(0, -1.24, 2.26);
+
+        for (const sx of [-0.38, 0.38]) {
+          const sBowl = new THREE.Mesh(brazierBowlGeo, brassTrimMat);
+          sBowl.position.set(sx, 0.68, 2.02);
+          const sFlame = new THREE.Mesh(brazierFlameGeo, f1GlowMat);
+          sFlame.position.set(sx, 0.8, 2.02);
+          sFlame.scale.set(0.75, 1.2, 0.75);
+          wWrap.add(sBowl, sFlame);
+        }
+        wWrap.add(leftTower, rightTower, archLint, archTrim, gateGable, portalBacking, portalGlow, gateApron);
+      } else {
+        addFlushGothicWindow(wWrap, f1FaceMidR, f1WallSlope, 0.145, 0.94, f1WindowMat);
+      }
+
+      // Anchored Parapet Forge Braziers cleanly on Floor 1 Brass Cornice
       const bowl = new THREE.Mesh(brazierBowlGeo, brassTrimMat);
       bowl.position.set(0, 1.2, 1.56);
       const flame = new THREE.Mesh(brazierFlameGeo, f1GlowMat);
       flame.position.set(0, 1.32, 1.56);
-      flame.scale.set(0.8, 1.3, 0.8);
+      flame.scale.set(0.8, 1.25, 0.8);
       f1BrazierGems.push(flame);
-      wWrap.add(frame, slit, bowl, flame);
+      wWrap.add(bowl, flame);
 
       floor1Group.add(bWrap, wWrap);
     }
 
+    // Forged Brass Outer Keep Runic Belt (r = 2.68 -> strictly >= 0.40m outside buttresses & gatehouse)
     const f1OrbitRingGroup = new THREE.Group();
     floor1Group.add(f1OrbitRingGroup);
-    const f1ArcGeo = regGeo(new THREE.TorusGeometry(2.38, 0.022, 8, 18, Math.PI * 0.24));
-    const f1SatGeo = regGeo(new THREE.OctahedronGeometry(0.11, 0));
+    const f1BrassBelt = new THREE.Mesh(regGeo(new THREE.TorusGeometry(2.68, 0.022, 8, 48)), brassTrimMat);
+    f1BrassBelt.rotation.x = Math.PI / 2;
+    f1BrassBelt.position.y = -0.25;
+    f1OrbitRingGroup.add(f1BrassBelt);
+    const f1ArcGeo = regGeo(new THREE.TorusGeometry(2.68, 0.011, 8, 18, Math.PI * 0.22));
+    const f1SatGeo = regGeo(new THREE.OctahedronGeometry(0.1, 0));
     for (let i = 0; i < 6; i++) {
       const arc = new THREE.Mesh(f1ArcGeo, f1GlowMat);
       arc.rotation.x = Math.PI / 2;
       arc.rotation.z = (i * Math.PI * 2) / 6;
-      arc.position.y = -0.35;
+      arc.position.y = -0.22;
       f1OrbitRingGroup.add(arc);
     }
     for (let i = 0; i < 4; i++) {
       const sat = new THREE.Mesh(f1SatGeo, f1GlowMat);
       const a = (i * Math.PI * 2) / 4;
-      sat.position.set(Math.cos(a) * 2.52, -0.32, Math.sin(a) * 2.52);
+      sat.position.set(Math.cos(a) * 2.74, -0.22, Math.sin(a) * 2.74);
       f1OrbitRingGroup.add(sat);
     }
 
-    // --- FLOOR 2: Glacial Bastion (Rime-Veined Slate + Cryo Shards + Waist Frost Mist Collar) ---
+    // --- FLOOR 2: Glacial Bastion (Symmetrical 8-Bay Rime Slate + Socketed Cryo Clusters + Outer Crystal Ring) ---
     const floor2Group = new THREE.Group();
     floor2Group.position.y = 0.36;
     citadelRoot.add(floor2Group);
 
-    const f2Plinth = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.42, 1.62, 0.22, 12)), f2StoneMat);
+    const f2Plinth = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.42, 1.62, 0.24, 8)), f2StoneMat);
     f2Plinth.position.y = -1.04;
     floor2Group.add(f2Plinth);
 
     const f2Body = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(1.06, 1.38, 1.95, 8)), f2StoneMat);
     floor2Group.add(f2Body);
 
-    const f2FresnelMat = createFresnelMat(0x38bdf8, 2.5, 0.44);
+    const f2FresnelMat = createFresnelMat(0x38bdf8, 2.9, 0.28);
     const f2FresnelShell = new THREE.Mesh(
-      regGeo(new THREE.CylinderGeometry(1.13, 1.46, 1.96, 12, 1, true)),
+      regGeo(new THREE.CylinderGeometry(1.09, 1.42, 1.94, 16, 1, true)),
       f2FresnelMat
     );
     floor2Group.add(f2FresnelShell);
@@ -1006,7 +1279,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     f2Trim.position.y = 0.96;
     floor2Group.add(f2Trim);
 
-    // Mid-waist Swirling Glacial Mist Collar marking Floor 1 -> Floor 2 thermal divide
+    // Mid-waist Swirling Glacial Mist Collar seated strictly on Floor 1->2 gallery ledger
     const midMistMat = regMat(
       new THREE.ShaderMaterial({
         transparent: true,
@@ -1035,12 +1308,12 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
             vec2 p = (vUv - 0.5) * 2.0;
             float r = length(p);
             float ang = atan(p.y, p.x);
-            float radialMask = smoothstep(0.45, 0.62, r) * (1.0 - smoothstep(0.75, 1.0, r));
+            float radialMask = smoothstep(0.5, 0.65, r) * (1.0 - smoothstep(0.76, 1.0, r));
             float swirl = 0.5 + 0.5 * sin(ang * 5.0 - uTime * 0.9 + r * 6.0);
             float swirl2 = 0.5 + 0.5 * cos(ang * 3.0 + uTime * 0.65 - r * 4.0);
             float vapor = radialMask * (0.45 + 0.55 * swirl * swirl2);
-            float a = clamp(vapor * (0.28 + uBoost * 0.34), 0.0, 0.72);
-            gl_FragColor = vec4(uColor * (0.95 + uBoost * 0.5), a);
+            float a = clamp(vapor * (0.24 + uBoost * 0.3), 0.0, 0.68);
+            gl_FragColor = vec4(uColor * (0.9 + uBoost * 0.45), a);
           }
         `,
       })
@@ -1050,59 +1323,72 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     midMistMesh.position.y = -0.88;
     floor2Group.add(midMistMesh);
 
-    const f2WindowGeo = regGeo(new THREE.BoxGeometry(0.065, 0.95, 0.05));
-    const cryoColGeo = regGeo(new THREE.CylinderGeometry(0.09, 0.14, 1.55, 6));
-    const cryoTipGeo = regGeo(new THREE.OctahedronGeometry(0.18, 0));
-    const cryoSpireGeo = regGeo(new THREE.ConeGeometry(0.1, 0.58, 5));
+    const cryoColGeo = regGeo(new THREE.CylinderGeometry(0.085, 0.13, 1.55, 6));
+    const cryoTipGeo = regGeo(new THREE.OctahedronGeometry(0.16, 0));
+    const cryoSpireGeo = regGeo(new THREE.ConeGeometry(0.095, 0.56, 5));
+    const cryoSocketGeo = regGeo(new THREE.CylinderGeometry(0.14, 0.18, 0.24, 6));
     const f2CrystalsGroup = new THREE.Group();
     floor2Group.add(f2CrystalsGroup);
 
-    for (let i = 0; i < 6; i++) {
-      const ang = (i * Math.PI * 2) / 6;
+    // Hammered-brass orbital track carrying cryo fragments cleanly outside bastion sockets (r = 2.26)
+    const f2OrbitBrass = new THREE.Mesh(regGeo(new THREE.TorusGeometry(2.26, 0.018, 8, 48)), brassTrimMat);
+    f2OrbitBrass.rotation.x = Math.PI / 2;
+    f2OrbitBrass.position.y = 0.04;
+    f2CrystalsGroup.add(f2OrbitBrass);
 
-      // Attached tall gothic lancet mullions + glowing frost core slits
+    const f2FaceMidR = 1.22 * Math.cos(Math.PI / 8);
+    const f2WallSlope = Math.atan2((1.38 - 1.06) * Math.cos(Math.PI / 8), 1.95);
+
+    for (let i = 0; i < 8; i++) {
+      const ang = (i * Math.PI * 2) / 8;
+
+      // Flush Bastion Window aligned to octagonal wall facet (0 horizontal crossing clutter)
       const lancetWrap = new THREE.Group();
-      lancetWrap.rotation.y = ang + Math.PI / 6;
-      const frostSlit = new THREE.Mesh(f2WindowGeo, f2GlowMat);
-      frostSlit.position.set(0, 0.02, 1.24);
+      lancetWrap.rotation.y = ang + Math.PI / 8;
+      addFlushGothicWindow(lancetWrap, f2FaceMidR, f2WallSlope, 0.115, 0.9, f2WindowMat);
+
+      const iceSocket = new THREE.Mesh(cryoSocketGeo, stoneDarkMat);
+      iceSocket.position.set(0, -0.88, 1.48);
       const baseIceSpike = new THREE.Mesh(cryoSpireGeo, cryoFacetMat);
-      baseIceSpike.position.set(0, -0.78, 1.54);
-      baseIceSpike.rotation.x = 0.52;
-      lancetWrap.add(frostSlit, baseIceSpike);
+      baseIceSpike.position.set(0, -0.68, 1.58);
+      baseIceSpike.rotation.x = 0.48;
+      lancetWrap.add(iceSocket, baseIceSpike);
       floor2Group.add(lancetWrap);
 
-      // Cantilevered flanking stone pinnacle + suspended glowing cryo prism
+      // Corner Stone Column + Socketed Cryo Crystal Finial
       const colWrap = new THREE.Group();
       colWrap.rotation.y = ang;
       const stonePin = new THREE.Mesh(cryoColGeo, stoneDarkMat);
-      stonePin.position.set(0, -0.04, 1.52);
-      const crystalHead = new THREE.Mesh(cryoTipGeo, f2GlowMat);
-      crystalHead.position.set(0, 0.72, 1.52);
-      crystalHead.scale.set(0.6, 1.25, 0.6);
+      stonePin.position.set(0, -0.04, 1.48);
+      const crystalHead = new THREE.Mesh(cryoTipGeo, cryoFacetMat);
+      crystalHead.position.set(0, 0.72, 1.48);
+      crystalHead.scale.set(0.62, 1.28, 0.62);
       colWrap.add(stonePin, crystalHead);
       floor2Group.add(colWrap);
 
-      // Orbiting faceted glacier diamond fragments + broken cryo rune arcs
+      // Outer Orbiting Faceted Crystals & Thin Glow Inlay (r = 2.26, >= 0.56m clear of masonry)
       const orbitCrystal = new THREE.Mesh(cryoTipGeo, f2GlowMat);
       orbitCrystal.position.set(
-        Math.cos(ang) * 1.96,
-        i % 2 === 0 ? 0.16 : -0.16,
-        Math.sin(ang) * 1.96
+        Math.cos(ang) * 2.28,
+        i % 2 === 0 ? 0.14 : -0.08,
+        Math.sin(ang) * 2.28
       );
-      orbitCrystal.scale.set(0.45, 1.2, 0.45);
+      orbitCrystal.scale.set(0.42, 1.15, 0.42);
       f2CrystalsGroup.add(orbitCrystal);
 
-      const f2Arc = new THREE.Mesh(
-        regGeo(new THREE.TorusGeometry(1.78, 0.018, 8, 16, Math.PI * 0.22)),
-        f2GlowMat
-      );
-      f2Arc.rotation.x = Math.PI / 2;
-      f2Arc.rotation.z = ang + 0.12;
-      f2Arc.position.y = 0.08;
-      f2CrystalsGroup.add(f2Arc);
+      if (i % 2 === 0) {
+        const f2Arc = new THREE.Mesh(
+          regGeo(new THREE.TorusGeometry(2.26, 0.009, 8, 16, Math.PI * 0.2)),
+          f2GlowMat
+        );
+        f2Arc.rotation.x = Math.PI / 2;
+        f2Arc.rotation.z = ang + 0.14;
+        f2Arc.position.y = 0.04;
+        f2CrystalsGroup.add(f2Arc);
+      }
     }
 
-    // --- FLOOR 3: Void Apex Sanctum (Obsidian Circuit Monolith + Fresnel Veil + Astrolabe Nodes) ---
+    // --- FLOOR 3: Void Apex Sanctum (8-Bay Obsidian + Fluted Roof Ribs + Brass Armillaries + Non-Clipping Finial) ---
     const floor3Group = new THREE.Group();
     floor3Group.position.y = 2.42;
     citadelRoot.add(floor3Group);
@@ -1114,104 +1400,137 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     const f3Body = new THREE.Mesh(regGeo(new THREE.CylinderGeometry(0.62, 0.98, 1.85, 8)), f3StoneMat);
     floor3Group.add(f3Body);
 
-    // Gothic roof pinnacle needle rising gracefully to crown
     const f3SpireRoof = new THREE.Mesh(regGeo(new THREE.ConeGeometry(0.7, 2.25, 8)), f3StoneMat);
     f3SpireRoof.position.y = 2.02;
     floor3Group.add(f3SpireRoof);
 
-    // Translucent Additive Fresnel Void Aura sheathing upper spire & apex diamond
-    const f3FresnelMat = createFresnelMat(0xa855f7, 2.4, 0.56);
+    // Tight Silhouette-Matched Void Fresnel Veil sheathing spire roof
+    const f3FresnelMat = createFresnelMat(0xa855f7, 2.9, 0.34);
     const f3FresnelShell = new THREE.Mesh(
-      regGeo(new THREE.ConeGeometry(0.84, 2.55, 16, 1, true)),
+      regGeo(new THREE.ConeGeometry(0.75, 2.32, 16, 1, true)),
       f3FresnelMat
     );
-    f3FresnelShell.position.y = 2.04;
+    f3FresnelShell.position.y = 2.02;
     floor3Group.add(f3FresnelShell);
 
-    // 8 Flaring Obsidian Crown Pinnacles + Slender Violet Runic Lancet Slits
     const crownGroup = new THREE.Group();
     floor3Group.add(crownGroup);
-    const hornGeo = regGeo(new THREE.ConeGeometry(0.11, 1.25, 4));
-    const voidSlitGeo = regGeo(new THREE.BoxGeometry(0.055, 1.05, 0.04));
+    const hornGeo = regGeo(new THREE.ConeGeometry(0.09, 0.92, 4));
+    const roofRibGeo = regGeo(new THREE.BoxGeometry(0.05, 2.32, 0.07));
+    const roofSlope = Math.atan2(0.7, 2.25);
+
+    const f3FaceMidR = 0.8 * Math.cos(Math.PI / 8);
+    const f3WallSlope = Math.atan2((0.98 - 0.62) * Math.cos(Math.PI / 8), 1.85);
 
     for (let i = 0; i < 8; i++) {
       const ang = (i * Math.PI * 2) / 8;
-      const hornWrap = new THREE.Group();
-      hornWrap.rotation.y = ang;
-      const horn = new THREE.Mesh(hornGeo, f3StoneMat);
-      horn.position.set(0, 1.15, 0.86);
-      horn.rotation.x = -0.18;
-      const slit = new THREE.Mesh(voidSlitGeo, f3GlowMat);
-      slit.position.set(0, -0.05, 0.82);
-      hornWrap.add(horn, slit);
-      crownGroup.add(hornWrap);
+
+      // Flush recessed Void Sanctum gothic slit bay on octagonal face
+      const faceWrap = new THREE.Group();
+      faceWrap.rotation.y = ang + Math.PI / 8;
+      addFlushGothicWindow(faceWrap, f3FaceMidR, f3WallSlope, 0.095, 0.92, f3WindowMat);
+      floor3Group.add(faceWrap);
+
+      // Corner ridge: tucked gothic cornice horn + fluted spire edge-rib climbing up to finial cradle
+      const ridgeWrap = new THREE.Group();
+      ridgeWrap.rotation.y = ang;
+      const horn = new THREE.Mesh(hornGeo, brassTrimMat);
+      horn.rotation.y = Math.PI / 4;
+      horn.position.set(0, 1.08, 0.78);
+      horn.rotation.x = -0.14;
+
+      const rib = new THREE.Mesh(roofRibGeo, stoneDarkMat);
+      rib.position.set(0, 2.0, 0.34);
+      rib.rotation.x = -roofSlope;
+
+      ridgeWrap.add(horn, rib);
+      crownGroup.add(ridgeWrap);
     }
 
-    // 4 Floating Obsidian Monolith Fin Blades around upper Void Sanctum
+    // 4 Floating Obsidian Monolith Fin Blades stationed outside armillary rings (r = 1.84)
     const finGeo = regGeo(new THREE.OctahedronGeometry(0.14, 0));
     for (let i = 0; i < 4; i++) {
       const ang = (i * Math.PI) / 2 + Math.PI / 4;
       const fin = new THREE.Mesh(finGeo, f3StoneMat);
-      fin.position.set(Math.cos(ang) * 1.32, 0.36, Math.sin(ang) * 1.32);
-      fin.scale.set(0.45, 2.5, 0.22);
+      fin.position.set(Math.cos(ang) * 1.84, 0.38, Math.sin(ang) * 1.84);
+      fin.scale.set(0.45, 2.6, 0.22);
       fin.rotation.y = -ang;
       crownGroup.add(fin);
     }
 
-    // Precision Precessing Astrolabe / Armillary Rings + Ring-Mounted Gimbal Nodes
-    const astrolabeRingA = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.42, 0.02, 8, 64)), f3GlowMat);
-    astrolabeRingA.rotation.x = Math.PI / 2.6;
-    astrolabeRingA.position.y = 0.82;
-    floor3Group.add(astrolabeRingA);
+    // Sculpted Hammered-Brass Armillary Rings + Embedded Thin Rune Inlay + Gimbal Nodes (Zero Roof Clipping)
+    const buildArmillaryRing = (radius: number, posY: number, rotX: number, rotY = 0, rotZ = 0) => {
+      const grp = new THREE.Group();
+      grp.position.y = posY;
+      grp.rotation.set(rotX, rotY, rotZ);
 
-    const astrolabeRingB = new THREE.Mesh(regGeo(new THREE.TorusGeometry(1.12, 0.017, 8, 64)), f3GlowMat);
-    astrolabeRingB.rotation.x = -Math.PI / 2.9;
-    astrolabeRingB.position.y = 1.48;
-    floor3Group.add(astrolabeRingB);
+      const brassFrame = new THREE.Mesh(regGeo(new THREE.TorusGeometry(radius, 0.022, 8, 64)), brassTrimMat);
+      const glowingInlay = new THREE.Mesh(regGeo(new THREE.TorusGeometry(radius, 0.0085, 8, 64)), f3GlowMat);
+      grp.add(brassFrame, glowingInlay);
 
-    const gimbalNodeGeo = regGeo(new THREE.OctahedronGeometry(0.058, 0));
-    for (let g = 0; g < 3; g++) {
-      const ga = (g * Math.PI * 2) / 3;
-      const nodeA = new THREE.Mesh(gimbalNodeGeo, apexCoreMat);
-      nodeA.position.set(Math.cos(ga) * 1.42, Math.sin(ga) * 1.42, 0);
-      astrolabeRingA.add(nodeA);
+      const nodeGeo = regGeo(new THREE.OctahedronGeometry(0.052, 0));
+      for (let g = 0; g < 3; g++) {
+        const ga = (g * Math.PI * 2) / 3;
+        const node = new THREE.Mesh(nodeGeo, apexCoreMat);
+        node.position.set(Math.cos(ga) * radius, Math.sin(ga) * radius, 0);
+        grp.add(node);
+      }
+      floor3Group.add(grp);
+      return grp;
+    };
 
-      const nodeB = new THREE.Mesh(gimbalNodeGeo, apexCoreMat);
-      nodeB.position.set(Math.cos(ga + 0.5) * 1.12, Math.sin(ga + 0.5) * 1.12, 0);
-      astrolabeRingB.add(nodeB);
-    }
-
-    const astrolabeRingC = new THREE.Mesh(regGeo(new THREE.TorusGeometry(0.86, 0.015, 8, 56)), apexCoreMat);
-    astrolabeRingC.rotation.y = Math.PI / 3;
-    astrolabeRingC.position.y = 2.05;
-    floor3Group.add(astrolabeRingC);
+    const astrolabeRingA = buildArmillaryRing(1.38, 0.78, 0.44);
+    const astrolabeRingB = buildArmillaryRing(1.22, 1.48, -0.48);
+    const astrolabeRingC = buildArmillaryRing(0.98, 2.24, 0.28, Math.PI / 3, 0.32);
 
     const crownOrbGroup = new THREE.Group();
     crownOrbGroup.position.y = 1.15;
     floor3Group.add(crownOrbGroup);
-    const voidOrbGeo = regGeo(new THREE.OctahedronGeometry(0.095, 0));
+    const voidOrbGeo = regGeo(new THREE.OctahedronGeometry(0.085, 0));
     for (let i = 0; i < 3; i++) {
       const a = (i * Math.PI * 2) / 3;
       const orb = new THREE.Mesh(voidOrbGeo, f3GlowMat);
-      orb.position.set(Math.cos(a) * 1.48, 0.18 * Math.sin(i * 2.1), Math.sin(a) * 1.48);
+      orb.position.set(Math.cos(a) * 1.64, 0.16 * Math.sin(i * 2.1), Math.sin(a) * 1.64);
       crownOrbGroup.add(orb);
     }
 
-    // Floating Shattered Apex Relic Crystal + Silhouette-Matched Crystalline Aura Shell
-    const apexBeacon = new THREE.Mesh(regGeo(new THREE.OctahedronGeometry(0.26, 0)), apexCoreMat);
-    apexBeacon.position.y = 3.36;
+    // Forged Brass Finial Crown Cradle + Floating Shattered Apex Relic Crystal + Crystalline Aura Shell
+    const apexCradle = new THREE.Mesh(
+      regGeo(new THREE.CylinderGeometry(0.16, 0.08, 0.24, 8)),
+      brassTrimMat
+    );
+    apexCradle.position.y = 3.1;
+    floor3Group.add(apexCradle);
+
+    const apexBeacon = new THREE.Mesh(regGeo(new THREE.OctahedronGeometry(0.24, 0)), apexCoreMat);
+    apexBeacon.position.y = 3.52;
     apexBeacon.scale.set(0.76, 1.55, 0.76);
     floor3Group.add(apexBeacon);
 
-    const apexAuraMat = createFresnelMat(0xc084fc, 2.9, 0.48);
-    const apexAuraShell = new THREE.Mesh(regGeo(new THREE.OctahedronGeometry(0.32, 1)), apexAuraMat);
-    apexAuraShell.position.y = 3.36;
+    const apexAuraMat = createFresnelMat(0xc084fc, 3.0, 0.44);
+    const apexAuraShell = new THREE.Mesh(regGeo(new THREE.OctahedronGeometry(0.3, 1)), apexAuraMat);
+    apexAuraShell.position.y = 3.52;
     apexAuraShell.scale.set(0.84, 1.68, 0.84);
     floor3Group.add(apexAuraShell);
 
     // =========================================================================
-    // 7. VOLUMETRIC CASCADE VEIL + TIER-ISOLATED BOKEH & GLINT PARTICLE CLOUDS
+    // 7. BOUNDING-ENVELOPE CASCADE VEILS, FILIGREE BELT & HELIX SURGE PARTICLES
     // =========================================================================
+    // Smooth continuous radial envelope strictly OUTSIDE all buttresses, fins & crystals
+    const getEnvelopeRadius = (localY: number): number => {
+      if (localY <= -1.2) return 2.76;
+      if (localY <= 0.36) {
+        const t = (localY - -1.2) / 1.56;
+        return 2.76 - t * 0.28; // 2.76 -> 2.48
+      }
+      if (localY <= 2.42) {
+        const t = (localY - 0.36) / 2.06;
+        return 2.48 - t * 0.46; // 2.48 -> 2.02
+      }
+      const t = Math.min(1, (localY - 2.42) / 3.2);
+      return 2.02 - t * 0.52; // 2.02 -> 1.50
+    };
+
     const shockMat = regMat(
       new THREE.MeshBasicMaterial({
         color: 0xf2a63b,
@@ -1222,7 +1541,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         depthWrite: false,
       })
     );
-    const shockRing = new THREE.Mesh(regGeo(new THREE.RingGeometry(1.25, 1.5, 48)), shockMat);
+    const shockRing = new THREE.Mesh(regGeo(new THREE.RingGeometry(0.96, 1.14, 48)), shockMat);
     shockRing.rotation.x = -Math.PI / 2;
     citadelRoot.add(shockRing);
 
@@ -1236,7 +1555,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         depthWrite: false,
       })
     );
-    const waveRingPrimary = new THREE.Mesh(regGeo(new THREE.RingGeometry(1.88, 2.04, 64)), wavePrimaryMat);
+    const waveRingPrimary = new THREE.Mesh(regGeo(new THREE.RingGeometry(0.97, 1.05, 64)), wavePrimaryMat);
     waveRingPrimary.rotation.x = -Math.PI / 2;
     citadelRoot.add(waveRingPrimary);
 
@@ -1250,11 +1569,30 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         depthWrite: false,
       })
     );
-    const waveRingSecondary = new THREE.Mesh(regGeo(new THREE.RingGeometry(1.88, 2.04, 64)), waveSecondaryMat);
+    const waveRingSecondary = new THREE.Mesh(regGeo(new THREE.RingGeometry(0.97, 1.05, 64)), waveSecondaryMat);
     waveRingSecondary.rotation.x = -Math.PI / 2;
     citadelRoot.add(waveRingSecondary);
 
-    // Soft feathered cylindrical volumetric ribbon traveling smoothly with the cascade wave crest
+    // Rotating engraved alchemical filigree belt riding outside getEnvelopeRadius(y)
+    const waveSigilMat = regMat(
+      new THREE.MeshBasicMaterial({
+        map: glyphRibbonTex,
+        color: 0xf2a63b,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      })
+    );
+    const waveSigilBelt = new THREE.Mesh(
+      regGeo(new THREE.CylinderGeometry(1.02, 1.02, 0.56, 48, 1, true)),
+      waveSigilMat
+    );
+    citadelRoot.add(waveSigilBelt);
+
+    // Tall volumetric cascade curtain with asymmetric directional comet tail along uTravelDir
     const waveCollarMat = regMat(
       new THREE.ShaderMaterial({
         transparent: true,
@@ -1265,6 +1603,8 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         uniforms: {
           uColor: { value: new THREE.Color(0xf2a63b) },
           uOpacity: { value: 0 },
+          uTravelDir: { value: 1 },
+          uTime: { value: 0 },
         },
         vertexShader: `
           varying vec2 vUv;
@@ -1276,18 +1616,23 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         fragmentShader: `
           uniform vec3 uColor;
           uniform float uOpacity;
+          uniform float uTravelDir;
+          uniform float uTime;
           varying vec2 vUv;
           void main() {
-            float band = exp(-pow((vUv.y - 0.5) * 4.2, 2.0));
-            float shimmer = 0.8 + 0.2 * sin(vUv.x * 37.699);
-            float a = clamp(band * shimmer * uOpacity, 0.0, 0.78);
-            gl_FragColor = vec4(uColor * 1.4, a);
+            float signedDist = (vUv.y - 0.5) * uTravelDir;
+            // Tight bright leading rim, silky extended trailing tail behind motion
+            float sigma = signedDist > 0.0 ? 0.16 : 0.42;
+            float band = exp(-pow(signedDist / sigma, 2.0));
+            float shimmer = 0.78 + 0.22 * sin(vUv.x * 37.699 + uTime * 2.4 * uTravelDir);
+            float a = clamp(band * shimmer * uOpacity, 0.0, 0.76);
+            gl_FragColor = vec4(uColor * 1.25, a);
           }
         `,
       })
     );
     const waveCollarMesh = new THREE.Mesh(
-      regGeo(new THREE.CylinderGeometry(1.98, 2.28, 1.25, 48, 1, true)),
+      regGeo(new THREE.CylinderGeometry(0.98, 1.08, 2.05, 48, 1, true)),
       waveCollarMat
     );
     citadelRoot.add(waveCollarMesh);
@@ -1376,8 +1721,8 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       count: isShowcase ? 88 : 38,
       yMin: -3.65,
       yMax: -0.25,
-      radMin: 2.0,
-      radMax: isShowcase ? 8.4 : 3.4,
+      radMin: 2.35,
+      radMax: isShowcase ? 8.4 : 3.6,
       omegaBase: 0.34,
       riseMin: 0.008,
       riseMax: 0.02,
@@ -1389,21 +1734,21 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       count: isShowcase ? 78 : 34,
       yMin: -0.65,
       yMax: 1.55,
-      radMin: 1.7,
-      radMax: isShowcase ? 7.2 : 3.1,
+      radMin: 2.05,
+      radMax: isShowcase ? 7.2 : 3.2,
       omegaBase: 0.56,
       riseMin: -0.004,
       riseMax: 0.004,
       texture: iceGlintTex,
-      size: isShowcase ? 0.26 : 0.18,
+      size: isShowcase ? 0.25 : 0.17,
       initialHex: 0x38bdf8,
     });
     const f3Particles = createTierParticleSystem({
       count: isShowcase ? 76 : 32,
       yMin: 1.5,
       yMax: 5.9,
-      radMin: 1.2,
-      radMax: isShowcase ? 7.4 : 2.9,
+      radMin: 1.65,
+      radMax: isShowcase ? 7.4 : 3.0,
       omegaBase: 0.28,
       riseMin: 0.005,
       riseMax: 0.015,
@@ -1411,6 +1756,36 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       size: isShowcase ? 0.22 : 0.15,
       initialHex: 0xa855f7,
     });
+
+    // Dedicated Directional Cascade Helix Surge Spores carried along active hover wavefront
+    const SURGE_COUNT = isShowcase ? 84 : 36;
+    const surgePos = new Float32Array(SURGE_COUNT * 3);
+    const surgeAngles = new Float32Array(SURGE_COUNT);
+    const surgeOffsets = new Float32Array(SURGE_COUNT);
+    const surgeRadPads = new Float32Array(SURGE_COUNT);
+    const surgeOmegas = new Float32Array(SURGE_COUNT);
+    for (let i = 0; i < SURGE_COUNT; i++) {
+      surgeAngles[i] = (i / SURGE_COUNT) * Math.PI * 2 * 3;
+      surgeOffsets[i] = ((i / SURGE_COUNT) - 0.5) * 1.95;
+      surgeRadPads[i] = 0.06 + (i % 5) * 0.09;
+      surgeOmegas[i] = (1.1 + (i % 7) * 0.18) * (i % 2 === 0 ? 1 : -1);
+    }
+    const surgeGeo = regGeo(new THREE.BufferGeometry());
+    surgeGeo.setAttribute("position", new THREE.BufferAttribute(surgePos, 3));
+    const surgeMat = regMat(
+      new THREE.PointsMaterial({
+        color: 0xffb02e,
+        map: bokehSparkTex,
+        size: isShowcase ? 0.29 : 0.19,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      })
+    );
+    const cascadeSparks = new THREE.Points(surgeGeo, surgeMat);
+    citadelRoot.add(cascadeSparks);
 
     // =========================================================================
     // 8. POINTER RAYCASTING, DRAG ORBIT & FLOOR SELECTION
@@ -1524,8 +1899,13 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     let waveClock = 0;
     let time = 0;
     let hoverScalar = 0;
+    let coronaY = 0.5;
     let rafId = 0;
     let prevPerf = performance.now();
+
+    const coronaCenterVec = new THREE.Vector3();
+    const dirCamToCorona = new THREE.Vector3();
+    const dirToTower = new THREE.Vector3();
 
     const animate = (now: number) => {
       rafId = requestAnimationFrame(animate);
@@ -1568,85 +1948,129 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       );
       camera.lookAt(0, currentLookYRef.current, 0);
 
-      // Harmonic cascade state progression across Floor 1 / 2 / 3 (delta-time normalized)
+      // Slow luxurious ~2.15s harmonic cascade across Floor 1 / 2 / 3 (delta-time normalized)
       if (hovFloor !== null) {
         if (hovFloor !== lastCascadeOrigin) {
           lastCascadeOrigin = hovFloor;
           waveClock = 0;
         }
-        waveClock = Math.min(1.2, waveClock + dt * 1.38);
+        waveClock = Math.min(1.22, waveClock + dt * 0.46);
         cascadeCol.copy(hovFloor === 1 ? COL_SOLAR : hovFloor === 2 ? COL_FROST : COL_VOID);
       } else {
         lastCascadeOrigin = null;
-        waveClock = Math.max(0, waveClock - dt * 3.5);
+        waveClock = Math.max(0, waveClock - dt * 1.35);
       }
 
       const d1 = hovFloor === null ? 0 : Math.abs(1 - hovFloor);
       const d2 = hovFloor === null ? 0 : Math.abs(2 - hovFloor);
       const d3 = hovFloor === null ? 0 : Math.abs(3 - hovFloor);
 
-      const stepDelay = (dist: number) => (dist === 0 ? 0.0 : dist === 1 ? 0.2 : 0.4);
-      const prog1 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d1)) / 0.34) : 0;
-      const prog2 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d2)) / 0.34) : 0;
-      const prog3 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d3)) / 0.34) : 0;
+      const stepDelay = (dist: number) => (dist === 0 ? 0.0 : dist === 1 ? 0.28 : 0.56);
+      const prog1 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d1)) / 0.36) : 0;
+      const prog2 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d2)) / 0.36) : 0;
+      const prog3 = hovFloor !== null ? smoothstep01((waveClock - stepDelay(d3)) / 0.36) : 0;
 
       const crest1 = hovFloor !== null ? Math.sin(prog1 * Math.PI) : 0;
       const crest2 = hovFloor !== null ? Math.sin(prog2 * Math.PI) : 0;
       const crest3 = hovFloor !== null ? Math.sin(prog3 * Math.PI) : 0;
 
-      // Update per-tier chromatic convergence:
+      // Smooth per-tier chromatic convergence:
       // Hover F1 -> Gold sweeps 1 -> 2 -> 3 | Hover F2 -> Blue sweeps 2 -> 1&3 | Hover F3 -> Purple sweeps 3 -> 2 -> 1
-      // When idle -> smoothly melt back to distinct Triad colors (Gold / Cyan / Violet)
       if (hovFloor !== null) {
-        const originLerp = 1 - Math.exp(-16.0 * dt);
-        const hopLerp = 1 - Math.exp(-11.0 * dt);
+        const originLerp = 1 - Math.exp(-8.5 * dt);
+        const hopLerp = 1 - Math.exp(-5.5 * dt);
         if (waveClock >= stepDelay(d1)) curF1Col.lerp(cascadeCol, d1 === 0 ? originLerp : hopLerp);
         if (waveClock >= stepDelay(d2)) curF2Col.lerp(cascadeCol, d2 === 0 ? originLerp : hopLerp);
         if (waveClock >= stepDelay(d3)) curF3Col.lerp(cascadeCol, d3 === 0 ? originLerp : hopLerp);
         if (waveClock >= stepDelay(d3)) curApexCol.lerp(cascadeCol, hopLerp);
       } else {
-        const idleLerp = 1 - Math.exp(-6.0 * dt);
+        const idleLerp = 1 - Math.exp(-4.5 * dt);
         curF1Col.lerp(COL_SOLAR, idleLerp);
         curF2Col.lerp(COL_FROST, idleLerp);
         curF3Col.lerp(COL_VOID, idleLerp);
         curApexCol.lerp(COL_APEX_IDLE, idleLerp);
       }
 
-      // Traveling additive harmonic wave rings + feathered volumetric ribbon along spire silhouette
-      const waveActive = hovFloor !== null && waveClock < 1.15;
-      const waveNorm = smoothstep01(waveClock / 0.92);
-      const ringAlpha = waveActive ? Math.sin(waveNorm * Math.PI) * 0.56 : 0;
-      const ringScaleHdr = hovFloor === 2 ? 2.15 : hovFloor === 1 ? 2.45 : 2.9;
+      // Synchronize World-Y Masonry Cascade Shader so stone fissures ignite stone-by-stone along wavefront
+      const waveNorm = smoothstep01(waveClock / 0.96);
+      if (hovFloor !== null) {
+        waveShaderState.uWaveOriginY.value =
+          hovFloor === 1 ? -2.2 : hovFloor === 2 ? 0.15 : 3.85;
+        waveShaderState.uWaveDir.value = hovFloor === 1 ? 1 : hovFloor === 2 ? 0 : -1;
+        waveShaderState.uWaveRadius.value =
+          waveNorm * (hovFloor === 2 ? 4.4 : hovFloor === 1 ? 6.4 : 6.8);
+      }
+      waveShaderState.uWaveMix.value =
+        hovFloor !== null
+          ? Math.min(1, hoverScalar * 1.18)
+          : smoothstep01(waveClock / 0.35) * 0.65;
+      waveShaderState.uWaveColor.value.copy(cascadeCol);
+      waveShaderState.uWaveCrestIntensity.value = 1.15 + hoverScalar * 0.45;
+
+      // Bounding-envelope Wave Veils, Rotating Engraved Sigil Belt, & Directional Helix Surge Spores
+      const waveActive = hovFloor !== null && waveClock < 1.16;
+      const ringAlpha = waveActive ? Math.sin(waveNorm * Math.PI) * 0.54 : 0;
+      const ringScaleHdr = hovFloor === 2 ? 1.85 : hovFloor === 1 ? 2.05 : 2.35;
       if (ringAlpha > 0.01 && hovFloor !== null) {
-        wavePrimaryMat.color.copy(cascadeCol).multiplyScalar(ringScaleHdr);
-        wavePrimaryMat.opacity = ringAlpha;
         const primaryY =
           hovFloor === 1
-            ? -1.75 + waveNorm * 6.2
+            ? -2.4 + waveNorm * 6.0
             : hovFloor === 2
-              ? 0.35 + waveNorm * 4.1
-              : 4.25 - waveNorm * 6.3;
-        const ringScaleFactor = 1.22 - ((primaryY + 2) / 6.5) * 0.38;
+              ? 0.38 + waveNorm * 3.25
+              : 3.55 - waveNorm * 5.95;
+        const secondaryY = 0.38 - waveNorm * 2.8;
+        const primaryEnvR = getEnvelopeRadius(primaryY);
+        const dirSign = hovFloor === 3 ? -1 : 1;
+
+        wavePrimaryMat.color.copy(cascadeCol).multiplyScalar(ringScaleHdr);
+        wavePrimaryMat.opacity = ringAlpha;
         waveRingPrimary.position.y = primaryY;
-        waveRingPrimary.scale.setScalar(ringScaleFactor);
+        waveRingPrimary.scale.setScalar(primaryEnvR + 0.08);
+
+        const collarScaleXZ = primaryEnvR + 0.14;
         waveCollarMesh.position.y = primaryY;
-        waveCollarMesh.scale.setScalar(ringScaleFactor);
-        waveCollarMat.uniforms.uColor.value.copy(cascadeCol).multiplyScalar(ringScaleHdr * 0.65);
-        waveCollarMat.uniforms.uOpacity.value = ringAlpha * 0.68;
+        waveCollarMesh.scale.set(collarScaleXZ, 1, collarScaleXZ);
+        waveCollarMat.uniforms.uColor.value.copy(cascadeCol).multiplyScalar(ringScaleHdr * 0.62);
+        waveCollarMat.uniforms.uOpacity.value = ringAlpha * 0.64;
+        waveCollarMat.uniforms.uTravelDir.value = dirSign;
+        waveCollarMat.uniforms.uTime.value = time;
+
+        const beltScaleXZ = primaryEnvR + 0.05;
+        waveSigilBelt.position.y = primaryY;
+        waveSigilBelt.scale.set(beltScaleXZ, 1, beltScaleXZ);
+        waveSigilBelt.rotation.y = time * 0.45 * dirSign;
+        glyphRibbonTex.offset.x = (time * 0.22 * dirSign) % 1;
+        waveSigilMat.color.copy(cascadeCol).multiplyScalar(1.35);
+        waveSigilMat.opacity = ringAlpha * 1.12;
 
         if (hovFloor === 2) {
           waveSecondaryMat.color.copy(cascadeCol).multiplyScalar(ringScaleHdr);
           waveSecondaryMat.opacity = ringAlpha;
-          const secondaryY = 0.35 - waveNorm * 2.45;
           waveRingSecondary.position.y = secondaryY;
-          waveRingSecondary.scale.setScalar(1.0 + waveNorm * 0.34);
+          waveRingSecondary.scale.setScalar(getEnvelopeRadius(secondaryY) + 0.08);
         } else {
           waveSecondaryMat.opacity = 0;
         }
+
+        const surgePosAttr = surgeGeo.attributes.position as THREE.BufferAttribute;
+        for (let i = 0; i < SURGE_COUNT; i++) {
+          const useSecondary = hovFloor === 2 && i % 2 === 1;
+          const baseY = useSecondary ? secondaryY : primaryY;
+          const localDir = useSecondary ? -1 : dirSign;
+          const py = baseY + surgeOffsets[i] * -localDir * 0.72;
+          const envR = getEnvelopeRadius(py) + surgeRadPads[i];
+          const ang = surgeAngles[i] + time * surgeOmegas[i];
+          surgePosAttr.setXYZ(i, Math.cos(ang) * envR, py, Math.sin(ang) * envR);
+        }
+        surgePosAttr.needsUpdate = true;
+        surgeMat.color.copy(cascadeCol).multiplyScalar(1.3);
+        surgeMat.opacity = Math.min(0.92, ringAlpha * 1.45);
       } else {
         wavePrimaryMat.opacity = 0;
         waveSecondaryMat.opacity = 0;
+        waveSigilMat.opacity = 0;
         waveCollarMat.uniforms.uOpacity.value = 0;
+        surgeMat.opacity = 0;
       }
 
       // Environmental wash color tracks hovered floor (or active floor / dominant element)
@@ -1660,34 +2084,43 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
               : 0xa855f7
           : FLOOR_COLORS[activeFocus] ?? ELEMENT_COLORS[dominantElementRef.current] ?? 0xf2a63b;
       envTargetCol.setHex(focusHex);
-      envCurrentCol.lerp(envTargetCol, 0.1);
+      envCurrentCol.lerp(envTargetCol, 0.08);
       const focusY = FLOOR_CAM_TARGET_Y[activeFocus] ?? 0.5;
 
-      coronaPlane.position.y += (focusY - coronaPlane.position.y) * 0.1;
+      // Always keep corona halo behind tower along camera view ray so it frames silhouette naturally
+      coronaY += (focusY - coronaY) * 0.09;
+      coronaCenterVec.set(0, coronaY, 0);
+      dirCamToCorona.copy(coronaCenterVec).sub(camera.position).normalize();
+      coronaPlane.position.copy(coronaCenterVec).addScaledVector(dirCamToCorona, 3.6);
       coronaPlane.lookAt(camera.position);
       coronaShaderMat.uniforms.uTime.value = time;
       coronaShaderMat.uniforms.uColor.value.copy(envCurrentCol);
-      coronaShaderMat.uniforms.uBoost.value = hoverScalar + Math.max(crest1, crest2, crest3) * 0.45;
+      coronaShaderMat.uniforms.uBoost.value = hoverScalar + Math.max(crest1, crest2, crest3) * 0.42;
 
       // Synchronize Sky Dome scattering & mountain bounce illumination
-      const dirToTower = new THREE.Vector3(0, 0.35 + focusY * 0.04, 0)
-        .sub(camera.position)
-        .normalize();
+      dirToTower.set(0, 0.35 + focusY * 0.04, 0).sub(camera.position).normalize();
       skyDomeMat.uniforms.uTime.value = time;
       skyDomeMat.uniforms.uBeaconColor.value.copy(envCurrentCol);
       skyDomeMat.uniforms.uBeaconDir.value.copy(dirToTower);
       skyDomeMat.uniforms.uBloomBoost.value = hoverScalar;
 
-      // Synchronized tier & valley lights (per-element balanced HDR luminance so obsidian stone stays crisp)
+      // Synchronized tier & valley lights (symmetrical Floor 1 core + twin bounce fills for 360deg consistency)
       const cascadeLumCap = hovFloor === 2 ? 0.66 : hovFloor === 1 ? 0.78 : 1.0;
       valleyWashLight.color.copy(envCurrentCol);
-      valleyWashLight.intensity = 5.5 + hoverScalar * (hovFloor === 2 ? 7.2 : 10.0);
+      valleyWashLight.intensity = 5.2 + hoverScalar * (hovFloor === 2 ? 6.8 : 9.2);
+
       keepCoreLight.color.copy(curF1Col);
-      keepCoreLight.intensity = 8.0 + crest1 * 6.0 * cascadeLumCap + (hovFloor !== null ? 3.5 * cascadeLumCap : 0);
+      keepCoreLight.intensity = 7.2 + crest1 * 5.2 * cascadeLumCap + (hovFloor !== null ? 3.2 * cascadeLumCap : 0);
+      const keepFillIntensity = 3.8 + crest1 * 2.6 * cascadeLumCap + (hovFloor !== null ? 1.6 * cascadeLumCap : 0);
+      keepFillFront.color.copy(curF1Col);
+      keepFillFront.intensity = keepFillIntensity;
+      keepFillRear.color.copy(curF1Col);
+      keepFillRear.intensity = keepFillIntensity;
+
       bastionCoreLight.color.copy(curF2Col);
-      bastionCoreLight.intensity = 7.5 + crest2 * 6.0 * cascadeLumCap + (hovFloor !== null ? 3.5 * cascadeLumCap : 0);
+      bastionCoreLight.intensity = 7.0 + crest2 * 5.5 * cascadeLumCap + (hovFloor !== null ? 3.2 * cascadeLumCap : 0);
       apexAuraLight.color.copy(curF3Col);
-      apexAuraLight.intensity = 8.0 + crest3 * 6.2 * cascadeLumCap + (hovFloor !== null ? 4.0 * cascadeLumCap : 0);
+      apexAuraLight.intensity = 7.5 + crest3 * 5.8 * cascadeLumCap + (hovFloor !== null ? 3.6 * cascadeLumCap : 0);
 
       mistShaderMat.uniforms.uTime.value = time;
       mistShaderMat.uniforms.uColor.value.copy(envCurrentCol);
@@ -1706,63 +2139,81 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       magicDialMat.opacity = 0.36 + hoverScalar * 0.36;
 
       conduitBeamMat.uniforms.uColor.value.copy(envCurrentCol);
-      conduitBeamMat.uniforms.uBoost.value = hoverScalar * 0.8 + (shockwaveRef.current.active ? 0.45 : 0);
+      conduitBeamMat.uniforms.uBoost.value = hoverScalar * 0.72 + (shockwaveRef.current.active ? 0.4 : 0);
 
-      // Floor Unlock state + Calibrated HDR Radiance Multipliers (distinct Triad idle, crisp Cascade on hover)
+      // Floor Unlock state + Calibrated Non-Whiteout HDR Glazing & Filigree Multipliers
       const fs = floorsRef.current;
       const f2State = fs?.find((f) => f.floor === 2);
       const f3State = fs?.find((f) => f.floor === 3);
 
-      const pulse = motionScale > 0 ? Math.sin(time * 2.5) * 0.14 : 0;
-      const f1HoverGain = hovFloor !== null ? ((hovFloor === 1 ? 1.15 : prog1 * 0.95) + crest1 * 0.85) * cascadeLumCap : 0;
-      const f2HoverGain = hovFloor !== null ? ((hovFloor === 2 ? 1.2 : prog2 * 1.0) + crest2 * 0.88) * cascadeLumCap : 0;
-      const f3HoverGain = hovFloor !== null ? ((hovFloor === 3 ? 1.4 : prog3 * 1.15) + crest3 * 0.95) * cascadeLumCap : 0;
+      const pulse = motionScale > 0 ? Math.sin(time * 2.5) * 0.12 : 0;
+      const f1HoverGain = hovFloor !== null ? ((hovFloor === 1 ? 1.05 : prog1 * 0.88) + crest1 * 0.78) * cascadeLumCap : 0;
+      const f2HoverGain = hovFloor !== null ? ((hovFloor === 2 ? 1.1 : prog2 * 0.92) + crest2 * 0.82) * cascadeLumCap : 0;
+      const f3HoverGain = hovFloor !== null ? ((hovFloor === 3 ? 1.25 : prog3 * 1.05) + crest3 * 0.88) * cascadeLumCap : 0;
 
-      const f1Mult = (hovFloor === 1 ? 1.9 : selFloor === 1 ? 1.95 : 1.68) + f1HoverGain + pulse;
+      const f1Mult = (hovFloor === 1 ? 1.62 : selFloor === 1 ? 1.65 : 1.42) + f1HoverGain * 0.75 + pulse;
       const f2Locked = Boolean(f2State && !f2State.unlocked);
       const f2Mult = f2Locked
-        ? 0.48
-        : (hovFloor === 2 ? 1.72 : selFloor === 2 ? 1.85 : 1.66) + f2HoverGain + pulse;
+        ? 0.44
+        : (hovFloor === 2 ? 1.54 : selFloor === 2 ? 1.58 : 1.38) + f2HoverGain * 0.75 + pulse;
       const f3Locked = Boolean(f3State && !f3State.unlocked);
       const f3Mult = f3Locked
-        ? 0.48
-        : (hovFloor === 3 ? 2.15 : selFloor === 3 ? 2.1 : 1.82) + f3HoverGain + pulse;
+        ? 0.44
+        : (hovFloor === 3 ? 1.78 : selFloor === 3 ? 1.74 : 1.5) + f3HoverGain * 0.78 + pulse;
 
       f1GlowMat.color.copy(curF1Col).multiplyScalar(f1Mult);
       f2GlowMat.color.copy(curF2Col).multiplyScalar(f2Mult);
       f3GlowMat.color.copy(curF3Col).multiplyScalar(f3Mult);
-      apexCoreMat.color.copy(curApexCol).multiplyScalar(2.1 + f3HoverGain * 0.72 + pulse);
-      pylonGlowMat.color.copy(envCurrentCol).multiplyScalar(1.75 + hoverScalar * 0.9 * cascadeLumCap);
+      apexCoreMat.color.copy(curApexCol).multiplyScalar(1.85 + f3HoverGain * 0.6 + pulse);
+      pylonGlowMat.color.copy(envCurrentCol).multiplyScalar(1.55 + hoverScalar * 0.72 * cascadeLumCap);
+
+      // Update leaded Gothic furnace / arcane stained-glass core shaders (dark iron frames + flowing plasma)
+      f1WindowMat.uniforms.uTime.value = time;
+      f1WindowMat.uniforms.uColor.value.copy(curF1Col);
+      f1WindowMat.uniforms.uIntensity.value =
+        (hovFloor === 1 ? 1.42 : selFloor === 1 ? 1.38 : 1.08) + f1HoverGain * 0.42 + pulse * 0.35;
+
+      f2WindowMat.uniforms.uTime.value = time;
+      f2WindowMat.uniforms.uColor.value.copy(curF2Col);
+      f2WindowMat.uniforms.uIntensity.value = f2Locked
+        ? 0.35
+        : (hovFloor === 2 ? 1.36 : selFloor === 2 ? 1.35 : 1.06) + f2HoverGain * 0.4 + pulse * 0.35;
+
+      f3WindowMat.uniforms.uTime.value = time;
+      f3WindowMat.uniforms.uColor.value.copy(curF3Col);
+      f3WindowMat.uniforms.uIntensity.value = f3Locked
+        ? 0.35
+        : (hovFloor === 3 ? 1.52 : selFloor === 3 ? 1.48 : 1.15) + f3HoverGain * 0.44 + pulse * 0.35;
 
       // Synchronized procedural masonry vein emissives & edge-lit Fresnel aura shells
       f1StoneMat.emissive.copy(curF1Col);
       f1StoneMat.emissiveIntensity =
-        0.48 + crest1 * 0.65 * cascadeLumCap + (hovFloor === 1 ? 0.32 : prog1 * 0.25);
+        0.54 + crest1 * 0.58 * cascadeLumCap + (hovFloor === 1 ? 0.3 : prog1 * 0.24);
       f2StoneMat.emissive.copy(curF2Col);
       f2StoneMat.emissiveIntensity = f2Locked
         ? 0.16
-        : 0.44 + crest2 * 0.58 * cascadeLumCap + (hovFloor === 2 ? 0.28 : prog2 * 0.22);
+        : 0.48 + crest2 * 0.54 * cascadeLumCap + (hovFloor === 2 ? 0.26 : prog2 * 0.22);
       f3StoneMat.emissive.copy(curF3Col);
       f3StoneMat.emissiveIntensity = f3Locked
         ? 0.18
-        : 0.52 + crest3 * 0.7 * cascadeLumCap + (hovFloor === 3 ? 0.36 : prog3 * 0.26);
+        : 0.54 + crest3 * 0.62 * cascadeLumCap + (hovFloor === 3 ? 0.32 : prog3 * 0.24);
 
       cryoFacetMat.emissive.copy(curF2Col).multiplyScalar(0.5);
-      cryoFacetMat.emissiveIntensity = f2Locked ? 0.2 : 0.52 + f2HoverGain * 0.45;
+      cryoFacetMat.emissiveIntensity = f2Locked ? 0.2 : 0.48 + f2HoverGain * 0.4;
 
       f1FresnelMat.uniforms.uColor.value.copy(curF1Col);
       f1FresnelMat.uniforms.uIntensity.value =
-        0.4 + crest1 * 0.55 * cascadeLumCap + (hovFloor === 1 ? 0.38 : prog1 * 0.24);
+        0.36 + crest1 * 0.48 * cascadeLumCap + (hovFloor === 1 ? 0.34 : prog1 * 0.22);
       f2FresnelMat.uniforms.uColor.value.copy(curF2Col);
       f2FresnelMat.uniforms.uIntensity.value = f2Locked
         ? 0.14
-        : 0.42 + crest2 * 0.5 * cascadeLumCap + (hovFloor === 2 ? 0.34 : prog2 * 0.22);
+        : 0.38 + crest2 * 0.46 * cascadeLumCap + (hovFloor === 2 ? 0.3 : prog2 * 0.2);
       f3FresnelMat.uniforms.uColor.value.copy(curF3Col);
       f3FresnelMat.uniforms.uIntensity.value = f3Locked
         ? 0.14
-        : 0.54 + crest3 * 0.62 * cascadeLumCap + (hovFloor === 3 ? 0.44 : prog3 * 0.28);
+        : 0.48 + crest3 * 0.54 * cascadeLumCap + (hovFloor === 3 ? 0.38 : prog3 * 0.24);
       apexAuraMat.uniforms.uColor.value.copy(curApexCol);
-      apexAuraMat.uniforms.uIntensity.value = f3Locked ? 0.22 : 0.72 + f3HoverGain * 0.38 + pulse * 0.5;
+      apexAuraMat.uniforms.uIntensity.value = f3Locked ? 0.22 : 0.66 + f3HoverGain * 0.34 + pulse * 0.45;
 
       if (motionScale > 0) {
         f1OrbitRingGroup.rotation.y = time * (0.58 + hoverScalar * 0.65);
@@ -1774,7 +2225,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
         astrolabeRingB.rotation.z = -time * (0.76 + hoverScalar * 0.85);
         astrolabeRingC.rotation.x = time * 0.88;
         apexBeacon.rotation.y = time * (1.05 + hoverScalar * 0.9);
-        apexBeacon.position.y = 3.36 + Math.sin(time * 2.2) * 0.1 + hoverScalar * 0.1;
+        apexBeacon.position.y = 3.52 + Math.sin(time * 2.2) * 0.08 + hoverScalar * 0.08;
         apexAuraShell.rotation.y = apexBeacon.rotation.y;
         apexAuraShell.position.y = apexBeacon.position.y;
         magicDialMesh.rotation.z = time * (0.14 + hoverScalar * 0.12);
@@ -1805,37 +2256,39 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       if (shockwaveRef.current.active) {
         shockwaveRef.current.progress += 0.032;
         const p = shockwaveRef.current.progress;
-        shockBoost = (1 - p) * 0.55;
+        shockBoost = (1 - p) * 0.45;
         if (p >= 1) {
           shockwaveRef.current.active = false;
           shockMat.opacity = 0;
         } else {
-          shockRing.position.y = FLOOR_CAM_TARGET_Y[shockwaveRef.current.floor] ?? 0;
-          shockRing.scale.setScalar(1 + p * 2.8);
+          const shockY = FLOOR_CAM_TARGET_Y[shockwaveRef.current.floor] ?? 0;
+          shockRing.position.y = shockY;
+          shockRing.scale.setScalar(getEnvelopeRadius(shockY) * (1.06 + p * 0.72));
           shockMat.color.setHex(focusHex);
-          shockMat.opacity = (1 - p) * 0.9;
+          shockMat.opacity = (1 - p) * 0.85;
         }
       }
 
       const waveCrestPeak = Math.max(crest1, crest2, crest3);
       if (bloomPass) {
-        bloomPass.strength = 0.64 + hoverScalar * (hovFloor === 2 ? 0.22 : 0.30) + waveCrestPeak * 0.22 + shockBoost;
-        bloomPass.radius = 0.68 + hoverScalar * 0.18;
+        bloomPass.strength = 0.5 + hoverScalar * (hovFloor === 2 ? 0.2 : 0.26) + waveCrestPeak * 0.2 + shockBoost;
+        bloomPass.radius = 0.64 + hoverScalar * 0.16;
       }
 
       f1Particles.mat.color.copy(curF1Col);
-      f1Particles.mat.opacity = 0.66 + crest1 * 0.25 + hoverScalar * 0.22;
+      f1Particles.mat.opacity = 0.66 + crest1 * 0.24 + hoverScalar * 0.2;
       f2Particles.mat.color.copy(curF2Col);
-      f2Particles.mat.opacity = f2Locked ? 0.24 : 0.64 + crest2 * 0.24 + hoverScalar * 0.22;
+      f2Particles.mat.opacity = f2Locked ? 0.24 : 0.64 + crest2 * 0.24 + hoverScalar * 0.2;
       f3Particles.mat.color.copy(curF3Col);
-      f3Particles.mat.opacity = f3Locked ? 0.24 : 0.68 + crest3 * 0.28 + hoverScalar * 0.24;
+      f3Particles.mat.opacity = f3Locked ? 0.24 : 0.68 + crest3 * 0.26 + hoverScalar * 0.22;
 
       const hoverStillEasing = Math.abs(hoverScalar - prevHoverScalar) > 0.001;
       const camStillEasing = Math.abs(currentDistRef.current - prevDist) > 0.001;
       const colorDiff = (a: THREE.Color, b: THREE.Color) =>
         Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
       const cascadeSettling =
-        (hovFloor !== null && waveClock < 1.18) ||
+        (hovFloor !== null && waveClock < 1.2) ||
+        (hovFloor === null && waveClock > 0.01) ||
         colorDiff(curF1Col, COL_SOLAR) > 0.015 ||
         colorDiff(curF2Col, COL_FROST) > 0.015 ||
         colorDiff(curF3Col, COL_VOID) > 0.015;
@@ -1870,6 +2323,8 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       window.removeEventListener("pointerup", handlePointerUp);
       renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
 
+      scene.environment = null;
+      envRenderTarget?.dispose();
       disposables.geometries.forEach((g) => g.dispose());
       disposables.materials.forEach((m) => m.dispose());
       disposables.textures.forEach((t) => t.dispose());
