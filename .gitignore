@@ -4,37 +4,48 @@
 
 # Dependencies
 node_modules/
-relayer/node_modules/
-web/node_modules/
+**/node_modules/
 
 # Rust & Cargo Build Artifacts
 target/
 contract/target/
 **/*.rs.bk
+*.wasm
 
-# Next.js & Web Application Build Artifacts
-web/.next/
+# Next.js, Relayer, Vercel & Web Build Artifacts
+.next/
+**/.next/
 web/out/
+dist/
+relayer/dist/
 .turbo/
 .vercel/
+**/.vercel/
 *.tsbuildinfo
 
-# Environment Variables & Private Credentials
+# Environment Variables & Private Credentials (HACKATHON.md: never commit secrets)
 .env
-.env*.local
-.env.local
-web/.env.local
-relayer/.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+!**/.env.*.example
 .near-credentials/
+**/.near-credentials/
 *.pem
 *.key
+*.secret
+keypair*.json
+credentials*.json
 
-# Preserve example environment templates
-!.env.example
-!web/.env.example
-!relayer/.env.example
+# Hackathon Submission Payloads (HACKATHON.md: contains personal data, never commit)
+application*.json
+submission*.json
+*application-payload*.json
+hackathon-submission*.json
 
-# Agent Tools, Workspaces, Skills & System-Generated Directories
+# Agent Tools, Design Tooling, Workspaces, Skills & System-Generated Directories
 .agents/
 .agent/
 _agents/
@@ -44,9 +55,14 @@ _agent/
 .cursor/
 .codex/
 .opencode/
+.impeccable/
+**/.impeccable/
 .system_generated/
 skills-lock.json
 graphify-out/
+FULLSTACK_MASTER_PLAN.md
+UI_REMEDIATION_PLAN.md
+TESTNET_LAUNCH_PLAN*.md
 
 # Logs & Debugging
 logs/
@@ -64,6 +80,12 @@ Thumbs.db
 *.swp
 *.swo
 
-# Test Coverage & Temporary Scratch Files
+# Test Coverage, QA Screenshots & Temporary Scratch Files
 coverage/
 scratch/
+.tmp/
+*.tmp
+.playwright-mcp/
+playwright-report/
+test-results/
+qa_*.png
