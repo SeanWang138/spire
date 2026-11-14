@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Store,
   TrendingUp,
@@ -11,6 +12,8 @@ import {
   Coins,
   ShieldAlert,
 } from "lucide-react";
+import { SpireTooltip } from "@/components/ui/SpireUi";
+import { formatContractErrorMessage } from "@/lib/errors";
 import {
   get_quote,
   get_buyback_quote,
@@ -41,6 +44,8 @@ interface NpcMerchantBazaarProps {
   isOpen: boolean;
   stock: Record<ItemId, number>;
   inventory: PlayerInventory;
+  /** Playable contract Citadel Pouch balance in yoctoNEAR for pre-trade Buy guard. */
+  pouchYocto?: string | null;
   onTrade: (action: "buy" | "sell", itemId: ItemId, amount: number) => Promise<void>;
   onFundMerchant?: (amountNear: number) => Promise<void>;
   disabled?: boolean;
@@ -58,6 +63,7 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
   isOpen,
   stock,
   inventory,
+  pouchYocto,
   onTrade,
   onFundMerchant,
   disabled = false,
@@ -79,6 +85,11 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
   const isClosed = !isOpen || cashNear < MERCHANT_MIN_CASH_NEAR;
   const currentStock = stock[selectedItem] ?? 0;
   const sellableBalance = inventory.materials[selectedItem] ?? 0;
+  const buyCostYocto = parseYoctoSafe(liveQuotes.buy?.total_price);
+  const insufficientPouchForBuy =
+    pouchYocto != null &&
+    buyCostYocto > 0n &&
+    parseYoctoSafe(pouchYocto) < buyCostYocto;
 
   useEffect(() => {
     let cancelled = false;
@@ -115,12 +126,13 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
 
   const handleAction = async (action: "buy" | "sell") => {
     if (isClosed || isTrading || disabled || qty < 1) return;
+    if (action === "buy" && insufficientPouchForBuy) return;
     setIsTrading(true);
     setError(null);
     try {
       await onTrade(action, selectedItem, qty);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Trade failed: check merchant reserve and stock.");
+      setError(formatContractErrorMessage(err));
     } finally {
       setIsTrading(false);
     }
@@ -139,7 +151,7 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
     try {
       await onFundMerchant(amt);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to fund merchant reserve.");
+      setError(formatContractErrorMessage(err));
     } finally {
       setIsFunding(false);
     }
@@ -270,8 +282,7 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
           <button
             type="button"
             onClick={() => handleAction("buy")}
-            disabled={isClosed || isTrading || disabled || currentStock < qty}
-            title={buyReasoning}
+            disabled={isClosed || isTrading || disabled || currentStock < qty || insufficientPouchForBuy}
             className="min-h-[48px] py-2.5 px-3 rounded-lg bg-frost/15 hover:bg-frost/25 border border-frost/40 text-frost text-xs font-mono font-bold transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
           >
             <span className="inline-flex items-center gap-1.5 uppercase">
@@ -287,7 +298,6 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
             type="button"
             onClick={() => handleAction("sell")}
             disabled={isClosed || isTrading || disabled || sellableBalance < qty}
-            title={sellReasoning}
             className="min-h-[48px] py-2.5 px-3 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
           >
             <span className="inline-flex items-center gap-1.5 uppercase">
@@ -300,12 +310,39 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
           </button>
         </div>
 
-        <div className="px-3.5 py-2.5 rounded-lg bg-panel-dark text-xs font-mono text-ash space-y-1.5">
-          <div className="flex items-start gap-2">
-            <HelpCircle className="w-4 h-4 text-frost shrink-0 mt-0.5" aria-hidden="true" />
-            <span>{buyReasoning}</span>
+        {insufficientPouchForBuy && (
+          <div className="px-3 py-2.5 rounded-lg bg-solar/10 border border-solar/35 text-xs font-mono text-solar flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Citadel Pouch ({formatNearAmount(pouchYocto ?? "0", 4)}) is below Buy Ask.
+            </span>
+            <Link
+              href="/game/vault?tab=pouch"
+              className="underline font-bold text-parchment hover:text-solar"
+            >
+              Deposit in Vault →
+            </Link>
           </div>
-          <div className="pl-6 text-pewter">{sellReasoning}</div>
+        )}
+
+        <div className="px-3.5 py-2.5 rounded-lg bg-panel-dark text-xs font-mono text-ash space-y-1.5">
+          <div className="flex items-start justify-between gap-2">
+            <span className="leading-relaxed">{buyReasoning}</span>
+            <SpireTooltip
+              triggerLabel="Inspect bonding curve pricing formula"
+              content={
+                <div className="space-y-1.5 font-mono text-xs">
+                  <div className="font-bold text-solar">Bonding-Curve Pricing Logic</div>
+                  <p className="text-ash">
+                    Mid price shifts dynamically from the {MERCHANT_BASE_PRICE_NEAR.toFixed(2)} NEAR base using stock vs {MERCHANT_TARGET_STOCK} target + demand pressure, clamped 0.50x..2.00x with &plusmn;{MERCHANT_SPREAD_BPS / 100}% spread.
+                  </p>
+                  <p className="text-pewter">{sellReasoning}</p>
+                </div>
+              }
+            >
+              <HelpCircle className="w-4 h-4 text-frost shrink-0" aria-hidden="true" />
+            </SpireTooltip>
+          </div>
+          <div className="text-pewter">{sellReasoning}</div>
         </div>
       </div>
 
@@ -416,7 +453,7 @@ export const FloorBuybackDesk: React.FC<FloorBuybackDeskProps> = ({
     try {
       await onBuyback(activeFloor, selectedElement, qty);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Floor buyback transaction failed.");
+      setError(formatContractErrorMessage(err));
     } finally {
       setIsSelling(false);
     }
@@ -451,7 +488,7 @@ export const FloorBuybackDesk: React.FC<FloorBuybackDeskProps> = ({
       </div>
 
       <p className="text-xs text-ash leading-relaxed">
-        Sell Free Crafted weapons to a floor&apos;s Boss Reserve at its AI-set multiplier. Credits directly to your Citadel Ledger (Starter Locked weapons excluded).
+        Sell Free Crafted weapons to a floor&apos;s Boss Reserve at its live floor multiplier (1.00x baseline in epoch-only mode). Credits directly to your Citadel Pouch (Starter Locked weapons excluded).
       </p>
 
       {/* Floor selector */}

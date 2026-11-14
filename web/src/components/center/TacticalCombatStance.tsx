@@ -32,6 +32,7 @@ import {
   type WeaponTributeTier,
 } from "@/lib/combat-rules";
 import { PlayerInventory, ElementIndex, StanceIndex } from "@/lib/contract";
+import { formatContractErrorMessage } from "@/lib/errors";
 import { FLOOR_TICKET_COST_NEAR, nearToYocto } from "@/lib/spire/constants";
 import { bpsToPercent, formatNearAmount, parseYoctoSafe } from "@/lib/utils/cn";
 import { SpireTooltip } from "@/components/ui/SpireUi";
@@ -212,7 +213,7 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
       const stances = turnStances.map((s) => STANCE_IDS[s]) as [StanceIndex, StanceIndex, StanceIndex];
       await onAttack(floor, weaponElement, stances);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Strike failed: verify ledger balance and session key.");
+      setError(formatContractErrorMessage(err));
     } finally {
       setIsRaiding(false);
     }
@@ -225,9 +226,9 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
   if (floorLocked) {
     disabledReason = `Floor ${floor} is locked until Floor ${floor - 1} is defeated.`;
   } else if (!ownsAnyWeapon) {
-    disabledReason = "You hold 0 weapons of this element. Claim your starter kit or forge a weapon first.";
+    disabledReason = "You hold 0 weapons of this element. Open Forge to craft or claim starter gear.";
   } else if (insufficientLedger) {
-    disabledReason = `Internal ledger (${formatNearAmount(ledgerYocto, 2)}) is below the ${ticketCostNear.toFixed(2)} NEAR ticket.`;
+    disabledReason = `Citadel Pouch (${formatNearAmount(ledgerYocto, 2)}) is below the ${ticketCostNear.toFixed(2)} NEAR ticket.`;
   }
 
   return (
@@ -449,11 +450,20 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
           </div>
           {insufficientLedger && (
             <Link
-              href="/game/vault"
+              href="/game/vault?tab=pouch"
               className="min-h-[44px] px-3 py-2 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/45 text-solar font-bold inline-flex items-center gap-2 shrink-0 transition-colors"
             >
               <Coins className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span>Deposit in Vault</span>
+              <span>Top Up Pouch in Vault</span>
+            </Link>
+          )}
+          {!ownsAnyWeapon && (
+            <Link
+              href="/game/forge"
+              className="min-h-[44px] px-3 py-2 rounded-lg bg-frost/15 hover:bg-frost/25 border border-frost/45 text-frost font-bold inline-flex items-center gap-2 shrink-0 transition-colors"
+            >
+              <Swords className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>Open Forge &amp; Gear</span>
             </Link>
           )}
         </div>
@@ -468,7 +478,7 @@ export const TacticalCombatStance: React.FC<TacticalCombatStanceProps> = ({
                 Round timer expired: striking lazily settles the expired round and starts a fresh round.
               </span>
             ) : (
-              <span>Signless execution debits {ticketCostNear.toFixed(2)} NEAR from your internal ledger.</span>
+              <span>Signless execution debits {ticketCostNear.toFixed(2)} NEAR from your Citadel Pouch.</span>
             )}
           </div>
 

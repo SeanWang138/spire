@@ -21,13 +21,13 @@ import {
 } from "lucide-react";
 import {
   back_boss_vault,
+  batchMap,
   claim_backer_dividend,
   claim_jackpot,
   claim_payout,
   deposit,
   fund_jackpot,
   get_backer,
-  get_balance,
   get_claimable,
   get_claimable_loot,
   get_tower,
@@ -40,6 +40,7 @@ import {
   type FloorResponse,
   type NftToken,
 } from "@/lib/contract";
+import { formatContractErrorMessage } from "@/lib/errors";
 import {
   BACKER_SHARE_UNIT_NEAR,
   ELEMENT_NAMES,
@@ -48,7 +49,8 @@ import {
   SPLIT_JACKPOT_BPS,
   SPLIT_MERCHANT_BPS,
 } from "@/lib/spire/constants";
-import { useContractView, useSessionAccount } from "@/lib/spire/hooks";
+import { useContractView } from "@/lib/spire/hooks";
+import { useSpireTelemetry } from "@/lib/spire/telemetry";
 import {
   formatNearAmount,
   getExplorerTxUrl,
@@ -67,7 +69,8 @@ import {
 const STORAGE_HISTORY_KEY = "spirefi.vault.history.v1";
 const SHARE_UNIT_YOCTO = 10_000_000_000_000_000n; // 1e-8 NEAR per backer share (Jalur A)
 const SMALL_WEIGHT_THRESHOLD_YOCTO = 10_000_000_000_000_000_000_000n; // 0.01 NEAR
-const MAX_SCAN_ROUNDS_PER_FLOOR = 20;
+const MAX_SCAN_ROUNDS_PER_FLOOR = 6;
+const GAS_TANK_RESERVE_NEAR = 0.1;
 
 const CONTROL_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled";
@@ -128,27 +131,29 @@ function hasLoot(loot: [number, number, number] | null | undefined): boolean {
 }
 
 export default function VaultPage() {
-  const session = useSessionAccount();
+  const { session, pouchYocto, pouchLoading, gasTankYocto, reloadBalance } =
+    useSpireTelemetry();
   const accountId = session?.accountId ?? "";
+  const historyStorageKey = accountId
+    ? `${STORAGE_HISTORY_KEY}:${accountId}`
+    : STORAGE_HISTORY_KEY;
 
-  const [activeTab, setActiveTab] = useState<VaultTab>("payouts");
+  const [activeTab, setActiveTab] = useState<VaultTab>("pouch");
+  const tabTouchedRef = useRef(false);
+  const urlTabProvidedRef = useRef(false);
 
-  const balance = useContractView(
-    async () => (accountId ? await get_balance(accountId) : null),
-    [accountId]
-  );
   const tower = useContractView(get_tower, []);
 
   // Unified floor selector for Floor Backer (stake + share view + dividend claim)
   const [selectedBackerFloor, setSelectedBackerFloor] = useState<number>(1);
-  const [backAmount, setBackAmount] = useState<number>(0.25);
+  const [backAmount, setBackAmount] = useState<number>(0.15);
 
   // Pouch deposit / withdraw / jackpot sponsor state
-  const [depositNear, setDepositNear] = useState<number>(0.25);
+  const [depositNear, setDepositNear] = useState<number>(0.15);
   const [withdrawAll, setWithdrawAll] = useState(false);
   const [withdrawNear, setWithdrawNear] = useState<number>(0);
   const [fundFloor, setFundFloor] = useState<number>(1);
-  const [fundAmount, setFundAmount] = useState<number>(0.25);
+  const [fundAmount, setFundAmount] = useState<number>(0.15);
 
   // Payouts & Loot state (supports Round 0!)
   const [claimFloor, setClaimFloor] = useState<number>(1);
@@ -168,6 +173,7 @@ export default function VaultPage() {
     "Waiting for tower telemetry..."
   );
   const [scanningClaims, setScanningClaims] = useState(false);
+  const [scanAllRounds, setScanAllRounds] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const scanGenRef = useRef(0);
 
@@ -217,102 +223,136 @@ export default function VaultPage() {
     }
   }, [tower.data, floorsByNumber, claimFloor]);
 
-  // Load persisted local history
+  // Respect ?tab= query param without triggering Next.js static prerender Suspense constraints
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_HISTORY_KEY);
-      if (raw) setHistory(JSON.parse(raw) as HistoryEntry[]);
-    } catch {
-      // ignore corrupted or unavailable local storage
+    if (typeof window === "undefined") return;
+    const param = new URLSearchParams(window.location.search).get("tab");
+    if (
+      param === "payouts" ||
+      param === "pouch" ||
+      param === "backer" ||
+      param === "trophies"
+    ) {
+      urlTabProvidedRef.current = true;
+      tabTouchedRef.current = true;
+      setActiveTab(param);
     }
   }, []);
 
-  const runClaimScan = useCallback(async () => {
-    if (!accountId || !tower.data) return;
-    const gen = ++scanGenRef.current;
-    setScanningClaims(true);
-    setScanError(null);
-
-    try {
-      const targets: Array<{ floor: number; round: number }> = [];
-      const scannedNotes: string[] = [];
-
-      for (const fl of tower.data.floors) {
-        const latestCompleted = fl.round - 1;
-        if (latestCompleted >= 0) {
-          const startRound = Math.max(
-            0,
-            latestCompleted - (MAX_SCAN_ROUNDS_PER_FLOOR - 1)
-          );
-          for (let r = startRound; r <= latestCompleted; r += 1) {
-            targets.push({ floor: fl.floor, round: r });
-          }
-          scannedNotes.push(
-            `F${fl.floor} R${startRound}${latestCompleted > startRound ? `-${latestCompleted}` : ""}`
-          );
-        } else if (fl.hp === 0) {
-          targets.push({ floor: fl.floor, round: 0 });
-          scannedNotes.push(`F${fl.floor} R0`);
-        } else {
-          scannedNotes.push(`F${fl.floor} R0 open`);
-        }
-      }
-
-      if (targets.length === 0) {
-        if (scanGenRef.current === gen) {
-          setDiscoveredClaims([]);
-          setScanSummary(
-            `No completed rounds yet (${scannedNotes.join(", ")}).`
-          );
-        }
-        return;
-      }
-
-      const results = await Promise.allSettled(
-        targets.map(async ({ floor, round }) => {
-          const [payoutYocto, loot] = await Promise.all([
-            get_claimable(accountId, floor, round),
-            get_claimable_loot(accountId, floor, round),
-          ]);
-          return { floor, round, payoutYocto, loot };
-        })
-      );
-
-      if (scanGenRef.current !== gen) return;
-
-      const found: DiscoveredClaim[] = [];
-      let failedChecks = 0;
-
-      for (const res of results) {
-        if (res.status === "fulfilled") {
-          const item = res.value;
-          if (parseYoctoSafe(item.payoutYocto) > 0n || hasLoot(item.loot)) {
-            found.push(item);
-          }
-        } else {
-          failedChecks += 1;
-        }
-      }
-
-      setDiscoveredClaims(found);
-      if (failedChecks > 0 && found.length === 0) {
-        setScanError(
-          `Scanned ${targets.length} round(s), but ${failedChecks} RPC check(s) failed. Retry scan.`
-        );
-      }
-      setScanSummary(`Scanned ${scannedNotes.join(" | ")}`);
-    } catch (err) {
-      if (scanGenRef.current === gen) {
-        setScanError(
-          err instanceof Error ? err.message : "Failed to scan completed rounds."
-        );
-      }
-    } finally {
-      if (scanGenRef.current === gen) {
-        setScanningClaims(false);
-      }
+  // Load persisted local history scoped per account
+  useEffect(() => {
+    if (!accountId) {
+      setHistory([]);
+      return;
     }
-  }, [accountId, tower.data]);
+    try {
+      const raw = localStorage.getItem(historyStorageKey);
+      setHistory(raw ? (JSON.parse(raw) as HistoryEntry[]) : []);
+    } catch {
+      setHistory([]);
+    }
+  }, [accountId, historyStorageKey]);
+
+  const runClaimScan = useCallback(
+    async (maxRoundsOverride?: number) => {
+      if (!accountId || !tower.data) return;
+      const gen = ++scanGenRef.current;
+      const MAX_FULL_SCAN_ROUNDS = 120;
+      const scanWindow =
+        maxRoundsOverride ??
+        (scanAllRounds ? MAX_FULL_SCAN_ROUNDS : MAX_SCAN_ROUNDS_PER_FLOOR);
+      setScanningClaims(true);
+      setScanError(null);
+
+      try {
+        const targets: Array<{ floor: number; round: number }> = [];
+        const scannedNotes: string[] = [];
+
+        for (const fl of tower.data.floors) {
+          const latestCompleted = fl.round - 1;
+          if (latestCompleted >= 0) {
+            const startRound = Math.max(0, latestCompleted - (scanWindow - 1));
+            for (let r = startRound; r <= latestCompleted; r += 1) {
+              targets.push({ floor: fl.floor, round: r });
+            }
+            scannedNotes.push(
+              `F${fl.floor} R${startRound}${latestCompleted > startRound ? `-${latestCompleted}` : ""}`
+            );
+          } else if (fl.hp === 0) {
+            targets.push({ floor: fl.floor, round: 0 });
+            scannedNotes.push(`F${fl.floor} R0`);
+          } else {
+            scannedNotes.push(`F${fl.floor} R0 open`);
+          }
+        }
+
+        if (targets.length === 0) {
+          if (scanGenRef.current === gen) {
+            setDiscoveredClaims([]);
+            setScanSummary(
+              `No completed rounds yet (${scannedNotes.join(", ")}).`
+            );
+            if (!urlTabProvidedRef.current && !tabTouchedRef.current) {
+              setActiveTab("pouch");
+            }
+          }
+          return;
+        }
+
+        const results = await batchMap(
+          targets,
+          6,
+          async ({ floor, round }) => {
+            try {
+              const [payoutYocto, loot] = await Promise.all([
+                get_claimable(accountId, floor, round),
+                get_claimable_loot(accountId, floor, round),
+              ]);
+              return { status: "fulfilled" as const, value: { floor, round, payoutYocto, loot } };
+            } catch (reason) {
+              return { status: "rejected" as const, reason };
+            }
+          }
+        );
+
+        if (scanGenRef.current !== gen) return;
+
+        const found: DiscoveredClaim[] = [];
+        let failedChecks = 0;
+
+        for (const res of results) {
+          if (res.status === "fulfilled") {
+            const item = res.value;
+            if (parseYoctoSafe(item.payoutYocto) > 0n || hasLoot(item.loot)) {
+              found.push(item);
+            }
+          } else {
+            failedChecks += 1;
+          }
+        }
+
+        setDiscoveredClaims(found);
+        if (!urlTabProvidedRef.current && !tabTouchedRef.current) {
+          setActiveTab(found.length > 0 ? "payouts" : "pouch");
+        }
+        if (failedChecks > 0 && found.length === 0) {
+          setScanError(
+            `Scanned ${targets.length} round(s), but ${failedChecks} RPC check(s) failed. Retry scan.`
+          );
+        }
+        setScanSummary(`Scanned ${scannedNotes.join(" | ")}`);
+      } catch (err) {
+        if (scanGenRef.current === gen) {
+          setScanError(formatContractErrorMessage(err));
+        }
+      } finally {
+        if (scanGenRef.current === gen) {
+          setScanningClaims(false);
+        }
+      }
+    },
+    [accountId, scanAllRounds, tower.data]
+  );
 
   useEffect(() => {
     void runClaimScan();
@@ -335,7 +375,7 @@ export default function VaultPage() {
         ...prev,
       ].slice(0, 25);
       try {
-        localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(next));
+        localStorage.setItem(historyStorageKey, JSON.stringify(next));
       } catch {
         // storage full: local log is best-effort
       }
@@ -346,20 +386,20 @@ export default function VaultPage() {
   const handleClearHistory = () => {
     setHistory([]);
     try {
-      localStorage.removeItem(STORAGE_HISTORY_KEY);
+      localStorage.removeItem(historyStorageKey);
     } catch {
       // ignore storage unavailability
     }
   };
 
   const refreshAllVaultData = useCallback(() => {
-    balance.reload();
+    reloadBalance();
     tower.reload();
     backer.reload();
     nftSupply.reload();
     trophyToken.reload();
     void runClaimScan();
-  }, [balance, tower, backer, nftSupply, trophyToken, runClaimScan]);
+  }, [reloadBalance, tower, backer, nftSupply, trophyToken, runClaimScan]);
 
   const run = async (
     kind: HistoryEntry["kind"],
@@ -380,8 +420,7 @@ export default function VaultPage() {
       afterSuccess?.();
     } catch (err) {
       setTxStatus({
-        text:
-          err instanceof Error ? err.message : "Transaction failed on-chain.",
+        text: formatContractErrorMessage(err),
         isError: true,
       });
     } finally {
@@ -401,9 +440,7 @@ export default function VaultPage() {
       setClaimableYocto(amount);
       setClaimLoot(loot);
     } catch (err) {
-      setClaimableError(
-        err instanceof Error ? err.message : "Failed to query claimable state."
-      );
+      setClaimableError(formatContractErrorMessage(err));
     } finally {
       setBusy(null);
     }
@@ -413,8 +450,9 @@ export default function VaultPage() {
     return (
       <div className="max-w-5xl mx-auto py-8">
         <EmptyState
-          title="No active session"
-          hint="Enter your account name and authorize a session key on the Title Screen to access your Citadel Pouch, bounties, and trophies."
+          headingAs="h1"
+          title="No active guest session"
+          hint="Launch a 1-click guest subaccount on the Start screen to manage your Citadel Pouch, raid bounties, and trophies."
           actionHref="/game/start"
           actionLabel="Go to Title Screen"
         />
@@ -422,8 +460,26 @@ export default function VaultPage() {
     );
   }
 
-  const balanceYocto = balance.data ?? "0";
+  const balanceYocto = pouchYocto ?? "0";
   const withdrawMax = yoctoToNear(balanceYocto);
+  const gasTankNear =
+    gasTankYocto !== null ? yoctoToNear(gasTankYocto) : null;
+  const maxSafeDepositNear =
+    gasTankNear !== null
+      ? Math.max(
+          0,
+          Math.floor((gasTankNear - GAS_TANK_RESERVE_NEAR) * 100) / 100
+        )
+      : null;
+  const depositExceedsReserve =
+    maxSafeDepositNear !== null && depositNear > maxSafeDepositNear;
+  const hasClaimableRewards = discoveredClaims.length > 0;
+  const manualHasClaimable =
+    claimableYocto !== null &&
+    (parseYoctoSafe(claimableYocto) > 0n || hasLoot(claimLoot));
+  const hasOlderRounds = (tower.data?.floors ?? []).some(
+    (fl) => fl.round > MAX_SCAN_ROUNDS_PER_FLOOR
+  );
   const totalDiscoveredNearYocto = discoveredClaims.reduce(
     (sum, item) => sum + parseYoctoSafe(item.payoutYocto),
     0n
@@ -483,7 +539,7 @@ export default function VaultPage() {
           aria-live="polite"
           className={`px-4 py-3 rounded-xl border text-xs font-mono flex flex-wrap items-center justify-between gap-2 ${
             txStatus.isError
-              ? "bg-hp-red/10 border-hp-red/40 text-hp-text"
+              ? "bg-hp/10 border-hp/40 text-hp-text"
               : "bg-jackpot/10 border-jackpot/35 text-jackpot"
           }`}
         >
@@ -502,7 +558,7 @@ export default function VaultPage() {
         </div>
       )}
 
-      {balance.error && !balance.data ? (
+      {!pouchLoading && pouchYocto === null && tower.error && !tower.data ? (
         <EmptyState
           title="Vault ledger unavailable"
           hint="Failed to read get_balance from the SpireFi contract. Check testnet RPC connectivity and retry."
@@ -517,7 +573,10 @@ export default function VaultPage() {
           >
             <button
               type="button"
-              onClick={() => setActiveTab("payouts")}
+              onClick={() => {
+                tabTouchedRef.current = true;
+                setActiveTab("payouts");
+              }}
               className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
             >
               <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
@@ -530,13 +589,16 @@ export default function VaultPage() {
                   : formatNearAmount(totalDiscoveredNearYocto, 4)}
               </span>
               <span className="text-xs font-mono text-pewter">
-                {discoveredClaims.length} round(s), {totalDiscoveredEssence} essence
+                {discoveredClaims.length} round(s), {totalDiscoveredEssence} seized weapon loot
               </span>
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveTab("pouch")}
+              onClick={() => {
+                tabTouchedRef.current = true;
+                setActiveTab("pouch");
+              }}
               className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
             >
               <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
@@ -544,7 +606,7 @@ export default function VaultPage() {
                 Citadel Pouch
               </span>
               <span className="text-xl font-bold font-mono-numbers text-parchment">
-                {balance.loading
+                {pouchLoading && pouchYocto === null
                   ? "..."
                   : formatNearAmount(balanceYocto, 4)}
               </span>
@@ -572,7 +634,10 @@ export default function VaultPage() {
 
             <button
               type="button"
-              onClick={() => setActiveTab("trophies")}
+              onClick={() => {
+                tabTouchedRef.current = true;
+                setActiveTab("trophies");
+              }}
               className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
             >
               <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
@@ -590,7 +655,10 @@ export default function VaultPage() {
 
           <SpireTabs
             value={activeTab}
-            onValueChange={(val) => setActiveTab(val as VaultTab)}
+            onValueChange={(val) => {
+              tabTouchedRef.current = true;
+              setActiveTab(val as VaultTab);
+            }}
             className="flex flex-col gap-5"
           >
             <SpireTabsList
@@ -623,23 +691,38 @@ export default function VaultPage() {
                         Auto-Discovered Rewards
                       </h2>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void runClaimScan()}
-                      disabled={scanningClaims || busy !== null}
-                      className={`min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-dark hover:bg-white/10 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors disabled:opacity-50 ${CONTROL_RING}`}
-                    >
-                      {scanningClaims ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-frost" aria-hidden="true" />
-                      ) : (
-                        <Search className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void runClaimScan()}
+                        disabled={scanningClaims || busy !== null}
+                        className={`min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-dark hover:bg-white/10 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors disabled:opacity-50 ${CONTROL_RING}`}
+                      >
+                        {scanningClaims ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-frost" aria-hidden="true" />
+                        ) : (
+                          <Search className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+                        )}
+                        Rescan Recent
+                      </button>
+                      {hasOlderRounds && !scanAllRounds && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanAllRounds(true);
+                            void runClaimScan(10_000);
+                          }}
+                          disabled={scanningClaims || busy !== null}
+                          className={`min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-dark/70 hover:bg-white/10 border border-white/10 text-ash hover:text-parchment text-xs font-mono font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 ${CONTROL_RING}`}
+                        >
+                          Scan All
+                        </button>
                       )}
-                      Rescan Rounds 0..N
-                    </button>
+                    </div>
                   </div>
 
                   <p className="text-xs text-ash leading-relaxed">
-                    Scans completed rounds (0 through current round minus 1) across Floors 1 to 3 for unclaimed NEAR jackpots and seized essence loot.
+                    Scans recent completed rounds (up to last {MAX_SCAN_ROUNDS_PER_FLOOR} per floor) across Floors 1 to 3 for unclaimed NEAR jackpots and seized weapon loot.
                   </p>
 
                   <div className="rounded-lg bg-panel-dark/75 p-4 flex flex-wrap items-center justify-between gap-3">
@@ -651,7 +734,7 @@ export default function VaultPage() {
                         {formatNearAmount(totalDiscoveredNearYocto, 4)}
                       </div>
                       <div className="text-xs font-mono text-ash">
-                        Essence loot: {totalDiscoveredEssence} units across{" "}
+                        Seized weapon loot: {totalDiscoveredEssence} units across{" "}
                         {discoveredClaims.length} completed round(s)
                       </div>
                     </div>
@@ -665,7 +748,9 @@ export default function VaultPage() {
                           "1-Click Claim All Recent Bounties & Loot"
                         )
                       }
-                      disabled={busy !== null || scanningClaims}
+                      disabled={
+                        busy !== null || scanningClaims || !hasClaimableRewards
+                      }
                       className={`min-h-[44px] px-4 py-2.5 rounded-lg bg-jackpot text-oled font-mono font-bold text-xs uppercase tracking-wider hover:bg-jackpot/90 transition-colors inline-flex items-center gap-2 disabled:opacity-45 ${CONTROL_RING}`}
                     >
                       <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -673,7 +758,7 @@ export default function VaultPage() {
                         ? "Claiming..."
                         : discoveredClaims.length > 0
                           ? `1-Click Claim (${discoveredClaims.length})`
-                          : "1-Click Claim Recent"}
+                          : "No Rewards Ready"}
                     </button>
                   </div>
 
@@ -771,7 +856,7 @@ export default function VaultPage() {
                   </div>
 
                   <p className="text-xs text-ash leading-relaxed">
-                    Query any specific floor and round (starting at Round 0) to inspect your exact jackpot payout and seized essence loot before claiming.
+                    Query any specific floor and round (starting at Round 0) to inspect your exact jackpot payout and seized weapon loot before claiming.
                   </p>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -790,6 +875,9 @@ export default function VaultPage() {
                         value={claimFloor}
                         onChange={(e) => {
                           claimRoundTouchedRef.current = false;
+                          setClaimableYocto(null);
+                          setClaimLoot(null);
+                          setClaimableError(null);
                           setClaimFloor(
                             clampFloor(Number.parseInt(e.target.value, 10) || 1)
                           );
@@ -811,6 +899,9 @@ export default function VaultPage() {
                         value={claimRound}
                         onChange={(e) => {
                           claimRoundTouchedRef.current = true;
+                          setClaimableYocto(null);
+                          setClaimLoot(null);
+                          setClaimableError(null);
                           setClaimRound(parseNonNegativeInt(e.target.value, 0));
                         }}
                         className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
@@ -828,6 +919,9 @@ export default function VaultPage() {
                         type="button"
                         onClick={() => {
                           claimRoundTouchedRef.current = true;
+                          setClaimableYocto(null);
+                          setClaimLoot(null);
+                          setClaimableError(null);
                           setClaimRound(0);
                         }}
                         className={`min-h-[44px] px-2.5 rounded-lg bg-panel-dark hover:bg-white/10 text-parchment font-mono text-xs ${CONTROL_RING}`}
@@ -856,7 +950,7 @@ export default function VaultPage() {
                         </div>
                         {claimLoot && (
                           <div className="text-ash">
-                            Essence Loot: Solar {claimLoot[0]}, Frost{" "}
+                            Seized Weapon Loot: Solar {claimLoot[0]}, Frost{" "}
                             {claimLoot[1]}, Void {claimLoot[2]}
                           </div>
                         )}
@@ -880,7 +974,7 @@ export default function VaultPage() {
                           `Claim Floor ${claimFloor} Round ${claimRound} Payout`
                         )
                       }
-                      disabled={busy !== null}
+                      disabled={busy !== null || !manualHasClaimable}
                       className={`min-h-[44px] py-2 px-3 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
                     >
                       {busy === "claim" ? "Submitting..." : "Claim Payout"}
@@ -894,7 +988,7 @@ export default function VaultPage() {
                           "Claim All Recent Bounties"
                         )
                       }
-                      disabled={busy !== null}
+                      disabled={busy !== null || !hasClaimableRewards}
                       className={`min-h-[44px] py-2 px-3 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
                     >
                       {busy === "loot" ? "Submitting..." : "Claim All"}
@@ -991,7 +1085,7 @@ export default function VaultPage() {
 
                   {/* Deposit block */}
                   <div className="rounded-lg bg-panel-dark/70 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <label
                         htmlFor="deposit-amount"
                         className="text-xs font-mono font-semibold text-parchment inline-flex items-center gap-1.5"
@@ -1003,18 +1097,55 @@ export default function VaultPage() {
                         Deposit NEAR into Pouch
                       </label>
                       <div className="flex flex-wrap gap-2">
-                        {[0.1, 0.25, 0.5, 1].map((amt) => (
-                          <button
-                            key={amt}
-                            type="button"
-                            onClick={() => setDepositNear(amt)}
-                            className={`min-h-[44px] px-3 py-1 rounded-lg bg-panel-elevated hover:bg-white/10 text-parchment text-xs font-mono-numbers ${CONTROL_RING}`}
-                          >
-                            {amt} NEAR
-                          </button>
-                        ))}
+                        {[0.05, 0.15, 0.25].map((amt) => {
+                          const unsafe =
+                            maxSafeDepositNear !== null && amt > maxSafeDepositNear;
+                          return (
+                            <button
+                              key={amt}
+                              type="button"
+                              disabled={unsafe}
+                              onClick={() => setDepositNear(amt)}
+                              className={`min-h-[44px] px-3 py-1 rounded-lg bg-panel-elevated hover:bg-white/10 text-parchment text-xs font-mono-numbers disabled:opacity-40 ${CONTROL_RING}`}
+                            >
+                              {amt} NEAR
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          disabled={maxSafeDepositNear === null || maxSafeDepositNear <= 0}
+                          onClick={() => {
+                            if (maxSafeDepositNear !== null && maxSafeDepositNear > 0) {
+                              setDepositNear(maxSafeDepositNear);
+                            }
+                          }}
+                          className={`min-h-[44px] px-3 py-1 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/30 text-jackpot text-xs font-mono disabled:opacity-40 ${CONTROL_RING}`}
+                        >
+                          Max Safe
+                        </button>
                       </div>
                     </div>
+
+                    <p className="text-xs font-mono text-pewter">
+                      Silent Gas Tank:{" "}
+                      <span className="text-parchment font-mono-numbers">
+                        {gasTankNear !== null
+                          ? `${gasTankNear.toFixed(4)} NEAR`
+                          : "checking..."}
+                      </span>{" "}
+                      — keeps {GAS_TANK_RESERVE_NEAR.toFixed(2)} NEAR reserved for signless transactions.
+                    </p>
+
+                    {depositExceedsReserve && (
+                      <p className="text-xs font-mono text-solar">
+                        Lower deposit to{" "}
+                        <span className="font-semibold">
+                          {maxSafeDepositNear?.toFixed(2)} NEAR
+                        </span>{" "}
+                        or less so your Silent Gas Tank retains {GAS_TANK_RESERVE_NEAR.toFixed(2)} NEAR.
+                      </p>
+                    )}
 
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
@@ -1022,7 +1153,7 @@ export default function VaultPage() {
                         type="number"
                         min={0.01}
                         step={0.05}
-                        placeholder="0.25"
+                        placeholder="0.15"
                         value={depositNear}
                         onChange={(e) =>
                           setDepositNear(Math.max(0, Number(e.target.value)))
@@ -1038,7 +1169,9 @@ export default function VaultPage() {
                             `Deposit ${depositNear} NEAR to Citadel Pouch`
                           )
                         }
-                        disabled={busy !== null || depositNear <= 0}
+                        disabled={
+                          busy !== null || depositNear <= 0 || depositExceedsReserve
+                        }
                         className={`min-h-[44px] px-5 py-2 rounded-lg bg-solar text-oled font-mono font-bold text-xs uppercase tracking-wider hover:bg-solar/90 transition-colors disabled:opacity-40 ${CONTROL_RING}`}
                       >
                         {busy === "deposit" ? "Depositing..." : "Deposit NEAR"}
@@ -1218,7 +1351,13 @@ export default function VaultPage() {
                   </div>
 
                   <p className="text-xs text-ash leading-relaxed">
-                    Capital attached via Floor Backing goes straight into the floor jackpot (no minimum HP gate and no mid-cycle principal withdrawal). Until the boss is defeated, you earn pro-rata dividends from {(SPLIT_BACKER_BPS / 100).toFixed(0)}% of every raid ticket sold on that floor. If a round expires, the jackpot and active backer cycle carry forward to the next round without a 70% payout.
+                    Principal attached via Floor Backing is{" "}
+                    <strong className="text-parchment">locked permanently (non-withdrawable)</strong>{" "}
+                    into the floor jackpot to attract raiders (no minimum HP gate). Until the boss
+                    is defeated, you earn pro-rata dividends from{" "}
+                    {(SPLIT_BACKER_BPS / 100).toFixed(0)}% of every raid ticket sold on that
+                    floor. If a round expires, the jackpot and active backer cycle carry forward to
+                    the next round without a 70% payout.
                   </p>
 
                   <div>
@@ -1314,7 +1453,7 @@ export default function VaultPage() {
                   </div>
 
                   {backer.error && !backer.data ? (
-                    <div className="rounded-lg bg-hp-red/10 px-4 py-3 text-xs font-mono text-hp-text">
+                    <div className="rounded-lg bg-hp/10 border border-hp/30 px-4 py-3 text-xs font-mono text-hp-text">
                       Failed to load get_backer for Floor {selectedBackerFloor}.
                     </div>
                   ) : (
@@ -1512,7 +1651,7 @@ export default function VaultPage() {
                         {trophyTokenId} has not been minted yet
                       </p>
                       <p className="text-xs font-mono text-ash max-w-md mx-auto leading-relaxed">
-                        Defeat the Floor 3 boss in Round {nftRound} to mint {trophyTokenId} directly to the final striker, then claim {ELEMENT_NAMES.join(" / ")} essence rewards under Payouts &amp; Loot.
+                        Defeat the Floor 3 boss in Round {nftRound} to mint {trophyTokenId} directly to the final striker, then claim {ELEMENT_NAMES.join(" / ")} seized weapon rewards under Payouts &amp; Loot.
                       </p>
                     </div>
                   )}

@@ -450,9 +450,13 @@ function toHex(value: string): string | null {
  * no prose, no markdown fences, no extra keys.
  */
 export function parseStrictProposalPayload(content: string): AiProposal {
-  const trimmed = (content ?? "").trim();
+  let trimmed = (content ?? "").trim();
+  const fenced = /^```(?:json)?\s*\r?\n?([\s\S]*?)\r?\n?```$/i.exec(trimmed);
+  if (fenced) {
+    trimmed = fenced[1].trim();
+  }
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    throw new Error("AI response is not a bare JSON object (prose or fenced output rejected)");
+    throw new Error("AI response is not a bare JSON object (prose or malformed output rejected)");
   }
 
   let raw: Record<string, unknown>;

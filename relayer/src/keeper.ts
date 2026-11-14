@@ -93,13 +93,21 @@ export function evaluateEnrageTick(floor: FloorResponse, nowNs: bigint): bigint 
     return null;
   }
   const isEnrageFloor = floor.enrage === true || floor.floor === 2 || floor.floor === 3;
-  if (!isEnrageFloor || floor.floor_start_ns === undefined || floor.enrage_ticks === undefined) {
+  const startRaw = floor.floor_start_ns ?? floor.first_attack_ns;
+  if (!isEnrageFloor || startRaw === undefined || startRaw === null) {
     return null;
   }
-  const elapsed = nowNs - toBigInt(floor.floor_start_ns);
+  const startNs = toBigInt(startRaw);
+  if (startNs <= 0n) return null;
+  const elapsed = nowNs - startNs;
   if (elapsed <= 0n) return null;
   const expectedTicks = elapsed / FLOOR3_ENRAGE_INTERVAL_NS;
-  return expectedTicks > BigInt(floor.enrage_ticks) ? expectedTicks : null;
+  if (expectedTicks <= 0n) return null;
+  if (floor.enrage_ticks !== undefined) {
+    return expectedTicks > BigInt(floor.enrage_ticks) ? expectedTicks : null;
+  }
+  const hp = floor.hp ?? floor.boss_hp ?? 0;
+  return hp > 0 ? expectedTicks : null;
 }
 
 /**
@@ -134,6 +142,7 @@ export class SpireKeeper {
 
   private mockState: KeeperMockState | null = null;
   private lastNonce = 0;
+  private nonceSeeded = false;
   private submittedEpochs = new Set<string>();
 
   constructor(config: KeeperConfig = {}) {
@@ -415,9 +424,35 @@ export class SpireKeeper {
       const result = await this.callChangeMethod("update_meta", {}, GAS_UPDATE_META);
       if (result.success) {
         actions.push(`update_meta:epoch=${meta.epoch}:${result.txHash ?? "ok"}`);
+        try {
+          ({ meta, floors } = await this.readState());
+        } catch (err: any) {
+          errors.push(`state refresh after update_meta failed: ${err?.message || String(err)}`);
+        }
+      } else if (String(result.error ?? "").includes("E_SAME_EPOCH")) {
+        // Optimistic/final RPC clock skew can occasionally trigger E_SAME_EPOCH; skip benignly.
+        actions.push(`update_meta:skipped_same_epoch=${meta.epoch}`);
       } else {
         errors.push(`update_meta failed: ${result.error}`);
       }
+    }
+
+    // Seed lastNonce from on-chain get_ai_state(0..MAX_FLOOR-1) once per process start
+    // so keeper restarts cannot propose a stale nonce and hit E_REPLAY_DETECTED.
+    if (!this.nonceSeeded && this.aiMode !== "epoch-only" && this.teeClient) {
+      let maxOnChainNonce = this.lastNonce;
+      for (let floor = 0; floor < MAX_FLOOR; floor++) {
+        try {
+          const aiState = await this.readAiState(floor, meta);
+          if ((aiState.nonce ?? 0) > maxOnChainNonce) {
+            maxOnChainNonce = aiState.nonce;
+          }
+        } catch {
+          // ignore uninitialized floor ai state during boot seed
+        }
+      }
+      this.lastNonce = maxOnChainNonce;
+      this.nonceSeeded = true;
     }
 
     // (d) settlement-due visibility (expiry runs lazily inside attack() on-chain) + enrage visibility

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SessionData, SessionManager } from "@/lib/near";
 
 /** Loads the signless session and re-reads it whenever the session changes
@@ -29,11 +29,14 @@ export function useContractView<T>(
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetcher()
+    fetcherRef
+      .current()
       .then((res) => {
         if (!cancelled) {
           setData(res);
@@ -56,5 +59,8 @@ export function useContractView<T>(
   }, [...deps, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { data, error, loading, reload };
+  return useMemo(
+    () => ({ data, error, loading, reload }),
+    [data, error, loading, reload]
+  );
 }

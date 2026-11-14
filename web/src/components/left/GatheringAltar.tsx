@@ -52,27 +52,43 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({
   accountId = "guest",
   epoch = 0,
 }) => {
-  const storageKey = `spire_gather:${accountId}:${epoch}`;
+  const validEpoch = epoch > 0;
+  const storageKey = validEpoch ? `spire_gather:${accountId}:${epoch}` : "";
   const [harvestingKey, setHarvestingKey] = useState<string | null>(null);
   const [successKey, setSuccessKey] = useState<string | null>(null);
   const [cooldownLeft, setCooldownLeft] = useState<number>(0);
   const [epochGathered, setEpochGathered] = useState<number>(0);
+  const successTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync cooldown & epoch cap counter for current account + epoch
   useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    };
+  }, []);
+
+  // Sync cooldown & epoch cap counter only when real on-chain epoch > 0
+  useEffect(() => {
+    if (!storageKey) return;
     const saved = readGatherTracker(storageKey);
     setEpochGathered(Math.min(GATHER_EPOCH_CAP, Math.max(0, saved.epochUnits)));
     const remaining = Math.max(0, Math.ceil((saved.cooldownUntilMs - Date.now()) / 1000));
     setCooldownLeft(remaining);
   }, [storageKey]);
 
+  const isCoolingDown = cooldownLeft > 0;
   useEffect(() => {
-    if (cooldownLeft <= 0) return;
+    if (!isCoolingDown) return;
     const t = setInterval(() => {
-      setCooldownLeft((c) => (c > 1 ? c - 1 : 0));
+      setCooldownLeft((c) => {
+        if (c <= 1) {
+          clearInterval(t);
+          return 0;
+        }
+        return c - 1;
+      });
     }, 1000);
     return () => clearInterval(t);
-  }, [cooldownLeft]);
+  }, [isCoolingDown]);
 
   const shrines = [
     {
@@ -124,18 +140,21 @@ export const GatheringAltar: React.FC<GatheringAltarProps> = ({
       const nextUntil = Date.now() + COOLDOWN_SECONDS * 1000;
       setEpochGathered(nextUnits);
       setCooldownLeft(COOLDOWN_SECONDS);
-      writeGatherTracker(storageKey, { cooldownUntilMs: nextUntil, epochUnits: nextUnits });
+      if (storageKey) {
+        writeGatherTracker(storageKey, { cooldownUntilMs: nextUntil, epochUnits: nextUnits });
+      }
       setSuccessKey(key);
-      setTimeout(() => setSuccessKey(null), 2000);
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => setSuccessKey(null), 2000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("E_EPOCH_CAP")) {
         setEpochGathered(GATHER_EPOCH_CAP);
-        writeGatherTracker(storageKey, { cooldownUntilMs: 0, epochUnits: GATHER_EPOCH_CAP });
+        if (storageKey) writeGatherTracker(storageKey, { cooldownUntilMs: 0, epochUnits: GATHER_EPOCH_CAP });
       } else if (msg.includes("E_COOLDOWN")) {
         const nextUntil = Date.now() + COOLDOWN_SECONDS * 1000;
         setCooldownLeft(COOLDOWN_SECONDS);
-        writeGatherTracker(storageKey, { cooldownUntilMs: nextUntil, epochUnits: epochGathered });
+        if (storageKey) writeGatherTracker(storageKey, { cooldownUntilMs: nextUntil, epochUnits: epochGathered });
       }
     } finally {
       setHarvestingKey(null);

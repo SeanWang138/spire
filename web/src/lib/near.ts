@@ -12,6 +12,13 @@ import { KeyPair } from "near-api-js";
 
 export const NETWORK_ID = "testnet";
 
+export const GUEST_PARENT_ACCOUNT =
+  process.env.NEXT_PUBLIC_GUEST_PARENT_ACCOUNT ||
+  process.env.NEXT_PUBLIC_CONTRACT_ID ||
+  "spire.testnet";
+
+export const GUEST_ACCOUNT_SUFFIX = `.${GUEST_PARENT_ACCOUNT}`;
+
 export const RPC_ENDPOINTS = [
   "https://rpc.testnet.fastnear.com",
   "https://test.rpc.fastnear.com",
@@ -71,7 +78,7 @@ export class SessionManager {
    */
   public createSession(accountId: string): SessionData {
     const keyPair = KeyPair.fromRandom("ed25519");
-    const cleanId = accountId.trim() || "player.spire.testnet";
+    const cleanId = accountId.trim() || `player${GUEST_ACCOUNT_SUFFIX}`;
     const session: SessionData = {
       accountId: cleanId,
       publicKey: keyPair.getPublicKey().toString(),
@@ -133,7 +140,18 @@ export class SessionManager {
 
   public clearSession(): void {
     if (typeof window !== "undefined") {
+      const current = this.getSession();
       localStorage.removeItem(STORAGE_SESSION_KEY);
+      if (current?.accountId) {
+        localStorage.removeItem(`spirefi.vault.history.v1:${current.accountId}`);
+        localStorage.removeItem(`spirefi.raid.log.v1:${current.accountId}`);
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith(`spire_gather:${current.accountId}:`)) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
       this.notifySessionChanged();
     }
   }

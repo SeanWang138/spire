@@ -47,7 +47,7 @@ Desktop and mobile browsers accessing NEAR testnet (`spire.testnet`). Players ca
 
 - Live NEAR testnet smart contract (`spire.testnet`) with Rust source in `contract/src/`.
 - Canonical mathematical models, cross-layer parity vectors, and tests in `tests/`, `relayer/src/`, and `web/src/lib/spire/`.
-- Authoritative UI/design specification in `web/DESIGN.md` and protocol docs in `PROJECT.md` and `09-games.md`.
+- Authoritative UI/design specification in `web/DESIGN.md` and protocol docs in `PROJECT.md` and `README.md`.
 
 ## Product Principles
 

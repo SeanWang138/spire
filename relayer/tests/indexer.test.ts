@@ -207,8 +207,8 @@ describe("Indexer Module - Stats collector", () => {
     ]);
 
     const summary = stats.getStats();
-    // 90% of each ticket goes to the floor jackpot: 900 + 1800, minus 500 claimed.
-    assert.strictEqual(summary.totalJackpotYocto, "2200");
+    // 70% of each ticket goes to the floor jackpot (v3.1 split_ticket): 700 + 1400, minus 500 claimed.
+    assert.strictEqual(summary.totalJackpotYocto, "1600");
     assert.strictEqual(summary.totalRaids, 2);
     assert.strictEqual(summary.totalDamage, 500);
     assert.deepStrictEqual(summary.supply, [1, 0, 0]);
@@ -216,8 +216,8 @@ describe("Indexer Module - Stats collector", () => {
     assert.strictEqual(summary.weakElement, 2);
     assert.strictEqual(summary.lastTaunt, "Void is cheaper than courage.");
     assert.strictEqual(summary.epoch, 4);
-    assert.strictEqual(summary.floors[1].jackpotYocto, "400");
-    assert.strictEqual(summary.floors[3].jackpotYocto, "1800");
+    assert.strictEqual(summary.floors[1].jackpotYocto, "200");
+    assert.strictEqual(summary.floors[3].jackpotYocto, "1400");
   });
 
   it("accepts authoritative meta refreshes", () => {
@@ -506,6 +506,212 @@ describe("Indexer Module - Landing page API", () => {
       assert.strictEqual(snap.total.bossHpTotal, "3500");
     } finally {
       globalThis.fetch = origFetch;
+    }
+  });
+
+  it("parses live events.rs v3.1 shapes, falls back to get_tower jackpot/damage, and scrapes blocks", async () => {
+    const collector = new StatsCollector();
+    const events = extractEventsFromLogs([
+      event("craft", {
+        account_id: "hero.spire.testnet",
+        recipe: "craft_weapon",
+        output_token: "weapon:frost",
+        materials_consumed: [{ token_id: "ore:iron", amount: 2 }],
+      }),
+      event("merchant_trade", {
+        account_id: "hero.spire.testnet",
+        side: "buy",
+        item_id: "ore:iron",
+        qty: 2,
+        total_price: "110000000000000000000000",
+        current_stock: 98,
+        merchant_cash: "5110000000000000000000000",
+      }),
+      event("buyback", {
+        account_id: "hero.spire.testnet",
+        floor: 0,
+        element: 1,
+        qty: 1,
+        unit_price: "100000000000000000000000",
+        total_price: "100000000000000000000000",
+      }),
+      event("ai_proposal_applied", {
+        floor: 0,
+        epoch: 3,
+        nonce: 9,
+        buyback_multiplier_bps: [10000, 12500, 10000],
+        altar_recipe_id: "reforge_2_to_1",
+      }),
+    ]);
+    assert.strictEqual(events.length, 4);
+    for (const ev of events) collector.ingest(ev);
+    assert.deepStrictEqual(collector.getStats().supply, [0, 0, 0]);
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      const req = JSON.parse(String(init?.body ?? "{}")) as { method?: string; params?: any };
+      if (req.method === "query") {
+        const method = req.params?.method_name;
+        const payload =
+          method === "get_tower"
+            ? {
+                floors: [
+                  { floor: 0, hp: 900, max_hp: 1000, jackpot: "70000000000000000000000", total_damage: "100" },
+                  { floor: 1, hp: 1600, max_hp: 1600, jackpot: "105000000000000000000000", total_damage: "0" },
+                ],
+              }
+            : method === "get_meta"
+              ? { epoch: 94, resistance: [4500, 4500, 4500], next_epoch_in_ns: 0, shifted_by: 0, supply: [1, 1, 1], weak_element: 0 }
+              : method === "get_supply"
+                ? [1, 1, 1]
+                : { cash: "2000000000000000000000000", stock: {}, is_open: true };
+        return new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: "1", result: { result: Array.from(Buffer.from(JSON.stringify(payload))) } }),
+          { status: 200 }
+        );
+      }
+      if (req.method === "block") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: { header: { height: 500 }, chunks: [{ chunk_hash: "chunk-500" }] },
+          }),
+          { status: 200 }
+        );
+      }
+      if (req.method === "chunk") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              transactions: [{ hash: "tx-raid-1", signer_id: "hero.spire.testnet", receiver_id: "spire.testnet" }],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+      if (req.method === "EXPERIMENTAL_tx_status") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              transaction_outcome: { outcome: { executor_id: "hero.spire.testnet", logs: [] } },
+              receipts_outcome: [
+                {
+                  outcome: {
+                    executor_id: "spire.testnet",
+                    logs: [
+                      event("raid", {
+                        account_id: "hero.spire.testnet",
+                        floor: 0,
+                        round: 1,
+                        weapon: "weapon:solar",
+                        damage: 140,
+                        boss_remaining_hp: 860,
+                        ticket_paid: "100000000000000000000000",
+                        tribute_taken: false,
+                      }),
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: null }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const indexer = new SpireIndexer({ rpcUrl: "https://mock-rpc.example", contractId: "spire.testnet" });
+      const snap = await indexer.fetchLiveStats();
+      assert.strictEqual(snap.total.totalJackpotYocto, "175000000000000000000000");
+      assert.strictEqual(snap.total.totalDamage, 100);
+
+      await indexer.pollLatestBlocks();
+      assert.strictEqual(indexer.getEventCount(), 1);
+      assert.strictEqual(indexer.getStats().totalRaids, 1);
+      assert.strictEqual(indexer.getStats().totalJackpotYocto, "70000000000000000000000");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("handles GET /api/events?limit=1 and maps AlreadyExists account creation errors to HTTP 409", async () => {
+    const collector = new StatsCollector();
+    const accounts = new AccountQueue();
+    const fakeEvents = [
+      { standard: "spire" as const, version: "3.1.0", event: "raid", data: [{ floor: 1, damage: 50 }] },
+      { standard: "spire" as const, version: "3.1.0", event: "boss_defeated", data: [{ floor: 1, round: 2 }] },
+    ];
+
+    const evRes = await handleApiRequestAsync("GET", "/api/events?limit=1", undefined, collector, accounts, {
+      getRecentEvents: (limit) => fakeEvents.slice(-limit),
+    });
+    assert.strictEqual(evRes.status, 200);
+    assert.strictEqual((evRes.body as any).events.length, 1);
+    assert.strictEqual((evRes.body as any).events[0].event, "boss_defeated");
+
+    const dupRes = await handleApiRequestAsync(
+      "POST",
+      "/api/accounts",
+      { account_id: "alice.spire.testnet", public_key: "ed25519:" + "ab".repeat(32) },
+      collector,
+      accounts,
+      {
+        createAccount: async () => {
+          throw new Error("AccountAlreadyExists: alice.spire.testnet already exists");
+        },
+      }
+    );
+    assert.strictEqual(dupRes.status, 409);
+    assert.strictEqual((dupRes.body as any).error, "account_exists");
+  });
+
+  it("serves CORS headers, OPTIONS 204 preflight, and /api/events on live SpireIndexer HTTP streamer", async () => {
+    const net = await import("node:net");
+    const port = await new Promise<number>((resolvePort, rejectPort) => {
+      const probe = net.createServer();
+      probe.once("error", rejectPort);
+      probe.listen(0, "127.0.0.1", () => {
+        const addr = probe.address();
+        const freePort = typeof addr === "object" && addr ? addr.port : 0;
+        probe.close(() => resolvePort(freePort));
+      });
+    });
+
+    const indexer = new SpireIndexer({ rpcUrl: "https://mock-rpc.example", contractId: "spire.testnet" });
+    indexer.ingestLogs([
+      'EVENT_JSON:{"standard":"spire","version":"3.1.0","event":"raid","data":[{"account_id":"a.spire.testnet","floor":0,"round":1,"weapon":"weapon:solar","damage":77,"boss_remaining_hp":923,"ticket_paid":"100000000000000000000000","tribute_taken":false}]}',
+    ]);
+    indexer.startStreamer(port);
+
+    try {
+      let optsRes: Response | null = null;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          optsRes = await fetch(`http://127.0.0.1:${port}/api/events`, { method: "OPTIONS" });
+          break;
+        } catch {
+          await new Promise((r) => setTimeout(r, 15));
+        }
+      }
+      assert.ok(optsRes, "Expected HTTP streamer to become reachable");
+      assert.strictEqual(optsRes.status, 204);
+      assert.strictEqual(optsRes.headers.get("access-control-allow-origin"), "*");
+
+      const evRes = await fetch(`http://127.0.0.1:${port}/api/events?limit=5`);
+      assert.strictEqual(evRes.status, 200);
+      assert.strictEqual(evRes.headers.get("access-control-allow-origin"), "*");
+      const evJson = (await evRes.json()) as { events: Array<{ event: string }> };
+      assert.strictEqual(evJson.events.length, 1);
+      assert.strictEqual(evJson.events[0].event, "raid");
+    } finally {
+      indexer.stopStreamer();
     }
   });
 });

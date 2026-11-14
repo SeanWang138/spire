@@ -11,6 +11,7 @@ interface EmptyStateProps {
   actionHref?: string;
   actionLabel?: string;
   className?: string;
+  headingAs?: "h1" | "h2";
 }
 
 /**
@@ -24,7 +25,9 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   actionHref,
   actionLabel,
   className = "",
+  headingAs = "h2",
 }) => {
+  const HeadingTag = headingAs;
   return (
     <div
       className={`obsidian-surface p-8 flex flex-col items-center justify-center text-center gap-3 ${className}`}
@@ -37,10 +40,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       >
         <Ghost className="w-6 h-6" />
       </div>
-      <h2 className="font-serif text-lg sm:text-xl font-bold text-parchment tracking-wide">
+      <HeadingTag className="font-serif text-lg sm:text-xl font-bold text-parchment tracking-wide">
         {title}
-      </h2>
-      <p className="text-xs font-mono text-ash max-w-md leading-relaxed">
+      </HeadingTag>
+      <p className="text-xs font-mono text-ash max-w-md leading-relaxed text-pretty">
         {hint}
       </p>
       {(onReload || (actionHref && actionLabel)) && (

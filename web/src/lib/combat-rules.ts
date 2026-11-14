@@ -9,13 +9,13 @@ import {
   FROST_WARD_FLOOR,
   TRIBUTE_THRESHOLD_BPS,
 } from "./spire/constants";
-import type { TacticalStance } from "./simulation/pricing";
+import {
+  getWeaponTributeTier,
+  type TacticalStance,
+  type WeaponTributeTier,
+} from "./simulation/pricing";
 
-export type WeaponTributeTier =
-  | "starter-safe"
-  | "last-weapon-safe"
-  | "safe-below-ward"
-  | "tribute-risk";
+export type { WeaponTributeTier };
 
 export interface WeaponTributeStatusInput {
   total: number;
@@ -77,18 +77,20 @@ export function getWeaponTributeStatus({
   effectiveResBps,
   stance,
 }: WeaponTributeStatusInput): WeaponTributeStatus {
-  if (effectiveResBps < TRIBUTE_THRESHOLD_BPS) {
+  const tier = getWeaponTributeTier(effectiveResBps, free, isOnlyWeapon);
+
+  if (tier === "safe-below-ward") {
     return {
-      tier: "safe-below-ward",
+      tier,
       atRisk: false,
       label: "Safe · Below Ward",
       detail: `Effective resistance (${effectiveResBps} bps) is below the ${TRIBUTE_THRESHOLD_BPS} bps Boss Tribute threshold.`,
     };
   }
 
-  if (free <= 0) {
+  if (tier === "starter-safe") {
     return {
-      tier: "starter-safe",
+      tier,
       atRisk: false,
       label: "Starter Safe",
       detail:
@@ -98,9 +100,9 @@ export function getWeaponTributeStatus({
     };
   }
 
-  if (isOnlyWeapon) {
+  if (tier === "last-weapon-safe") {
     return {
-      tier: "last-weapon-safe",
+      tier,
       atRisk: false,
       label: "Last Weapon Safe",
       detail:

@@ -2194,8 +2194,8 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       const dtFactor = dt / 0.016;
 
       const paused = pausedRef.current;
-      // Keep gentle living orbit even if OS reduced-motion is on; explicit Pause freezes time.
-      const motionScale = paused ? 0 : reducedMotionRef.current ? 0.35 : 1;
+      // Freeze ambient animation when Paused or OS prefers-reduced-motion unless Resume FX overrides.
+      const motionScale = paused || reducedMotionRef.current ? 0 : 1;
       const selFloor = selectedFloorRef.current;
       const hovFloor = hoveredFloorRef.current;
       const towerHot = hovFloor !== null;

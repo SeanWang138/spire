@@ -28,7 +28,7 @@ export const ONE_NEAR_YOCTO = 1_000_000_000_000_000_000_000_000n; // 10^24 yocto
 export const TRIBUTE_THRESHOLD_BPS = 7000;
 export const ELEMENT_COUNT = 3;
 export const MAX_FLOOR = 3;
-export const TICKET_JACKPOT_SHARE_BPS = 9000;
+export const TICKET_JACKPOT_SHARE_BPS = 7000;
 
 /**
  * Parses integer, decimal, or scientific-notation numbers/strings (e.g. "2.3683e+24",
@@ -260,7 +260,7 @@ export interface CraftEventData {
   account_id: string;
   recipe: string;
   output_token: string;
-  amount: number;
+  amount?: number;
   materials_consumed: Array<{ token_id: string; amount: number }>;
 }
 
@@ -270,6 +270,7 @@ export interface ReforgeEventData {
   received_element: string;
   burned_count: number;
   minted_count: number;
+  recipe?: string;
 }
 
 export interface RaidEventData {
@@ -288,27 +289,34 @@ export interface BossDefeatedEventData {
   round: number;
   killer: string;
   total_jackpot: string;
-  total_damage: number;
+  total_damage: number | string;
   trophy_token_id: string | null;
 }
 
 export interface AiProposalAppliedEventData {
+  floor?: number;
   epoch: number;
-  old_resistance: Triple;
-  new_resistance: Triple;
+  nonce?: number;
+  old_resistance?: Triple;
+  new_resistance?: Triple;
   buyback_multiplier_bps: number | Triple;
-  proposer: string;
-  memo: string;
+  altar_recipe_id?: string | null;
+  proposer?: string;
+  memo?: string;
 }
 
 export interface MerchantTradeEventData {
   account_id: string;
-  action: "buy" | "sell" | string;
+  side?: "buy" | "sell" | string;
+  action?: "buy" | "sell" | string;
   item_id: string;
-  amount: number;
-  price_paid: string;
+  qty?: number;
+  amount?: number;
+  total_price?: string;
+  price_paid?: string;
   current_stock: number;
-  treasury_reserve: string;
+  merchant_cash?: string;
+  treasury_reserve?: string;
 }
 
 export interface RoundExpiredEventData {
@@ -349,7 +357,9 @@ export interface BuybackEventData {
   floor: number;
   element: number;
   qty?: number;
-  amount: string;
+  unit_price?: string;
+  total_price?: string;
+  amount?: string;
 }
 
 export interface BackerStakedEventData {

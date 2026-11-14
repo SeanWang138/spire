@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
@@ -20,17 +20,21 @@ import {
   EyeOff,
   LogIn,
   RefreshCw,
+  Loader2,
 } from "lucide-react";
-import { SessionManager, SessionData } from "@/lib/near";
+import { GUEST_ACCOUNT_SUFFIX, SessionManager, SessionData } from "@/lib/near";
 import {
   provision_account,
   account_exists,
   verify_account_key,
   claim_starter,
+  deposit,
 } from "@/lib/contract";
+import { formatContractErrorMessage } from "@/lib/errors";
 import { useSessionAccount } from "@/lib/spire/hooks";
 
-const ACCOUNT_NAME_RE = /^[a-z0-9._-]{2,64}$/;
+const ACCOUNT_NAME_RE = /^[a-z0-9][a-z0-9_-]{1,30}$/;
+const AUTO_POUCH_DEPOSIT_YOCTO = "350000000000000000000000"; // 0.35 NEAR playable Pouch
 
 function generateGuestHandle(): string {
   const chars = "abcdefghijkmnpqrstuvwxyz23456789";
@@ -41,18 +45,14 @@ function generateGuestHandle(): string {
   return `raider-${suffix}`;
 }
 
-async function claimStarterWithRetry(): Promise<"claimed" | "already"> {
+async function retryPropagation<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await claim_starter();
-      return "claimed";
+      return await fn();
     } catch (err: unknown) {
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("E_ALREADY_CLAIMED") || msg.includes("already")) {
-        return "already";
-      }
       if (
         attempt < 2 &&
         (msg.includes("AccessKeyNotFound") ||
@@ -68,23 +68,36 @@ async function claimStarterWithRetry(): Promise<"claimed" | "already"> {
   throw lastErr;
 }
 
+async function claimStarterWithRetry(): Promise<"claimed" | "already"> {
+  try {
+    await retryPropagation(() => claim_starter());
+    return "claimed";
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("E_ALREADY_CLAIMED") || msg.includes("already")) {
+      return "already";
+    }
+    throw err;
+  }
+}
+
 const ONBOARDING_STEPS = [
   {
     step: "01",
-    title: "Town & Forge + Starter Kit",
-    desc: "1-click onboarding claims 4x Solar, 1x Frost, 4 Iron Ore, and 3 each Essence before entering the Forge.",
+    title: "1-Click Walletless Setup",
+    desc: "Auto-claims Starter Weapons (4x Solar, 1x Frost) & loads 0.35 NEAR into your Citadel Pouch (~0.245 NEAR stays reserved silently for gas).",
     href: "/game/forge",
   },
   {
     step: "02",
-    title: "Vault & Deposit NEAR",
-    desc: "Deposit NEAR from your 0.60 NEAR testnet subaccount into the Citadel Ledger or back a floor jackpot.",
-    href: "/game/vault",
+    title: "Forge & Npc Bazaar",
+    desc: "Harvest ore/essence every 30s, craft Void blades, or trade materials directly against the supply-driven NPC Merchant curve.",
+    href: "/game/merchant",
   },
   {
     step: "03",
-    title: "Read Resistance & Strike",
-    desc: "Check adaptive Meta Radar and Floor 2 Frost Ward before attacking to avoid Tribute weapon seizure.",
+    title: "Co-op Raid & Vault",
+    desc: "Read Meta Radar + Floor 2 Frost Ward, coordinate co-op boss kills, and sweep jackpots or backer dividends in Vault.",
     href: "/game/raid",
   },
 ];
@@ -101,6 +114,11 @@ export default function StartPage() {
 
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
+  const [retryingSetup, setRetryingSetup] = useState(false);
+  const [deferredSetup, setDeferredSetup] = useState<{
+    starter: boolean;
+    deposit: boolean;
+  } | null>(null);
   const [submittedSession, setSubmittedSession] = useState<SessionData | null>(null);
   const [provisionNote, setProvisionNote] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -108,23 +126,37 @@ export default function StartPage() {
   const [availability, setAvailability] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [showSecret, setShowSecret] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Pre-fill a valid guest handle on client mount for true 1-click onboarding
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     setNameInput((prev) => prev || generateGuestHandle());
   }, []);
 
-  const cleanName = nameInput.trim();
+  const stripKnownSuffix = (raw: string) => {
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed.endsWith(GUEST_ACCOUNT_SUFFIX)) {
+      return trimmed.slice(0, -GUEST_ACCOUNT_SUFFIX.length);
+    }
+    return trimmed.replace(/(\.faucet)?\.spire\.testnet$/, "");
+  };
+
+  const cleanName = stripKnownSuffix(nameInput);
   const nameValid = ACCOUNT_NAME_RE.test(cleanName);
   const fullAccountId = useMemo(
-    () => (cleanName.endsWith(".spire.testnet") ? cleanName : `${cleanName}.spire.testnet`),
+    () => (cleanName ? `${cleanName}${GUEST_ACCOUNT_SUFFIX}` : ""),
     [cleanName]
   );
   const activeSession = session ?? submittedSession;
 
   // Live debounced account availability check for new guest handle
   useEffect(() => {
-    if (activeSession || !nameValid) {
+    if (activeSession || !nameValid || !fullAccountId) {
       setAvailability("idle");
       return;
     }
@@ -152,21 +184,19 @@ export default function StartPage() {
 
     const handleToUse = cleanName || generateGuestHandle();
     if (!ACCOUNT_NAME_RE.test(handleToUse)) {
-      setErrorMsg("Enter 2 to 64 lowercase characters (letters, digits, dots, underscores, or hyphens).");
+      setErrorMsg("Enter 2 to 31 lowercase letters, digits, underscores, or hyphens.");
       return;
     }
 
-    const targetAccountId = handleToUse.endsWith(".spire.testnet")
-      ? handleToUse
-      : `${handleToUse}.spire.testnet`;
-
+    const targetAccountId = `${handleToUse}${GUEST_ACCOUNT_SUFFIX}`;
     if (availability === "taken") {
-      setErrorMsg(`"${targetAccountId}" is already taken on-chain (HTTP 409). Click Randomize or import your Recovery Key below.`);
+      setErrorMsg(`"${targetAccountId}" is already taken on-chain. Click Randomize or import your Recovery Key below.`);
       return;
     }
 
     setErrorMsg(null);
-    setProvisionNote("Generating browser Ed25519 keypair and requesting 0.60 NEAR testnet subaccount...");
+    setDeferredSetup(null);
+    setProvisionNote("Step 1/3 — Forging walletless guest subaccount (0.60 NEAR grant)...");
     setIsProvisioning(true);
 
     const mgr = SessionManager.getInstance();
@@ -176,43 +206,80 @@ export default function StartPage() {
       await provision_account(next.accountId, next.publicKey);
       mgr.markProvisioned(next.accountId);
       setSubmittedSession({ ...next, provision: "confirmed" });
-      setProvisionNote("Subaccount funded (0.60 NEAR). Auto-claiming Starter Kit...");
 
+      let starterNote = "Starter Kit ready";
+      let starterOk = true;
       try {
+        setProvisionNote("Step 2/3 — Claiming Starter Relics (4x Solar, 1x Frost, 4 Ore)...");
         const claimStatus = await claimStarterWithRetry();
-        setProvisionNote(
+        starterNote =
           claimStatus === "already"
-            ? "Starter Kit already active. Entering Town & Forge..."
-            : "Starter Kit claimed (4x Solar, 1x Frost, 4 Ore, 3 Essence each). Entering Town & Forge..."
-        );
+            ? "Starter Kit already active"
+            : "Starter Kit claimed (4x Solar, 1x Frost, 4 Ore, 3 each Essence)";
       } catch (claimErr: unknown) {
-        const claimMsg = claimErr instanceof Error ? claimErr.message : String(claimErr);
-        setProvisionNote(
-          `Subaccount funded (0.60 NEAR), but Starter Kit auto-claim deferred (${claimMsg}). Entering Town & Forge where you can claim it directly...`
-        );
+        starterOk = false;
+        starterNote = `Starter claim deferred (${formatContractErrorMessage(claimErr)})`;
       }
 
-      router.push("/game/forge");
+      let pouchNote = "0.35 NEAR loaded into Citadel Pouch (~0.245 NEAR silent gas tank)";
+      let depositOk = true;
+      try {
+        setProvisionNote("Step 3/3 — Stocking 0.35 NEAR into your Citadel Pouch for instant Raid & Bazaar play...");
+        await retryPropagation(() => deposit(AUTO_POUCH_DEPOSIT_YOCTO));
+      } catch (depErr: unknown) {
+        depositOk = false;
+        pouchNote = `Auto-deposit deferred (${formatContractErrorMessage(depErr)}) — click Retry Setup below`;
+      }
+
+      setDeferredSetup(!starterOk || !depositOk ? { starter: !starterOk, deposit: !depositOk } : null);
+      setProvisionNote(`${starterNote} · ${pouchNote}. Save your Recovery Key above or launch straight in.`);
     } catch (err: unknown) {
       mgr.clearSession();
       setSubmittedSession(null);
+      setDeferredSetup(null);
       setProvisionNote(null);
 
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("TESTNET_FAUCET_NOT_CONFIGURED") || msg.includes("503")) {
-        setErrorMsg(
-          "Guest faucet unavailable (HTTP 503: TESTNET_FAUCET_NOT_CONFIGURED). Configure NEAR_PARENT_PRIVATE_KEY on the server, or expand Import Recovery Key below for an existing subaccount."
-        );
-      } else if (msg.includes("ACCOUNT_EXISTS") || msg.includes("already exists") || msg.includes("409")) {
+      const formatted = formatContractErrorMessage(err);
+      if (formatted.toLowerCase().includes("already taken")) {
         setAvailability("taken");
-        setErrorMsg(
-          `"${next.accountId}" already exists on NEAR testnet (HTTP 409). Pick another handle, click Randomize, or expand Import Recovery Key below.`
-        );
-      } else {
-        setErrorMsg(`Guest provisioning failed: ${msg}`);
       }
+      setErrorMsg(formatted);
     } finally {
       setIsProvisioning(false);
+    }
+  };
+
+  const handleRetryDeferredSetup = async () => {
+    if (!deferredSetup || retryingSetup) return;
+    setRetryingSetup(true);
+    setErrorMsg(null);
+    let starterOk = !deferredSetup.starter;
+    let depositOk = !deferredSetup.deposit;
+    const notes: string[] = [];
+
+    try {
+      if (deferredSetup.starter) {
+        try {
+          const claimStatus = await claimStarterWithRetry();
+          starterOk = true;
+          notes.push(claimStatus === "already" ? "Starter Kit already active" : "Starter Kit claimed");
+        } catch (err: unknown) {
+          notes.push(`Starter retry failed (${formatContractErrorMessage(err)})`);
+        }
+      }
+      if (deferredSetup.deposit) {
+        try {
+          await retryPropagation(() => deposit(AUTO_POUCH_DEPOSIT_YOCTO));
+          depositOk = true;
+          notes.push("0.35 NEAR loaded into Citadel Pouch");
+        } catch (err: unknown) {
+          notes.push(`Deposit retry failed (${formatContractErrorMessage(err)})`);
+        }
+      }
+      setDeferredSetup(!starterOk || !depositOk ? { starter: !starterOk, deposit: !depositOk } : null);
+      setProvisionNote(notes.join(" · "));
+    } finally {
+      setRetryingSetup(false);
     }
   };
 
@@ -221,16 +288,18 @@ export default function StartPage() {
     if (isRecovering || isProvisioning) return;
 
     setRecoveryErrorMsg(null);
-    const chosenName = recoveryAccountInput.trim() || cleanName;
-    if (!ACCOUNT_NAME_RE.test(chosenName)) {
-      setRecoveryErrorMsg("Enter a valid subaccount name (2 to 64 lowercase characters).");
-      return;
+    const rawRecovery = recoveryAccountInput.trim().toLowerCase();
+    let targetAccountId = "";
+    if (rawRecovery.endsWith(".testnet") || rawRecovery.endsWith(".near")) {
+      targetAccountId = rawRecovery;
+    } else {
+      const chosenName = stripKnownSuffix(rawRecovery || cleanName);
+      if (!ACCOUNT_NAME_RE.test(chosenName)) {
+        setRecoveryErrorMsg("Enter a valid subaccount handle (2 to 31 lowercase letters, digits, hyphens, or underscores).");
+        return;
+      }
+      targetAccountId = `${chosenName}${GUEST_ACCOUNT_SUFFIX}`;
     }
-
-    const targetAccountId = chosenName.endsWith(".spire.testnet")
-      ? chosenName
-      : `${chosenName}.spire.testnet`;
-
     const trimmedSecret = secretKeyInput.trim();
     if (!trimmedSecret) {
       setRecoveryErrorMsg("Enter your Recovery Key (ed25519:...).");
@@ -253,7 +322,7 @@ export default function StartPage() {
       const isValid = await verify_account_key(targetAccountId, derivedPub);
       if (!isValid) {
         setRecoveryErrorMsg(
-          `Key does not match "${targetAccountId}" on NEAR testnet, or the account does not exist.`
+          `Key does not match "${targetAccountId}" on NEAR Testnet, or the account does not exist.`
         );
         return;
       }
@@ -261,10 +330,10 @@ export default function StartPage() {
       const mgr = SessionManager.getInstance();
       const imported = mgr.importSession(targetAccountId, trimmedSecret);
       setSubmittedSession(imported);
-      setProvisionNote("Recovery key verified against NEAR testnet. Entering Town & Forge...");
+      setProvisionNote("Recovery key verified against NEAR Testnet. Entering Town & Forge...");
       router.push("/game/forge");
     } catch (err: unknown) {
-      setRecoveryErrorMsg(err instanceof Error ? err.message : "Recovery key import failed.");
+      setRecoveryErrorMsg(formatContractErrorMessage(err));
     } finally {
       setIsRecovering(false);
     }
@@ -274,7 +343,8 @@ export default function StartPage() {
     try {
       await navigator.clipboard.writeText(secretKey);
       setCopiedKey(true);
-      setTimeout(() => setCopiedKey(false), 2500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedKey(false), 2500);
     } catch {
       // Clipboard blocked in restricted browser contexts
     }
@@ -284,12 +354,12 @@ export default function StartPage() {
     <div className="flex flex-col gap-6">
       <div className="pb-5 border-b border-brass/15">
         <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
-          {activeSession ? "Active Testnet Session" : "1-Click Citadel Start"}
+          {activeSession ? "Raider Identity Ready" : "1-Click Citadel Start"}
         </h1>
-        <p className="text-sm text-ash mt-1.5 max-w-2xl leading-relaxed">
+        <p className="text-sm text-ash mt-1.5 max-w-[65ch] leading-relaxed">
           {activeSession
-            ? "Your Ephemeral Testnet Session Subaccount is ready for popup-free crafting, bazaar trades, and boss raids."
-            : "Launch a fresh Ephemeral Testnet Session Subaccount funded 0.60 NEAR via /api/accounts, auto-claim your Starter Kit, and enter Town & Forge in one click."}
+            ? "Your walletless NEAR Testnet subaccount is funded and ready for zero-popup forging, bazaar bartering, and co-op boss raids."
+            : "Spawn a NEAR Testnet subaccount, auto-claim starter weapons, and pre-load 0.35 NEAR into your Citadel Pouch in one click — no external wallet or seed prompts."}
         </p>
       </div>
 
@@ -344,7 +414,7 @@ export default function StartPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center rounded-lg bg-panel-dark border border-brass/25 overflow-hidden focus-within:ring-2 focus-within:ring-solar focus-within:border-solar transition-colors">
+                  <div className="flex items-center gap-2.5">
                     <input
                       id="spire-account-input"
                       type="text"
@@ -355,13 +425,13 @@ export default function StartPage() {
                       }}
                       placeholder="raider-shadow"
                       minLength={2}
-                      maxLength={64}
+                      maxLength={31}
                       autoComplete="username"
                       aria-describedby="account-format-hint"
-                      className="flex-1 min-h-[44px] bg-transparent px-3.5 py-2.5 text-sm font-mono text-parchment placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar min-w-0"
+                      className="flex-1 min-h-[44px] rounded-lg bg-panel-dark border border-brass/25 focus:border-solar px-3.5 py-2.5 text-sm font-mono text-parchment placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar min-w-0 transition-colors"
                     />
-                    <span className="px-3 py-3 text-xs font-mono text-ash bg-panel-card border-l border-brass/20 shrink-0">
-                      .spire.testnet
+                    <span className="text-xs font-mono text-ash shrink-0">
+                      {GUEST_ACCOUNT_SUFFIX}
                     </span>
                   </div>
 
@@ -371,7 +441,7 @@ export default function StartPage() {
                       cleanName.length > 0 && !nameValid ? "text-hp-text font-semibold" : "text-pewter"
                     }`}
                   >
-                    2 to 64 lowercase letters, digits, dots, underscores, or hyphens.
+                    2 to 31 lowercase letters, digits, underscores, or hyphens.
                   </p>
                 </div>
 
@@ -394,16 +464,16 @@ export default function StartPage() {
                   </p>
                 )}
 
-                <div className="p-3.5 rounded-lg bg-panel-dark space-y-1.5">
+                <div className="pt-3 border-t border-brass/15 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-mono text-frost font-semibold">
                     <KeyRound className="w-4 h-4 shrink-0" aria-hidden="true" />
-                    <span>Ephemeral Testnet Session Subaccount (Testnet Only)</span>
+                    <span>Zero-Popup NEAR Testnet Account (No External Wallet)</span>
                   </div>
-                  <p className="text-ash leading-relaxed text-xs">
-                    Generates a <code className="font-mono text-parchment">FullAccess</code> Ed25519 keypair stored in browser{" "}
-                    <code className="font-mono text-parchment">localStorage</code> and funds a dedicated subaccount with{" "}
-                    <strong className="text-parchment">0.60 NEAR</strong> via{" "}
-                    <code className="font-mono text-parchment">/api/accounts</code> for popup-free gameplay on NEAR testnet.
+                  <p className="text-ash leading-relaxed text-xs max-w-[65ch]">
+                    Generates a local Ed25519 keypair funded <strong className="text-parchment">0.60 NEAR</strong>: auto-deposits{" "}
+                    <strong className="text-jackpot">0.35 NEAR</strong> into your playable{" "}
+                    <strong className="text-parchment">Citadel Pouch</strong> and keeps{" "}
+                    <strong className="text-frost">~0.245 NEAR</strong> silently reserved for gas fees.
                   </p>
                 </div>
 
@@ -414,8 +484,8 @@ export default function StartPage() {
                 >
                   <span>
                     {isProvisioning
-                      ? "Creating Subaccount & Claiming Starter Kit..."
-                      : "1-Click Guest Play & Claim Starter Kit"}
+                      ? "Forging Account & Stocking 0.35 NEAR Pouch..."
+                      : "Enter Citadel (1-Click Walletless Play)"}
                   </span>
                   <ChevronRight className="w-4 h-4" aria-hidden="true" />
                 </button>
@@ -449,7 +519,7 @@ export default function StartPage() {
                   <form
                     id="recovery-key-accordion"
                     onSubmit={handleRecoveryImport}
-                    className="p-4 rounded-lg bg-panel-dark space-y-4"
+                    className="pt-4 border-t border-brass/15 space-y-4"
                   >
                     <div>
                       <label
@@ -467,12 +537,12 @@ export default function StartPage() {
                             setRecoveryAccountInput(e.target.value.toLowerCase());
                             setRecoveryErrorMsg(null);
                           }}
-                          placeholder="shadowknight"
+                          placeholder={`raider-ad90z (or full .testnet)`}
                           autoComplete="username"
                           className="flex-1 min-h-[44px] bg-transparent px-3.5 py-2 text-xs font-mono text-parchment placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar min-w-0"
                         />
                         <span className="px-3 py-3 text-xs font-mono text-ash bg-panel-card border-l border-brass/20 shrink-0">
-                          .spire.testnet
+                          {GUEST_ACCOUNT_SUFFIX}
                         </span>
                       </div>
                     </div>
@@ -526,7 +596,7 @@ export default function StartPage() {
               <div className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <span className="text-xs font-medium text-pewter block">Active Subaccount</span>
+                    <span className="text-xs font-medium text-pewter block">Active Guest Subaccount</span>
                     <span className="font-mono text-base sm:text-lg font-bold text-parchment break-all mt-0.5 block">
                       {activeSession.accountId}
                     </span>
@@ -544,13 +614,11 @@ export default function StartPage() {
                   )}
                 </div>
 
-                <div className="engraved-rule" />
-
-                <div className="px-4 py-3.5 rounded-lg bg-panel-dark flex flex-col gap-2.5">
+                <div className="py-3.5 border-y border-brass/15 flex flex-col gap-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-mono font-bold uppercase tracking-wider text-parchment inline-flex items-center gap-1.5">
                       <KeyRound className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
-                      Recovery Key
+                      Recovery Key (Optional Backup)
                     </span>
                     <div className="flex items-center gap-2">
                       <button
@@ -590,27 +658,59 @@ export default function StartPage() {
                 <p
                   role="status"
                   aria-live="polite"
-                  className="text-xs text-ash leading-relaxed"
+                  className="text-xs text-ash leading-relaxed max-w-[65ch]"
                 >
                   {provisionNote ??
-                    "Ephemeral Testnet Session Subaccount active (FullAccess browser keypair funded 0.60 NEAR via /api/accounts, testnet only). Back up your Recovery Key above before clearing browser data."}
+                    "Walletless NEAR Testnet subaccount active (0.35 NEAR loaded into Citadel Pouch + ~0.245 NEAR silent gas tank). No external wallet needed."}
                 </p>
 
                 <div className="flex flex-wrap items-center gap-3 pt-1">
-                  <Link
-                    href="/game/forge"
-                    className="rpg-sheen min-h-[44px] flex-1 sm:flex-initial py-2.5 px-5 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-                  >
-                    <Hammer className="w-4 h-4" aria-hidden="true" />
-                    <span>Enter Town &amp; Forge</span>
-                  </Link>
-                  <Link
-                    href="/game/raid"
-                    className="min-h-[44px] flex-1 sm:flex-initial py-2.5 px-5 rounded-lg border border-frost/35 bg-frost/10 hover:bg-frost/20 text-frost font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-                  >
-                    <Swords className="w-4 h-4" aria-hidden="true" />
-                    <span>Enter Spire Raid</span>
-                  </Link>
+                  {isProvisioning ? (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="min-h-[44px] w-full py-2.5 px-4 rounded-lg border border-frost/35 bg-frost/10 text-frost font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+                    >
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+                      <span>Completing Starter Kit &amp; 0.35 NEAR Pouch Deposit...</span>
+                    </div>
+                  ) : (
+                    <>
+                      {(deferredSetup?.starter || deferredSetup?.deposit) && (
+                        <button
+                          type="button"
+                          onClick={handleRetryDeferredSetup}
+                          disabled={retryingSetup}
+                          className="min-h-[44px] w-full py-2.5 px-4 rounded-lg border border-solar/45 bg-solar/15 hover:bg-solar/25 text-solar font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                        >
+                          {retryingSetup ? (
+                            <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" />
+                          ) : (
+                            <RefreshCw className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          )}
+                          <span>
+                            {retryingSetup
+                              ? "Retrying Starter & Deposit..."
+                              : "1-Click Complete Starter & Deposit 0.35 NEAR"}
+                          </span>
+                        </button>
+                      )}
+                      <Link
+                        href="/game/forge"
+                        className="rpg-sheen min-h-[44px] flex-1 sm:flex-initial py-2.5 px-5 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                      >
+                        <Hammer className="w-4 h-4" aria-hidden="true" />
+                        <span>Enter Town &amp; Forge</span>
+                      </Link>
+                      <Link
+                        href="/game/raid"
+                        className="min-h-[44px] flex-1 sm:flex-initial py-2.5 px-5 rounded-lg border border-frost/35 bg-frost/10 hover:bg-frost/20 text-frost font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                      >
+                        <Swords className="w-4 h-4" aria-hidden="true" />
+                        <span>Go Straight to Raid</span>
+                      </Link>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -618,9 +718,11 @@ export default function StartPage() {
                 <span className="text-xs text-pewter">Switch identity or clear browser key</span>
                 <button
                   type="button"
+                  disabled={isProvisioning}
                   onClick={() => {
                     SessionManager.getInstance().clearSession();
                     setSubmittedSession(null);
+                    setDeferredSetup(null);
                     setProvisionNote(null);
                     setErrorMsg(null);
                     setNameInput(generateGuestHandle());
@@ -628,7 +730,7 @@ export default function StartPage() {
                     setSecretKeyInput("");
                     setShowSecret(false);
                   }}
-                  className="min-h-[44px] px-2 text-xs font-mono text-ash hover:text-hp-text transition-colors underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar rounded"
+                  className="min-h-[44px] px-2 text-xs font-mono text-ash hover:text-hp-text disabled:opacity-40 disabled:cursor-not-allowed transition-colors underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar rounded"
                 >
                   Revoke local session &amp; switch account
                 </button>
@@ -667,7 +769,7 @@ export default function StartPage() {
           </div>
 
           <div className="pt-4 border-t border-brass/15 flex items-center justify-between text-xs font-mono text-pewter">
-            <span>NEAR Protocol Testnet</span>
+            <span>NEAR Testnet · Walletless</span>
             <span>NEP-245 Multi-Token</span>
           </div>
         </aside>

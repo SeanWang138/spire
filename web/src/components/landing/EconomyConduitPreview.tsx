@@ -54,7 +54,7 @@ const SPLIT_FLOWS = [
     color: "#F2A63B",
     textColor: "#F2A63B",
     textClass: "text-solar",
-    summary: "Accumulates per floor to fund 1.0x-4.0x scarce weapon bounties inside Boss Vault.",
+    summary: "Accumulates per floor to fund weapon buyback bounties inside Boss Vault (1.00x deterministic baseline in epoch-only mode).",
     pathY: 186,
   },
   {
@@ -117,12 +117,12 @@ const ROLE_TABS: {
     highlights: [
       { label: "Craft Cost", value: "2 Ore + 3 Essence" },
       { label: "Gather Cadence", value: "+2 Unit / 30s (20/Epoch)" },
-      { label: "Buyback Range", value: "1.0x - 4.0x Scarcity Quote" },
+      { label: "Buyback Baseline", value: "1.00x (Epoch-Only)" },
     ],
     mechanics: [
-      "Gather Iron Ore and elemental Essences every 30 seconds popup-free via your 0.60 NEAR ephemeral testnet guest subaccount or wallet session.",
+      "Gather Iron Ore and elemental Essences every 30 seconds popup-free via your ~0.60 NEAR walletless testnet guest subaccount.",
       "Mint tradeable Solar, Frost, or scarce Void armaments at the Forge for exactly 2 Ore + 3 Essence.",
-      "Burn surplus blades at the Altar via reforge_2_to_1 anytime (or AI-unlocked reforge_3_to_2), or sell non-starter weapons into Boss Buybacks up to 4.0x.",
+      "Burn surplus blades at the Altar via reforge_2_to_1 anytime, or sell unlocked non-starter weapons into Boss Buybacks.",
     ],
   },
   {
@@ -192,10 +192,10 @@ export const EconomyConduitPreview: React.FC = () => {
     <section id="economy" className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-16">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
         <div>
-          <h2 className="font-serif text-3xl sm:text-4xl font-bold text-parchment tracking-tight">
+          <h2 className="font-serif text-3xl sm:text-4xl font-bold text-parchment tracking-tight text-balance">
             Zero-Inflation Ticket Conduit &amp; Guild Roles
           </h2>
-          <p className="mt-2.5 text-sm sm:text-base text-ash max-w-2xl leading-relaxed">
+          <p className="mt-2.5 text-sm sm:text-base text-ash max-w-[65ch] leading-relaxed">
             Every NEAR entering the Spire comes from ticket sales and crafting demand rather than emission inflation, routed deterministically across four protocol ledgers.
           </p>
         </div>
@@ -242,12 +242,12 @@ export const EconomyConduitPreview: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-ash leading-relaxed">
-              Deterministic 70 / 15 / 10 / 5 revenue conduit on every <code className="text-parchment">raid_attack</code> transaction.
+              Deterministic 70 / 15 / 10 / 5 revenue conduit on every <code className="text-parchment">attack()</code> strike transaction.
             </p>
           </div>
 
-          {/* Animated SVG Split Diagram (tonal surface without nested border) */}
-          <div className="relative w-full rounded-xl bg-[#07080E] p-3">
+          {/* Animated SVG Split Diagram (flush diagram surface, no nested card box) */}
+          <div className="relative w-full border-t border-b border-brass/15 py-2">
             <svg
               viewBox="0 0 432 300"
               className="w-full h-auto"
@@ -378,7 +378,7 @@ export const EconomyConduitPreview: React.FC = () => {
           >
             <div>
               <div className="flex flex-col gap-3 mb-5">
-                <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
+                <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment text-balance">
                   Choose Your Role Inside the Spire
                 </h3>
                 <SpireTabsList aria-label="SpireFi Guild Roles" className="w-fit">
@@ -408,8 +408,8 @@ export const EconomyConduitPreview: React.FC = () => {
                       <p className="text-sm text-ash leading-relaxed">{role.subtitle}</p>
                     </div>
 
-                    {/* Highlights row — tonal surface without nested bordered boxes */}
-                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4 bg-[#090A10]/85 px-4 rounded-lg">
+                    {/* Highlights row — flat borderless divider strip */}
+                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4 border-t border-b border-brass/15">
                       {role.highlights.map((item) => (
                         <div key={item.label} className="flex flex-col gap-1">
                           <dt className="text-xs font-mono uppercase tracking-wider text-pewter">
@@ -436,7 +436,7 @@ export const EconomyConduitPreview: React.FC = () => {
                     </ul>
 
                     {role.riskNotice && (
-                      <div className="flex items-start gap-3 rounded-lg bg-red-950/55 px-4 py-3 text-xs text-hp-text leading-relaxed">
+                      <div className="flex items-start gap-3 border-l-2 border-hp bg-hp/10 px-4 py-3 text-xs text-hp-text leading-relaxed">
                         <AlertTriangle
                           className="w-4 h-4 text-hp-text shrink-0 mt-0.5"
                           aria-hidden="true"

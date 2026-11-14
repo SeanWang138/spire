@@ -72,7 +72,8 @@ pub const SPLIT_MERCHANT_BPS: u128 = 500;
 pub const TRIBUTE_THRESHOLD_BPS: u32 = 7000;
 
 // ===================== Backer vault =====================
-pub const BACKER_SHARE_UNIT: u128 = 10_000_000_000_000_000; // 0.01 NEAR per share
+// 1e16 yocto = 10^-8 NEAR per share (1 NEAR = 10^8 shares)
+pub const BACKER_SHARE_UNIT: u128 = 10_000_000_000_000_000;
 pub const DIVIDEND_SCALE: u128 = 1_000_000; // fixed-point scale for dividend-per-share accumulator
 
 // ===================== Buyback =====================

@@ -195,32 +195,45 @@ export interface MerchantQuoteDetail {
 }
 
 /**
- * Merchant mid price mirror:
- *   mid = base * (1 + 0.5 * stock_pressure + 0.3 * demand_pressure), factor clamped to [0.5, 2.0]
- * with stock_pressure = (target - stock) / target and demand_pressure = demand / target (both [0,1]).
+ * Merchant mid price mirror (exact match to contract/src/merchant.rs):
+ *   stock_pressure  = clamp((target - stock) * 10000 / target, -10000..+10000)
+ *   demand_pressure = demand * 10000 / target (unbounded, clamped after adjustment)
+ *   mid = clamp(base * (10000^2 + 5000*stock_pressure + 3000*demand_pressure) / 10000^2, [0.5*base, 2*base])
  * Spread is 10% on each side: buy = mid * 1.1, sell = mid * 0.9.
  */
 export function calculateMerchantQuote(params: MerchantQuoteParams): MerchantQuoteDetail {
-  const stock = Math.max(0, params.stock);
-  const targetStock = params.targetStock ?? MERCHANT_TARGET_STOCK;
+  const stock = Math.max(0, Math.floor(params.stock));
+  const targetStock = Math.max(0, Math.floor(params.targetStock ?? MERCHANT_TARGET_STOCK));
   const basePriceYocto = parseYoctoSafe(params.basePriceYocto ?? "50000000000000000000000"); // 0.05 NEAR
-  const demand = Math.max(0, params.demand ?? 0);
+  const demand = Math.max(0, Math.floor(params.demand ?? 0));
   const treasuryReserveYocto = parseYoctoSafe(params.treasuryReserveYocto ?? ONE_NEAR_YOCTO * 5n);
 
-  // Stock pressure is signed: scarcity (+), surplus (-), both capped at 100%.
-  const stockPressureBps =
-    targetStock > 0 ? clampInt(Math.floor(((targetStock - stock) * 10000) / targetStock), -10000, 10000) : 0;
-  const demandPressureBps =
-    targetStock > 0 ? clampInt(Math.floor((demand * 10000) / targetStock), 0, 10000) : 0;
+  let stockPressureBpsBig = 0n;
+  let demandPressureBpsBig = 0n;
+  if (targetStock > 0) {
+    const s = BigInt(stock);
+    const t = BigInt(targetStock);
+    const rawDiff = s < t ? t - s : s - t;
+    const clampedDiff = rawDiff < t ? rawDiff : t;
+    const mag = (clampedDiff * 10000n) / t;
+    stockPressureBpsBig = s < t ? mag : -mag;
+    demandPressureBpsBig = (BigInt(demand) * 10000n) / t;
+  }
 
-  // factor in bps: 10000 + 0.5 * stock_pressure + 0.3 * demand_pressure
-  const factorBps = clampInt(
-    10000 + Math.floor((5000 * stockPressureBps) / 10000) + Math.floor((3000 * demandPressureBps) / 10000),
-    5000,
-    20000
-  );
+  const BPS_SQ = 100_000_000n;
+  const rawAdjustment = 5000n * stockPressureBpsBig + 3000n * demandPressureBpsBig;
+  const clampedAdjustment =
+    rawAdjustment < -9n * BPS_SQ
+      ? -9n * BPS_SQ
+      : rawAdjustment > 3n * BPS_SQ
+        ? 3n * BPS_SQ
+        : rawAdjustment;
+  const rawMid = (basePriceYocto * (BPS_SQ + clampedAdjustment)) / BPS_SQ;
+  const flooredMid = rawMid > 1n ? rawMid : 1n;
+  const minMid = basePriceYocto / 2n;
+  const maxMid = basePriceYocto * 2n;
+  const midPriceYocto = flooredMid < minMid ? minMid : flooredMid > maxMid ? maxMid : flooredMid;
 
-  const midPriceYocto = (basePriceYocto * BigInt(factorBps)) / 10000n;
   const buyPriceYocto = (midPriceYocto * BigInt(10000 + MERCHANT_SPREAD_BPS)) / 10000n;
   const sellPriceYocto = (midPriceYocto * BigInt(10000 - MERCHANT_SPREAD_BPS)) / 10000n;
 
@@ -231,8 +244,8 @@ export function calculateMerchantQuote(params: MerchantQuoteParams): MerchantQuo
     buyPriceYocto,
     sellPriceYocto,
     spreadBps: MERCHANT_SPREAD_BPS,
-    stockPressureBps,
-    demandPressureBps,
+    stockPressureBps: Number(stockPressureBpsBig),
+    demandPressureBps: Number(demandPressureBpsBig),
     isClosed,
     reason: isClosed ? "treasury_below_min_reserve" : "ok",
   };
@@ -398,57 +411,73 @@ export function calculateJackpotDistribution(
 }
 
 /**
- * Applies epoch meta shift bounds: restricts resistance shifts per element to MAX_SHIFT_BPS (2500 bps).
+ * Exact TypeScript port of `contract/src/resistance.rs::renormalize`:
+ * moves sum(r) to `totalBps` one unit at a time within `[minBps, maxBps]`,
+ * preferring elements with larger attempted shift weights and greater remaining
+ * distance from `original`.
+ */
+export function renormalizeResistance(
+  input: Triple,
+  weights: Triple,
+  original: Triple,
+  config: ResistanceConfig = DEFAULT_RESISTANCE_CONFIG
+): Triple {
+  const r: Triple = [input[0], input[1], input[2]];
+  let sum = r[0] + r[1] + r[2];
+  const goal = config.totalBps;
+  let guard = 8 * config.maxBps;
+
+  while (sum !== goal && guard > 0) {
+    guard -= 1;
+    const diff = goal - sum;
+    let idx = -1;
+    let best = Number.NEGATIVE_INFINITY;
+
+    for (let i = 0; i < 3; i++) {
+      const headroom = diff > 0 ? config.maxBps - r[i] : r[i] - config.minBps;
+      if (headroom <= 0) continue;
+      const dist = Math.abs(original[i] - r[i]);
+      const score = weights[i] * 1_000_000 + dist;
+      if (score > best) {
+        best = score;
+        idx = i;
+      }
+    }
+
+    if (idx === -1) break;
+    const step = diff > 0 ? 1 : -1;
+    r[idx] += step;
+    sum += step;
+  }
+
+  return r;
+}
+
+/**
+ * Applies epoch meta shift bounds matching `contract/src/resistance.rs::compute_shifted_resistance`:
+ * caps per-element movement at `MAX_SHIFT_BPS` (2500 bps), then calls `renormalizeResistance`
+ * so the 13,500 bps total invariant always wins.
  */
 export function applyMaxShiftLimit(
   currentResistances: Triple,
   targetResistances: Triple,
   maxShiftBps: number = MAX_SHIFT_BPS
 ): Triple {
-  const bounded: Triple = [0, 0, 0];
+  const out: Triple = [0, 0, 0];
+  const weights: Triple = [0, 0, 0];
 
   for (let i = 0; i < 3; i++) {
-    bounded[i] = computeShiftWithCap(
-      currentResistances[i],
-      targetResistances[i],
-      maxShiftBps
+    const delta = Math.max(
+      -maxShiftBps,
+      Math.min(maxShiftBps, targetResistances[i] - currentResistances[i])
     );
-  }
-
-  // Ensure elements stay within [minBps, maxBps]
-  for (let i = 0; i < 3; i++) {
-    bounded[i] = Math.max(
+    out[i] = clampInt(
+      currentResistances[i] + delta,
       DEFAULT_RESISTANCE_CONFIG.minBps,
-      Math.min(DEFAULT_RESISTANCE_CONFIG.maxBps, bounded[i])
+      DEFAULT_RESISTANCE_CONFIG.maxBps
     );
+    weights[i] = Math.abs(delta);
   }
 
-  // Renormalize to ensure sum remains totalBps (13500) without breaching maxShiftBps
-  const currentSum = bounded[0] + bounded[1] + bounded[2];
-  let diff = DEFAULT_RESISTANCE_CONFIG.totalBps - currentSum;
-
-  if (diff !== 0) {
-    for (let i = 0; i < 3 && diff !== 0; i++) {
-      const allowedMax = Math.min(
-        DEFAULT_RESISTANCE_CONFIG.maxBps,
-        currentResistances[i] + maxShiftBps
-      );
-      const allowedMin = Math.max(
-        DEFAULT_RESISTANCE_CONFIG.minBps,
-        currentResistances[i] - maxShiftBps
-      );
-
-      if (diff > 0 && bounded[i] < allowedMax) {
-        const room = Math.min(diff, allowedMax - bounded[i]);
-        bounded[i] += room;
-        diff -= room;
-      } else if (diff < 0 && bounded[i] > allowedMin) {
-        const room = Math.min(-diff, bounded[i] - allowedMin);
-        bounded[i] -= room;
-        diff += room;
-      }
-    }
-  }
-
-  return bounded;
+  return renormalizeResistance(out, weights, currentResistances, DEFAULT_RESISTANCE_CONFIG);
 }

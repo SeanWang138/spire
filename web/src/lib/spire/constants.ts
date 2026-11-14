@@ -4,8 +4,6 @@
  * the on-chain contract can never drift apart.
  */
 
-import { parseYoctoSafe } from "../utils/cn";
-
 // --- Elements / tokens ---------------------------------------------------
 
 export const ELEMENT_NAMES = ["Solar", "Frost", "Void"] as const;
@@ -141,6 +139,64 @@ export const BUYBACK_MAX_PER_ACCOUNT_EPOCH = 2;
 // --- Misc -----------------------------------------------------------------------
 
 export const YOCTO_PER_NEAR = 1e24;
+
+/**
+ * Safely parses integer, decimal, or scientific-notation yoctoNEAR values
+ * (e.g. "2.3683e+24", "5.7e+22", "4e+22") into bigint. Returns 0n on null,
+ * undefined, non-finite numbers, or malformed strings without throwing SyntaxError.
+ */
+export function parseYoctoSafe(
+  value: string | number | bigint | null | undefined
+): bigint {
+  if (value === null || value === undefined) return 0n;
+  if (typeof value === "bigint") return value;
+
+  let raw: string;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return 0n;
+    raw = String(value);
+  } else if (typeof value === "string") {
+    raw = value.trim();
+  } else {
+    return 0n;
+  }
+
+  if (!raw) return 0n;
+
+  const match =
+    /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(raw);
+  if (!match) return 0n;
+
+  const sign = match[1] === "-" ? "-" : "";
+  const intPart = match[2] ?? "";
+  const fracPart = match[3] ?? match[4] ?? "";
+  const exp = match[5] !== undefined ? Number.parseInt(match[5], 10) : 0;
+  if (!Number.isSafeInteger(exp)) return 0n;
+
+  const digits = intPart + fracPart;
+  if (!digits || /^0+$/.test(digits)) return 0n;
+
+  const shift = exp - fracPart.length;
+  if (!Number.isSafeInteger(shift) || shift > 10000) return 0n;
+
+  let integerDigits: string;
+  if (shift >= 0) {
+    integerDigits = digits + "0".repeat(shift);
+  } else {
+    const cut = digits.length + shift;
+    if (cut <= 0) return 0n;
+    integerDigits = digits.slice(0, cut);
+  }
+
+  const normalized = integerDigits.replace(/^0+/, "") || "0";
+  if (normalized === "0") return 0n;
+
+  try {
+    return BigInt(sign + normalized);
+  } catch {
+    return 0n;
+  }
+}
 
 /** Whole NEAR → yoctoNEAR string (no floats beyond the given precision). */
 export function nearToYocto(near: number): string {

@@ -71,7 +71,7 @@ interface MerchantVectorsFile {
 }
 
 const vectors: MerchantVectorsFile = JSON.parse(
-  readFileSync(resolve(__dirname, "../merchant_vectors.json"), "utf-8")
+  readFileSync(resolve(__dirname, "../../test-vectors/merchant_vectors.json"), "utf-8")
 ) as MerchantVectorsFile;
 
 const BASE = 100_000_000_000_000_000_000_000n; // 0.1 NEAR
@@ -157,10 +157,10 @@ describe("Pricing Engine - Merchant quote", () => {
 
     const crowded = calculateMerchantQuote({
       stock: 0,
-      demand: 1000, // clamped to 10000 bps demand pressure
+      demand: 1000, // unclamped demand pushes raw factor above 2.0x; mid clamps at 2.0x (matching contract/src/merchant.rs)
       basePriceYocto: BASE,
     });
-    assert.strictEqual(crowded.midPriceYocto, (BASE * 18000n) / 10000n); // 1.8x (below 2.0 cap)
+    assert.strictEqual(crowded.midPriceYocto, (BASE * 20000n) / 10000n); // 2.0x cap
   });
 
   it("keeps both sides of the spread inside 10% of mid", () => {
@@ -199,7 +199,7 @@ describe("Pricing Engine - Merchant quote", () => {
     assert.strictEqual(quote.reason, "ok");
   });
 
-  it("passes every vector in relayer/merchant_vectors.json (merchant)", () => {
+  it("passes every vector in test-vectors/merchant_vectors.json (merchant)", () => {
     for (const vector of vectors.merchant) {
       const quote = calculateMerchantQuote({
         stock: vector.stock,
@@ -228,7 +228,7 @@ describe("Pricing Engine - Merchant quote", () => {
     }
   });
 
-  it("passes every vector in relayer/merchant_vectors.json (buyback)", () => {
+  it("passes every vector in test-vectors/merchant_vectors.json (buyback)", () => {
     for (const vector of vectors.buyback) {
       const quote = calculateBuybackQuote({
         floor: vector.floor,
@@ -266,13 +266,17 @@ describe("Pricing Engine - Shift cap", () => {
     assert.strictEqual(computeShiftWithCap(10000, 11000, 2500), 11000);
   });
 
-  it("clamps resistance shifts exceeding MAX_SHIFT_BPS (2500 bps)", () => {
-    const current: [number, number, number] = [4500, 4500, 4500];
-    const target: [number, number, number] = [8500, 2500, 2500];
-
-    const bounded = applyMaxShiftLimit(current, target, 2500);
-    assert.ok(bounded[0] <= 7000);
+  it("matches contract resistance::compute_shifted_resistance renormalization invariant", () => {
+    // When bounded shifts cannot reach 13500 without exceeding MAX_SHIFT_BPS, 13500 total invariant wins
+    // (nudging element with highest attempted shift weight).
+    const bounded = applyMaxShiftLimit([4500, 4500, 4500], [8500, 2500, 2500], 2500);
+    assert.deepStrictEqual(bounded, [8500, 2500, 2500]);
     assert.strictEqual(bounded[0] + bounded[1] + bounded[2], 13500);
+
+    // Asymmetric infeasible target also preserves 13500 exact total inside [1000, 8500]
+    const asym = applyMaxShiftLimit([2000, 5750, 5750], [8500, 2500, 2500], 2500);
+    assert.strictEqual(asym[0] + asym[1] + asym[2], 13500);
+    assert.ok(asym.every((r) => r >= 1000 && r <= 8500));
   });
 });
 

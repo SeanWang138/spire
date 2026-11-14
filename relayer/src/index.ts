@@ -96,7 +96,7 @@ async function main() {
   if (role === "indexer" || role === "all") {
     console.log(`[Indexer] NEP-297 scraper + stats API on :${streamerPort}...`);
     indexer = new SpireIndexer({ rpcUrl, contractId, pollIntervalMs });
-    // POST /api/accounts: real subaccount creation (*.spire.testnet + fresh function
+    // POST /api/accounts: real subaccount creation (*.spire.testnet + fresh full-access
     // key) when explicitly enabled and keeper funding credentials exist; otherwise
     // accounts are validated and queued as pending.
     const autoCreate = process.env.AUTO_CREATE_ACCOUNTS === "true";
@@ -114,7 +114,7 @@ async function main() {
           publicKey
         );
         console.log(
-          `[Indexer] Created ${accountId} (function key ${created.public_key}${publicKey ? ", browser-provided" : ", operator-generated"})`
+          `[Indexer] Created ${accountId} (full-access key ${created.public_key}${publicKey ? ", browser-provided" : ", operator-generated"})`
         );
         return { created: true, detail: created.public_key };
       };

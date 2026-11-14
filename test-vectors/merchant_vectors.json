@@ -63,15 +63,15 @@
       }
     },
     {
-      "name": "demand_capped_at_full_pressure",
+      "name": "high_demand_clamped_at_two_x",
       "stock": 0,
       "target_stock": 100,
       "demand": 200,
       "reserve_yocto": "5000000000000000000000000",
       "expected": {
-        "midPriceYocto": "90000000000000000000000",
-        "buyPriceYocto": "99000000000000000000000",
-        "sellPriceYocto": "81000000000000000000000",
+        "midPriceYocto": "100000000000000000000000",
+        "buyPriceYocto": "110000000000000000000000",
+        "sellPriceYocto": "90000000000000000000000",
         "isClosed": false,
         "reason": "ok"
       }

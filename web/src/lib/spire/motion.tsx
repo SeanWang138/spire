@@ -18,27 +18,31 @@ const MotionContext = createContext<MotionContextValue>({
 });
 
 export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [paused, setPausedState] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  const [userPaused, setUserPaused] = useState<boolean | null>(null);
+  const [osReducedMotion, setOsReducedMotion] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReducedMotion(mq.matches);
+    setOsReducedMotion(mq.matches);
     const onChange = (e: MediaQueryListEvent) => {
-      setReducedMotion(e.matches);
+      setOsReducedMotion(e.matches);
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
   const setPaused = useCallback((next: boolean) => {
-    setPausedState(next);
+    setUserPaused(next);
   }, []);
 
   const togglePaused = useCallback(() => {
-    setPausedState((prev) => !prev);
-  }, []);
+    setUserPaused((prev) => !(prev !== null ? prev : osReducedMotion));
+  }, [osReducedMotion]);
+
+  // Respect prefers-reduced-motion by pausing ambient motion until the user clicks Resume FX.
+  const paused = userPaused !== null ? userPaused : osReducedMotion;
+  const reducedMotion = userPaused === false ? false : osReducedMotion;
 
   return (
     <MotionContext.Provider

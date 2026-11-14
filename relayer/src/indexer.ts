@@ -88,7 +88,7 @@ export function validateCraftData(data: unknown): data is CraftEventData {
   if (
     typeof data.account_id !== "string" ||
     typeof data.output_token !== "string" ||
-    typeof data.amount !== "number" ||
+    (data.amount !== undefined && typeof data.amount !== "number") ||
     !Array.isArray(data.materials_consumed)
   ) {
     return false;
@@ -128,30 +128,39 @@ export function validateBossDefeatedData(data: unknown): data is BossDefeatedEve
     typeof data.round === "number" &&
     typeof data.killer === "string" &&
     typeof data.total_jackpot === "string" &&
-    typeof data.total_damage === "number" &&
+    (typeof data.total_damage === "number" || typeof data.total_damage === "string") &&
     (typeof data.trophy_token_id === "string" || data.trophy_token_id === null)
   );
 }
 
 export function validateAiProposalAppliedData(data: unknown): data is AiProposalAppliedEventData {
   if (!isObject(data)) return false;
-  return (
-    typeof data.epoch === "number" &&
+  if (typeof data.epoch !== "number") return false;
+  const isV31LiveShape =
+    typeof data.floor === "number" &&
+    typeof data.nonce === "number" &&
+    isTriple(data.buyback_multiplier_bps);
+  const isLegacyVectorShape =
     isTriple(data.old_resistance) &&
     isTriple(data.new_resistance) &&
-    typeof data.proposer === "string"
-  );
+    typeof data.proposer === "string";
+  return isV31LiveShape || isLegacyVectorShape;
 }
 
 export function validateMerchantTradeData(data: unknown): data is MerchantTradeEventData {
   if (!isObject(data)) return false;
-  return (
-    typeof data.account_id === "string" &&
+  if (typeof data.account_id !== "string" || typeof data.item_id !== "string") {
+    return false;
+  }
+  const isV31LiveShape =
+    typeof data.side === "string" &&
+    typeof data.qty === "number" &&
+    typeof data.total_price === "string";
+  const isLegacyVectorShape =
     typeof data.action === "string" &&
-    typeof data.item_id === "string" &&
     typeof data.amount === "number" &&
-    typeof data.price_paid === "string"
-  );
+    typeof data.price_paid === "string";
+  return isV31LiveShape || isLegacyVectorShape;
 }
 
 export function validateRoundExpiredData(data: unknown): data is RoundExpiredEventData {
@@ -192,7 +201,7 @@ export function validateBuybackData(data: unknown): data is BuybackEventData {
     typeof data.account_id === "string" &&
     typeof data.floor === "number" &&
     typeof data.element === "number" &&
-    typeof data.amount === "string"
+    (typeof data.total_price === "string" || typeof data.amount === "string")
   );
 }
 
@@ -379,7 +388,7 @@ export class StatsCollector {
       }
       case "craft": {
         const element = elementFromToken(payload.output_token);
-        if (element !== null) this.addSupply(element, Number(payload.amount ?? 0));
+        if (element !== null) this.addSupply(element, Number(payload.amount ?? 1));
         break;
       }
       case "reforge": {
@@ -443,7 +452,7 @@ export class StatsCollector {
   }
 }
 
-export const ACCOUNT_SUFFIX = ".spire.testnet";
+export const ACCOUNT_SUFFIX = process.env.ACCOUNT_SUFFIX || ".spire.testnet";
 export const ACCOUNT_LABEL_RE = /^[a-z0-9._-]{2,32}$/;
 
 /** Normalizes "alice" or "alice.spire.testnet" to a validated full account id. */
@@ -502,6 +511,8 @@ export interface LiveStatsSnapshot {
 export interface AsyncApiOptions {
   /** Live contract read for POST /api/stats; without it the route returns 501. */
   fetchLiveStats?: () => Promise<LiveStatsSnapshot>;
+  /** Reads recent indexed NEP-297 events for GET /api/events. */
+  getRecentEvents?: (limit: number) => Nep297Event[];
   /** Real subaccount creation for POST /api/accounts; without it accounts are queued pending.
    * The second argument is the browser-provided Function Call public key (may be undefined). */
   createAccount?: (
@@ -511,8 +522,8 @@ export interface AsyncApiOptions {
 }
 
 /**
- * Pure async router: POST /api/stats (live) and POST /api/accounts (create) plus
- * everything the sync router already serves. No sockets involved, so it is testable.
+ * Pure async router: POST /api/stats (live), GET /api/events, and POST /api/accounts (create)
+ * plus everything the sync router already serves. No sockets involved, so it is testable.
  */
 export async function handleApiRequestAsync(
   method: string,
@@ -522,7 +533,18 @@ export async function handleApiRequestAsync(
   accounts: AccountQueue,
   opts: AsyncApiOptions = {}
 ): Promise<ApiResponse> {
-  const path = rawPath.split("?")[0].replace(/\/+$/, "") || "/";
+  const [pathPart, queryPart = ""] = rawPath.split("?");
+  const path = pathPart.replace(/\/+$/, "") || "/";
+
+  if (method === "GET" && path === "/api/events") {
+    const params = new URLSearchParams(queryPart);
+    const parsedLimit = Number(params.get("limit") ?? 30);
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(100, Math.max(1, Math.floor(parsedLimit)))
+      : 30;
+    const events = opts.getRecentEvents ? opts.getRecentEvents(limit) : [];
+    return { status: 200, body: { events } };
+  }
 
   if (method === "POST" && path === "/api/stats") {
     if (!opts.fetchLiveStats) {
@@ -559,9 +581,16 @@ export async function handleApiRequestAsync(
           },
         };
       } catch (err: any) {
+        const detail = err?.message || String(err);
+        if (/already exists|AccountAlreadyExists/i.test(detail)) {
+          return {
+            status: 409,
+            body: { error: "account_exists", detail },
+          };
+        }
         return {
           status: 502,
-          body: { error: "account_creation_failed", detail: err?.message || String(err) },
+          body: { error: "account_creation_failed", detail },
         };
       }
     }
@@ -723,6 +752,7 @@ export class SpireIndexer extends EventEmitter {
   private isRunning = false;
   private timer: NodeJS.Timeout | null = null;
   private lastBlockHeight = 0;
+  private seenTxHashes = new Set<string>();
   private eventHistory: Nep297Event[] = [];
   private wss: WebSocketServer | null = null;
   private httpServer: Server | null = null;
@@ -843,12 +873,38 @@ export class SpireIndexer extends EventEmitter {
 
     let bossHpTotal = 0n;
     let defeatedFloors = 0;
+    let liveJackpotTotal = 0n;
+    let liveDamageTotal = 0;
     for (const floor of floors) {
       const parsedHp = parseYoctoSafe(floor.hp ?? floor.boss_hp ?? 0);
       const hp = parsedHp > 0n ? parsedHp : 0n;
       bossHpTotal += hp;
       if (hp === 0n) defeatedFloors += 1;
+
+      if (floor.jackpot !== undefined && floor.jackpot !== null) {
+        try {
+          const parsedJackpot = parseYoctoSafe(floor.jackpot);
+          if (parsedJackpot > 0n) liveJackpotTotal += parsedJackpot;
+        } catch {
+          // ignore malformed jackpot field
+        }
+      }
+      if (floor.total_damage !== undefined && floor.total_damage !== null) {
+        try {
+          const parsedDamage = Number(parseYoctoSafe(floor.total_damage));
+          if (Number.isFinite(parsedDamage) && parsedDamage > 0) {
+            liveDamageTotal += parsedDamage;
+          }
+        } catch {
+          // ignore malformed total_damage field
+        }
+      }
     }
+
+    const cachedJackpot = parseYoctoSafe(cached.totalJackpotYocto);
+    const totalJackpotYocto =
+      cachedJackpot > 0n ? cached.totalJackpotYocto : liveJackpotTotal.toString();
+    const totalDamage = cached.totalDamage > 0 ? cached.totalDamage : liveDamageTotal;
 
     return {
       tower: { floors },
@@ -859,14 +915,29 @@ export class SpireIndexer extends EventEmitter {
         floors: floors.length,
         defeatedFloors,
         bossHpTotal: bossHpTotal.toString(),
-        totalJackpotYocto: cached.totalJackpotYocto,
+        totalJackpotYocto,
         totalRaids: cached.totalRaids,
-        totalDamage: cached.totalDamage,
+        totalDamage,
       },
     };
   }
 
+  private getCorsHeaders(): Record<string, string> {
+    return {
+      "Access-Control-Allow-Origin": process.env.INDEXER_CORS_ORIGIN || "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
+  }
+
   private handleHttp(req: IncomingMessage, res: ServerResponse): void {
+    const cors = this.getCorsHeaders();
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors);
+      res.end();
+      return;
+    }
+
     const chunks: Buffer[] = [];
     let size = 0;
 
@@ -886,7 +957,7 @@ export class SpireIndexer extends EventEmitter {
         try {
           body = JSON.parse(raw);
         } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
+          res.writeHead(400, { "Content-Type": "application/json", ...cors });
           res.end(JSON.stringify({ error: "invalid_json" }));
           return;
         }
@@ -900,12 +971,16 @@ export class SpireIndexer extends EventEmitter {
             body,
             this.stats,
             this.accounts,
-            { fetchLiveStats: () => this.fetchLiveStats(), createAccount: this.accountCreator ?? undefined }
+            {
+              fetchLiveStats: () => this.fetchLiveStats(),
+              getRecentEvents: (limit) => this.getRecentEvents(limit),
+              createAccount: this.accountCreator ?? undefined,
+            }
           );
-          res.writeHead(result.status, { "Content-Type": "application/json" });
+          res.writeHead(result.status, { "Content-Type": "application/json", ...cors });
           res.end(JSON.stringify(result.body));
         } catch (err: any) {
-          res.writeHead(500, { "Content-Type": "application/json" });
+          res.writeHead(500, { "Content-Type": "application/json", ...cors });
           res.end(JSON.stringify({ error: "internal_error", detail: err?.message || String(err) }));
         }
       })();
@@ -972,28 +1047,95 @@ export class SpireIndexer extends EventEmitter {
     this.stopStreamer();
   }
 
-  /**
-   * Polls the latest block from NEAR JSON-RPC and processes execution logs.
-   */
-  public async pollLatestBlocks(): Promise<void> {
+  private async rpcCall<T>(method: string, params: unknown): Promise<T | null> {
     try {
       const response = await fetch(this.rpcUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jsonrpc: "2.0",
-          id: "spirefi-indexer",
-          method: "block",
-          params: { finality: "final" },
+          id: `spirefi-indexer-${method}`,
+          method,
+          params,
         }),
       });
-
-      if (!response.ok) return;
+      if (!response.ok) return null;
       const data = (await response.json()) as any;
-      if (!data?.result?.header) return;
-      this.lastBlockHeight = data.result.header.height;
+      return (data?.result ?? null) as T | null;
     } catch {
-      // Network hiccup: keep polling on the next tick.
+      return null;
     }
+  }
+
+  private rememberTxHash(txHash: string): void {
+    this.seenTxHashes.add(txHash);
+    if (this.seenTxHashes.size > 500) {
+      const oldest = this.seenTxHashes.values().next().value;
+      if (oldest) this.seenTxHashes.delete(oldest);
+    }
+  }
+
+  /**
+   * Polls the latest finalized block(s) from NEAR JSON-RPC, traverses chunk
+   * transactions targeting CONTRACT_ID, and ingests NEP-297 contract logs.
+   */
+  public async pollLatestBlocks(): Promise<void> {
+    const latestBlock = await this.rpcCall<any>("block", { finality: "final" });
+    const latestHeight = Number(latestBlock?.header?.height ?? 0);
+    if (!Number.isFinite(latestHeight) || latestHeight <= 0) return;
+    if (latestHeight <= this.lastBlockHeight) return;
+
+    const startHeight =
+      this.lastBlockHeight === 0
+        ? latestHeight
+        : Math.max(this.lastBlockHeight + 1, latestHeight - 2);
+
+    for (let height = startHeight; height <= latestHeight; height++) {
+      const block =
+        height === latestHeight
+          ? latestBlock
+          : await this.rpcCall<any>("block", { block_id: height });
+      const chunks = Array.isArray(block?.chunks) ? block.chunks : [];
+
+      for (const chunkHeader of chunks) {
+        const chunkHash = chunkHeader?.chunk_hash;
+        if (typeof chunkHash !== "string" || !chunkHash) continue;
+
+        const chunk = await this.rpcCall<any>("chunk", { chunk_id: chunkHash });
+        const txs = Array.isArray(chunk?.transactions) ? chunk.transactions : [];
+
+        for (const tx of txs) {
+          const txHash = tx?.hash;
+          const signerId = tx?.signer_id;
+          const receiverId = tx?.receiver_id;
+          if (typeof txHash !== "string" || typeof signerId !== "string") continue;
+          if (receiverId !== this.contractId) continue;
+          if (this.seenTxHashes.has(txHash)) continue;
+
+          const txStatus = await this.rpcCall<any>("EXPERIMENTAL_tx_status", [txHash, signerId]);
+          if (!txStatus) continue;
+          this.rememberTxHash(txHash);
+
+          const txOutcome = txStatus.transaction_outcome?.outcome;
+          if (txOutcome?.executor_id === this.contractId && Array.isArray(txOutcome.logs) && txOutcome.logs.length > 0) {
+            this.ingestLogs(txOutcome.logs);
+          }
+
+          const receipts = Array.isArray(txStatus.receipts_outcome) ? txStatus.receipts_outcome : [];
+          for (const rec of receipts) {
+            const outcome = rec?.outcome;
+            if (
+              outcome?.executor_id === this.contractId &&
+              Array.isArray(outcome.logs) &&
+              outcome.logs.length > 0
+            ) {
+              this.ingestLogs(outcome.logs);
+            }
+          }
+        }
+      }
+    }
+
+    this.lastBlockHeight = latestHeight;
   }
 }

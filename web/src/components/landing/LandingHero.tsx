@@ -83,7 +83,7 @@ export const LandingHeader: React.FC = () => {
         <Link
           href="/"
           aria-label="SpireFi home"
-          className="flex items-center gap-2.5 min-h-[44px] text-parchment font-serif font-bold tracking-[0.2em] text-base sm:text-lg"
+          className="flex items-center gap-2.5 min-h-[44px] text-parchment font-serif font-bold tracking-[0.2em] text-base sm:text-lg rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
         >
           <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-solar/15 border border-solar/45">
             <Swords className="w-4 h-4 text-solar" aria-hidden="true" />
@@ -97,21 +97,21 @@ export const LandingHeader: React.FC = () => {
           aria-label="Protocol sections"
           className="hidden md:flex items-center gap-7 text-xs font-semibold tracking-wide text-ash"
         >
-          <a href="#loop" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+          <a href="#loop" className="hover:text-parchment transition-colors min-h-[44px] flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar">
             Game Loop
           </a>
-          <a href="#tower" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+          <a href="#tower" className="hover:text-parchment transition-colors min-h-[44px] flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar">
             Three-Floor Spire
           </a>
-          <a href="#economy" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+          <a href="#economy" className="hover:text-parchment transition-colors min-h-[44px] flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar">
             Ticket Conduit
           </a>
-          <a href="#boss-brain" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
-            Boss Brain &amp; TEE
+          <a href="#boss-brain" className="hover:text-parchment transition-colors min-h-[44px] flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar">
+            Epoch Oracle &amp; Guardrails
           </a>
           <Link
             href="/game/ai#time-warp"
-            className="text-frost hover:text-parchment transition-colors min-h-[44px] flex items-center"
+            className="text-frost hover:text-parchment transition-colors min-h-[44px] flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
           >
             1-Week Market Sim
           </Link>
@@ -123,7 +123,7 @@ export const LandingHeader: React.FC = () => {
             onClick={togglePaused}
             aria-pressed={paused}
             aria-label={paused ? "Resume 3D motion" : "Pause 3D motion"}
-            className="min-h-[44px] px-3 rounded-lg border border-brass/25 bg-panel-dark/90 text-xs font-medium text-ash hover:text-parchment hover:border-brass/60 flex items-center gap-2 transition-colors"
+            className="min-w-[44px] min-h-[44px] px-3 rounded-lg border border-brass/25 bg-panel-dark/90 text-xs font-medium text-ash hover:text-parchment hover:border-brass/60 flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
           >
             {paused ? (
               <Play className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
@@ -135,7 +135,7 @@ export const LandingHeader: React.FC = () => {
 
           <Link
             href="/game/start"
-            className="rpg-sheen inline-flex items-center gap-2 min-h-[44px] px-4 sm:px-5 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 text-oled font-bold text-xs uppercase tracking-wider border border-amber-300/60 hover:from-amber-300 hover:to-amber-500 transition-all"
+            className="rpg-sheen inline-flex items-center gap-2 min-h-[44px] px-4 sm:px-5 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 text-oled font-bold text-xs uppercase tracking-wider border border-amber-300/60 hover:from-amber-300 hover:to-amber-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
           >
             <span className="hidden sm:inline">Play Now (1 Click)</span>
             <span className="sm:hidden">Play Now</span>
@@ -208,20 +208,20 @@ export const LandingHero: React.FC<LandingHeroProps> = ({ showHeader = true }) =
                 SPIRE<span className="text-solar">FI</span>
               </h1>
               <div className="engraved-rule w-48 my-3.5" aria-hidden="true" />
-              <p className="font-lore italic text-xl sm:text-2xl text-ash leading-snug max-w-lg">
+              <p className="font-lore italic text-xl sm:text-2xl text-ash leading-snug max-w-[65ch]">
                 &ldquo;A living citadel where crowded steel fuels the Boss, scarce blades pierce its heart, and the mountain settles every claim in gold.&rdquo;
               </p>
             </div>
 
-            <p className="text-sm sm:text-base text-ash max-w-lg leading-relaxed">
-              Gather ore, forge elemental steel, outmaneuver an adaptive boss that counters dominant weapons every epoch, and raid popup-free via a 1-click 0.60 NEAR ephemeral testnet guest subaccount.
+            <p className="text-sm sm:text-base text-ash max-w-[65ch] leading-relaxed">
+              Gather ore, forge elemental steel, outmaneuver an adaptive boss that counters dominant weapons every epoch, and raid popup-free via a 1-click ~0.60 NEAR walletless testnet guest subaccount.
             </p>
 
             {/* Primary & Secondary Actions */}
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
               <Link
                 href="/game/start"
-                className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-7 py-3 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 border border-amber-300/60 text-oled font-bold text-sm uppercase tracking-wider hover:from-amber-300 hover:to-amber-500 transition-all"
+                className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-7 py-3 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 border border-amber-300/60 text-oled font-bold text-sm uppercase tracking-wider hover:from-amber-300 hover:to-amber-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
               >
                 <span>Play Now (1 Click)</span>
                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
@@ -229,7 +229,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({ showHeader = true }) =
 
               <Link
                 href="/game/ai#time-warp"
-                className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 rounded-lg bg-panel-dark/90 border border-frost/45 text-frost hover:bg-frost/15 hover:border-frost/75 font-mono text-xs font-bold uppercase tracking-wider transition-all"
+                className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 rounded-lg bg-panel-dark/90 border border-frost/45 text-frost hover:bg-frost/15 hover:border-frost/75 font-mono text-xs font-bold uppercase tracking-wider transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
               >
                 <TrendingUp className="w-4 h-4" aria-hidden="true" />
                 <span>Run 1-Week Market Sim</span>
@@ -254,11 +254,12 @@ export const LandingHero: React.FC<LandingHeroProps> = ({ showHeader = true }) =
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 font-mono-numbers text-xs">
-                  <span className="px-2.5 py-0.5 rounded bg-panel-elevated/90 text-parchment">
+                <div className="flex items-center gap-3 font-mono-numbers text-xs">
+                  <span className="text-parchment font-semibold">
                     {activeDossier.hp.toLocaleString("en-US")} HP
                   </span>
-                  <span className="px-2.5 py-0.5 rounded bg-solar/20 text-parchment font-semibold">
+                  <span className="text-brass/40" aria-hidden="true">|</span>
+                  <span className="text-solar font-semibold">
                     {activeDossier.ticket.toFixed(2)} N
                   </span>
                 </div>
@@ -267,7 +268,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({ showHeader = true }) =
               <div className="font-serif text-lg sm:text-xl font-bold text-parchment mb-1">
                 {activeDossier.boss}
               </div>
-              <p className="text-xs sm:text-sm text-ash leading-relaxed mb-3.5">
+              <p className="text-xs sm:text-sm text-ash leading-relaxed mb-3.5 max-w-[65ch]">
                 {activeDossier.rule}
               </p>
 
@@ -283,7 +284,7 @@ export const LandingHero: React.FC<LandingHeroProps> = ({ showHeader = true }) =
                       onMouseEnter={() => setHoveredFloor(n)}
                       onMouseLeave={() => setHoveredFloor(null)}
                       aria-pressed={selectedFloor === n}
-                      className={`min-h-[44px] px-2.5 py-2 rounded-lg border text-xs font-mono font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      className={`min-h-[44px] px-2.5 py-2 rounded-lg border text-xs font-mono font-bold transition-all flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled ${
                         isActive
                           ? meta.activePill
                           : "border-brass/20 bg-oled/80 text-ash hover:border-brass/50 hover:text-parchment"

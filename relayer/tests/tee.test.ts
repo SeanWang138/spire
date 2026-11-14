@@ -296,9 +296,20 @@ describe("TEE Module - Strict AI payload parsing", () => {
     });
   });
 
-  it("rejects prose, fenced output, extra keys and bad types", () => {
+  it("strips markdown JSON fences while rejecting prose, extra keys and bad types", () => {
+    assert.deepStrictEqual(parseStrictProposalPayload("```json\n" + valid + "\n```"), {
+      floor: 1,
+      epoch: 5,
+      buyback_multiplier_bps: [10000, 15000, 30000],
+      altar_recipe_id: null,
+      taunt: "Burn.",
+      nonce: 42,
+    });
     assert.throws(() => parseStrictProposalPayload(`Here you go: ${valid}`), /bare JSON object/);
-    assert.throws(() => parseStrictProposalPayload("```json\n" + valid + "\n```"), /bare JSON object/);
+    assert.throws(
+      () => parseStrictProposalPayload("Here you go:\n```json\n" + valid + "\n```"),
+      /bare JSON object/
+    );
     assert.throws(
       () => parseStrictProposalPayload(valid.replace('"nonce":42', '"nonce":42,"extra":1')),
       /do not match payload/

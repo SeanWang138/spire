@@ -38,12 +38,12 @@ const STAGES: ChronicleStage[] = [
     tabLabel: "30-Second Loop · City & Bazaar",
     cadence: "Every 30 Seconds",
     headline: "Zero-Popup Play Meets Live NPC Supply & Demand",
-    loreNote: "One deposit fills your satchel. From there, every swing of the pickaxe and barter with the town merchant lands cleanly without interrupting wallet prompts.",
+    loreNote: "One guest provisioning click loads your Pouch and gas reserve. From there, every harvest and merchant barter confirms on-chain with zero signing popups.",
     steps: [
       {
         title: "Instant 1-Click Ephemeral Account",
-        detail: "Provision an ephemeral 0.60 NEAR testnet guest subaccount with a local FullAccess keypair (or deposit via your wallet) into the internal vault.",
-        metric: "0.60 N Guest · 0 Popups",
+        detail: "Provision an ephemeral ~0.60 NEAR testnet guest subaccount (0.35 NEAR Citadel Pouch + ~0.245 NEAR Silent Gas Tank) — zero external wallet required.",
+        metric: "0.35 N Pouch · 0 Popups",
         icon: <KeyRound className="w-4 h-4 text-solar" aria-hidden="true" />,
       },
       {
@@ -81,7 +81,7 @@ const STAGES: ChronicleStage[] = [
       },
       {
         title: "Scout Radar & Reforge at the Altar",
-        detail: "Spot saturated elements above 7,000 bps Tribute risk and burn surplus blades via reforge_2_to_1 anytime (or AI-unlocked reforge_3_to_2).",
+        detail: "Spot saturated elements above 7,000 bps Tribute risk and transmute surplus blades via reforge_2_to_1 at any time.",
         metric: "13,500 bps Total Pool",
         icon: <Radar className="w-4 h-4 text-void" aria-hidden="true" />,
       },
@@ -114,13 +114,13 @@ const STAGES: ChronicleStage[] = [
       },
       {
         title: "Boss Buyback & Backer Vault",
-        detail: "Sell scarce non-starter blades at 1.0x-4.0x buyback quotes, or fund Floor jackpots directly for 15% ticket dividends until Boss defeat.",
+        detail: "Sell unlocked non-starter blades at the verified 1.00x buyback baseline, or fund Floor jackpots directly for 15% ticket dividends until Boss defeat.",
         metric: "15% Ticket Stream",
         icon: <Clock className="w-4 h-4 text-jackpot" aria-hidden="true" />,
       },
       {
-        title: "AI Proposes, Contract Decides",
-        detail: "NEAR AI Cloud proposes buyback multipliers, reforge_3_to_2 unlock, and taunts off-chain with chat_id audit logs while Ed25519 relayer signatures and bounds run on-chain.",
+        title: "Epoch-Only Oracle, Deterministic Math",
+        detail: "In this testnet build, AI Cloud overrides are intentionally off (epoch-only): weapon supply shifts boss resistance automatically while smart contract bounds cap every action.",
         metric: "Max 2,500 bps Shift/Epoch",
         icon: <ShieldCheck className="w-4 h-4 text-solar" aria-hidden="true" />,
       },
@@ -156,7 +156,7 @@ export const ProtocolLoopChronicle: React.FC = () => {
           <h2 className="font-serif text-3xl sm:text-4xl font-bold text-parchment tracking-tight">
             The Three Cadences of the Spire
           </h2>
-          <p className="mt-2.5 text-sm sm:text-base text-ash max-w-2xl leading-relaxed">
+          <p className="mt-2.5 text-sm sm:text-base text-ash max-w-[65ch] leading-relaxed">
             Built around a continuous closed-loop economy from thirty-second town trades to full multi-floor boss expeditions and market simulation.
           </p>
         </div>
@@ -206,7 +206,7 @@ export const ProtocolLoopChronicle: React.FC = () => {
                 <h3 className="font-serif text-2xl font-bold text-parchment">
                   {current.headline}
                 </h3>
-                <p className="font-lore italic text-lg sm:text-xl text-ash mt-1.5 max-w-3xl leading-snug">
+                <p className="font-lore italic text-lg sm:text-xl text-ash mt-1.5 max-w-[65ch] leading-snug">
                   &ldquo;{current.loreNote}&rdquo;
                 </p>
               </div>
@@ -215,7 +215,7 @@ export const ProtocolLoopChronicle: React.FC = () => {
               </span>
             </div>
 
-            <div className="rounded-xl bg-oled/85 divide-y md:divide-y-0 md:divide-x divide-brass/15 grid grid-cols-1 md:grid-cols-3">
+            <div className="border-t border-b border-brass/15 divide-y md:divide-y-0 md:divide-x divide-brass/15 grid grid-cols-1 md:grid-cols-3">
               {current.steps.map((step, idx) => (
                 <div
                   key={step.title}
@@ -223,10 +223,10 @@ export const ProtocolLoopChronicle: React.FC = () => {
                 >
                   <div>
                     <div className="flex items-center gap-2.5 mb-2.5">
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-panel-card shrink-0">
+                      <span className="inline-flex items-center justify-center w-6 h-6 shrink-0">
                         {step.icon}
                       </span>
-                      <h4 className="font-serif text-base font-bold text-parchment">
+                      <h4 className="font-serif text-base font-bold text-parchment text-balance">
                         {idx + 1}. {step.title}
                       </h4>
                     </div>

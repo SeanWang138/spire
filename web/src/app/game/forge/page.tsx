@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, AlertCircle, ExternalLink, Swords } from "lucide-react";
+import { CheckCircle2, AlertCircle, ExternalLink, Swords, Vault } from "lucide-react";
 import { CraftingForge } from "@/components/left/CraftingForge";
 import { GatheringAltar } from "@/components/left/GatheringAltar";
 import { LiveInventory, StarterKitButton } from "@/components/left/LiveInventory";
@@ -15,7 +15,6 @@ import {
   get_inventory,
   get_supply,
   get_ai_state,
-  get_meta,
   get_merchant,
   get_tower,
   craft_weapon,
@@ -26,10 +25,13 @@ import {
   sell_to_merchant,
   fund_merchant,
   sell_to_boss_buyback,
+  deposit,
   type ItemId,
   type ElementIndex,
 } from "@/lib/contract";
-import { useContractView, useSessionAccount } from "@/lib/spire/hooks";
+import { useContractView } from "@/lib/spire/hooks";
+import { useSpireTelemetry } from "@/lib/spire/telemetry";
+import { formatContractErrorMessage } from "@/lib/errors";
 import {
   ALTAR_RECIPE_2_TO_1,
   ALTAR_RECIPE_3_TO_2,
@@ -39,7 +41,7 @@ import {
   nearToYocto,
 } from "@/lib/spire/constants";
 import { getEffectiveResistances } from "@/lib/combat-rules";
-import { getExplorerTxUrl } from "@/lib/utils/cn";
+import { getExplorerTxUrl, parseYoctoSafe } from "@/lib/utils/cn";
 
 const WEAPON_ELEMENT: Record<Extract<ItemId, "weapon:solar" | "weapon:frost" | "weapon:void">, ElementIndex> = {
   "weapon:solar": 0,
@@ -47,8 +49,22 @@ const WEAPON_ELEMENT: Record<Extract<ItemId, "weapon:solar" | "weapon:frost" | "
   "weapon:void": 2,
 };
 
+const MIN_RAID_POUCH_YOCTO = 100_000_000_000_000_000_000_000n; // 0.10 NEAR
+const AUTO_POUCH_DEPOSIT_YOCTO = "350000000000000000000000"; // 0.35 NEAR
+const MIN_GAS_TANK_FOR_SETUP_YOCTO = 380_000_000_000_000_000_000_000n; // leave >= 0.03 NEAR gas
+
 export default function ForgePage() {
-  const session = useSessionAccount();
+  const {
+    session,
+    meta: sharedMeta,
+    metaLoading,
+    metaError,
+    pouchYocto,
+    gasTankYocto,
+    reloadMeta,
+    reloadBalance,
+    reloadAll,
+  } = useSpireTelemetry();
   const accountId = session?.accountId ?? "";
 
   const inventory = useContractView(
@@ -56,7 +72,6 @@ export default function ForgePage() {
     [accountId]
   );
   const supply = useContractView(get_supply, []);
-  const meta = useContractView(get_meta, []);
   const merchant = useContractView(get_merchant, []);
   const tower = useContractView(get_tower, []);
   const aiRecipeState = useContractView(async () => {
@@ -75,10 +90,19 @@ export default function ForgePage() {
     type: "success" | "error";
     txHash?: string;
   } | null>(null);
+  const [completingSetup, setCompletingSetup] = useState(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    };
+  }, []);
 
   const showStatus = (text: string, type: "success" | "error", txHash?: string) => {
     setStatusMessage({ text, type, txHash });
-    setTimeout(() => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(() => {
       setStatusMessage((curr) => (curr?.text === text ? null : curr));
     }, 7000);
   };
@@ -96,15 +120,7 @@ export default function ForgePage() {
       inventory.reload();
       supply.reload();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("E_INSUFFICIENT_ITEM")) {
-        showStatus(
-          `Insufficient materials: forging requires ${CRAFT_ORE_COST} Iron Ore and ${CRAFT_ESSENCE_COST} matching Essence.`,
-          "error"
-        );
-      } else {
-        showStatus(`Crafting failed: ${msg}`, "error");
-      }
+      showStatus(formatContractErrorMessage(err), "error");
       throw err;
     }
   };
@@ -120,15 +136,7 @@ export default function ForgePage() {
       inventory.reload();
       supply.reload();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("E_INSUFFICIENT_ITEM")) {
-        showStatus(
-          "Insufficient Free Crafted weapons. Starter-locked weapons cannot be burned at the altar.",
-          "error"
-        );
-      } else {
-        showStatus(`Reforging failed: ${msg}`, "error");
-      }
+      showStatus(formatContractErrorMessage(err), "error");
       throw err;
     }
   };
@@ -140,8 +148,7 @@ export default function ForgePage() {
       showStatus(`Gathered +2 ${material}.`, "success", res.txHash);
       inventory.reload();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      showStatus(`Gathering blocked (30s cooldown or 20/epoch cap): ${msg}`, "error");
+      showStatus(formatContractErrorMessage(err), "error");
       throw err;
     }
   };
@@ -157,16 +164,40 @@ export default function ForgePage() {
       inventory.reload();
       supply.reload();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("E_ALREADY_CLAIMED") || msg.includes("already")) {
-        showStatus("This account has already claimed the Starter Kit.", "error");
-      } else if (msg.includes("AccessKeyNotFound") || msg.includes("does not have access key")) {
-        showStatus("Session key not recognized on-chain. Re-enter from 1-Click Start.", "error");
-      } else if (msg.includes("NotEnoughBalance")) {
-        showStatus("Insufficient gas balance on your subaccount.", "error");
-      } else {
-        showStatus(`Starter claim failed: ${msg}`, "error");
+      showStatus(formatContractErrorMessage(err), "error");
+    }
+  };
+
+  const handleCompleteGuestSetup = async (claimStarter: boolean, depositPouch: boolean) => {
+    if (completingSetup) return;
+    setCompletingSetup(true);
+    let lastHash: string | undefined;
+    try {
+      if (claimStarter) {
+        try {
+          const res = await claim_starter();
+          lastHash = res.txHash;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes("E_ALREADY_CLAIMED")) throw err;
+        }
       }
+      if (depositPouch) {
+        const res = await deposit(AUTO_POUCH_DEPOSIT_YOCTO);
+        lastHash = res.txHash;
+      }
+      showStatus(
+        "Guest setup completed on-chain: Starter Relics & 0.35 NEAR Citadel Pouch active.",
+        "success",
+        lastHash
+      );
+      inventory.reload();
+      supply.reload();
+      reloadAll();
+    } catch (err: unknown) {
+      showStatus(formatContractErrorMessage(err), "error");
+    } finally {
+      setCompletingSetup(false);
     }
   };
 
@@ -183,9 +214,9 @@ export default function ForgePage() {
       );
       merchant.reload();
       inventory.reload();
+      reloadBalance();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      showStatus(`Bazaar trade failed: ${msg}`, "error");
+      showStatus(formatContractErrorMessage(err), "error");
       throw err;
     }
   };
@@ -199,9 +230,9 @@ export default function ForgePage() {
         res.txHash
       );
       merchant.reload();
+      reloadBalance();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      showStatus(`Failed to refill merchant reserve: ${msg}`, "error");
+      showStatus(formatContractErrorMessage(err), "error");
       throw err;
     }
   };
@@ -210,16 +241,16 @@ export default function ForgePage() {
     try {
       const res = await sell_to_boss_buyback(floor, element, qty);
       showStatus(
-        `Sold ${qty}x ${ELEMENT_NAMES[element]} weapon to Floor ${floor} Buyback Reserve. Payout credited to Citadel Ledger.`,
+        `Sold ${qty}x ${ELEMENT_NAMES[element]} weapon to Floor ${floor} Buyback Reserve. Payout credited to Citadel Pouch.`,
         "success",
         res.txHash
       );
       inventory.reload();
       supply.reload();
       tower.reload();
+      reloadBalance();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      showStatus(`Floor buyback failed: ${msg}`, "error");
+      showStatus(formatContractErrorMessage(err), "error");
       throw err;
     }
   };
@@ -228,8 +259,9 @@ export default function ForgePage() {
     return (
       <div className="max-w-4xl mx-auto py-8">
         <EmptyState
+          headingAs="h1"
           title="No active testnet session"
-          hint="Launch your 1-Click Ephemeral Testnet Subaccount to gather materials, forge weapons, and trade at the Bazaar."
+          hint="Launch your 1-Click Walletless Testnet Subaccount to gather materials, forge weapons, and trade at the Bazaar."
           actionHref="/game/start"
           actionLabel="Go to 1-Click Start"
         />
@@ -239,9 +271,17 @@ export default function ForgePage() {
 
   const activeRecipe = aiRecipeState.data?.altar_recipe_id ?? "";
   const txUrl = getExplorerTxUrl(statusMessage?.txHash);
-  const effectiveResistances = meta.data
-    ? getEffectiveResistances(meta.data.resistance, 1)
+  const effectiveResistances = sharedMeta
+    ? getEffectiveResistances(sharedMeta.resistance, 1)
     : null;
+  const pouchNeedTopUp = pouchYocto !== null && parseYoctoSafe(pouchYocto) < MIN_RAID_POUCH_YOCTO;
+  const gasTankBalance = gasTankYocto !== null ? parseYoctoSafe(gasTankYocto) : 0n;
+  const needsStarter = Boolean(
+    inventory.data && inventory.data.starter_locked.reduce((a, b) => a + b, 0) === 0
+  );
+  const canAutoDeposit = pouchNeedTopUp && gasTankBalance >= MIN_GAS_TANK_FOR_SETUP_YOCTO;
+  const canAutoStarter = needsStarter && gasTankBalance >= 50_000_000_000_000_000_000_000n;
+  const showRecoveryBanner = canAutoStarter || canAutoDeposit;
 
   return (
     <div className="flex flex-col gap-6">
@@ -258,6 +298,36 @@ export default function ForgePage() {
           <StarterKitButton inventory={inventory.data} onClaimStarter={handleClaimStarter} />
         )}
       </div>
+
+      {showRecoveryBanner && (
+        <div
+          role="status"
+          className="px-4 py-3.5 rounded-lg bg-solar/10 border border-solar/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="text-xs font-mono text-parchment leading-relaxed">
+            <span className="font-bold text-solar">Incomplete Guest Setup Detected:</span>{" "}
+            {canAutoStarter && canAutoDeposit
+              ? "Claim your free Starter Relics & transfer 0.35 NEAR from your gas tank into your playable Citadel Pouch."
+              : canAutoStarter
+                ? "Claim your free Starter Relics (4x Solar, 1x Frost, Ore & Essence)."
+                : "Transfer 0.35 NEAR from your guest gas tank into your playable Citadel Pouch."}
+          </div>
+          <button
+            type="button"
+            disabled={completingSetup}
+            onClick={() => handleCompleteGuestSetup(canAutoStarter, canAutoDeposit)}
+            className="min-h-[44px] px-4 py-2 rounded-lg bg-solar hover:bg-solar-dark text-oled font-mono font-bold text-xs uppercase tracking-wider shrink-0 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+          >
+            {completingSetup
+              ? "Completing Setup..."
+              : canAutoStarter && canAutoDeposit
+                ? "1-Click Complete Starter & Deposit 0.35 NEAR"
+                : canAutoStarter
+                  ? "1-Click Claim Starter Kit"
+                  : "1-Click Deposit 0.35 NEAR to Pouch"}
+          </button>
+        </div>
+      )}
 
       {statusMessage && (
         <div
@@ -320,14 +390,14 @@ export default function ForgePage() {
               <GatheringAltar
                 onHarvest={handleGather}
                 accountId={accountId}
-                epoch={meta.data?.epoch ?? 0}
+                epoch={sharedMeta?.epoch ?? 0}
               />
             </div>
           </div>
 
           {/* Band 3: Global Supply & Mini MetaRadar */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            <div className="lg:col-span-7 h-full">
+            <div className="lg:col-span-7">
               {supply.loading && !supply.data ? (
                 <div className="obsidian-surface p-6 text-xs font-mono text-ash">
                   Loading circulating weapon supply...
@@ -344,7 +414,7 @@ export default function ForgePage() {
             </div>
 
             <div className="lg:col-span-5 space-y-3">
-              {meta.loading && !meta.data ? (
+              {metaLoading && !sharedMeta ? (
                 <div className="obsidian-surface p-6 text-xs font-mono text-ash">
                   Loading live Meta Radar...
                 </div>
@@ -352,22 +422,32 @@ export default function ForgePage() {
                 <>
                   <MetaRadar
                     resistances={effectiveResistances}
-                    epoch={meta.data?.epoch}
-                    nextEpochInNs={meta.data?.next_epoch_in_ns}
+                    epoch={sharedMeta?.epoch}
+                    nextEpochInNs={sharedMeta?.next_epoch_in_ns}
                   />
-                  <Link
-                    href="/game/raid"
-                    className="min-h-[44px] w-full px-4 py-2.5 rounded-lg border border-frost/35 bg-frost/10 hover:bg-frost/20 text-frost text-xs font-mono font-bold flex items-center justify-between gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-                  >
-                    <span>Counter weakest element in Spire Raid (Floor 2 adds +1500 bps Frost Ward)</span>
-                    <Swords className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  </Link>
+                  {pouchNeedTopUp ? (
+                    <Link
+                      href="/game/vault?tab=pouch"
+                      className="min-h-[44px] w-full px-4 py-2.5 rounded-lg border border-solar/45 bg-solar/15 hover:bg-solar/25 text-solar text-xs font-mono font-bold flex items-center justify-between gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                    >
+                      <span>Next Step: Top up Citadel Pouch in Vault (&lt; 0.10 NEAR)</span>
+                      <Vault className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    </Link>
+                  ) : (
+                    <Link
+                      href="/game/raid"
+                      className="min-h-[44px] w-full px-4 py-2.5 rounded-lg border border-frost/35 bg-frost/10 hover:bg-frost/20 text-frost text-xs font-mono font-bold flex items-center justify-between gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                    >
+                      <span>Ready: Enter Spire Raid (Floor 2 adds +1500 bps Frost Ward)</span>
+                      <Swords className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    </Link>
+                  )}
                 </>
               ) : (
                 <EmptyState
                   title="Meta Radar unavailable"
-                  hint={meta.error ?? "Unable to load live adaptive resistance."}
-                  onReload={meta.reload}
+                  hint={metaError ?? "Unable to load live adaptive resistance."}
+                  onReload={reloadMeta}
                 />
               )}
             </div>
@@ -386,6 +466,7 @@ export default function ForgePage() {
                   isOpen={merchant.data.is_open}
                   stock={merchant.data.stock}
                   inventory={inventory.data ?? emptyInventory()}
+                  pouchYocto={pouchYocto}
                   onTrade={handleTrade}
                   onFundMerchant={handleFundMerchant}
                 />

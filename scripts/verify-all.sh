@@ -5,7 +5,7 @@
 # 1. Smart Contract: cargo check && cargo test
 # 2. Relayer & Keeper: TypeScript compile & test vectors
 # 3. Web App: Next.js 14 production build verification
-# 4. E2E Test Suite: Tiers 1-4 comprehensive test runner
+# 4. Parity & Live Probe: Cross-layer math parity + live RPC invariants
 # ==============================================================================
 
 set -eo pipefail
@@ -109,9 +109,9 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# STEP 4: Comprehensive E2E Testing Suite (Tiers 1-4)
+# STEP 4: Cross-Layer Parity & Live Contract Invariant Suite
 # ------------------------------------------------------------------------------
-echo -e "\n${CYAN}>>> [STEP 4/4] Executing Comprehensive E2E Test Suite (Tiers 1-4)...${RESET}"
+echo -e "\n${CYAN}>>> [STEP 4/4] Executing Cross-Layer Parity & Live Invariant Suite...${RESET}"
 cd "${ROOT_DIR}"
 if command -v tsx >/dev/null 2>&1; then
   E2E_CMD="tsx tests/run_all.ts"
@@ -139,7 +139,7 @@ if [ "${ERRORS}" -eq 0 ]; then
   echo -e "${GREEN}  - Smart Contract: Checked & Tested${RESET}"
   echo -e "${GREEN}  - Relayer Engine: Checked${RESET}"
   echo -e "${GREEN}  - Web Application: Validated${RESET}"
-  echo -e "${GREEN}  - E2E Test Harness: 111/111 Tests Passed (Tiers 1-4)${RESET}"
+  echo -e "${GREEN}  - Cross-Layer Parity & Live RPC Invariants: Passed${RESET}"
   echo -e "${MAGENTA}================================================================================${RESET}\n"
   exit 0
 else

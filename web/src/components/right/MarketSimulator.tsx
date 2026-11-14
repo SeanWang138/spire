@@ -31,6 +31,16 @@ interface SimTick {
   reason: string;
 }
 
+interface LiveSeedParams {
+  cashNear?: number;
+  stock?: number;
+  supply?: [number, number, number];
+}
+
+interface MarketSimulatorProps {
+  liveSeed?: LiveSeedParams;
+}
+
 const SCENARIOS: Record<ScenarioId, { label: string; summary: string }> = {
   balanced: {
     label: "Balanced Citadel",
@@ -49,13 +59,22 @@ const SCENARIOS: Record<ScenarioId, { label: string; summary: string }> = {
   },
 };
 
-function buildWeekTimeline(scenario: ScenarioId): SimTick[] {
+function buildWeekTimeline(
+  scenario: ScenarioId,
+  liveSeed?: LiveSeedParams | null
+): SimTick[] {
   const ticks: SimTick[] = [];
-  let cash = scenario === "bankrun" ? 4.8 : 6.0;
-  let stock = 95;
-  let s0 = 40;
-  let s1 = 35;
-  let s2 = 30;
+  let cash =
+    liveSeed?.cashNear !== undefined && liveSeed.cashNear > 0
+      ? liveSeed.cashNear
+      : scenario === "bankrun"
+        ? 4.8
+        : 6.0;
+  let stock =
+    liveSeed?.stock !== undefined && liveSeed.stock >= 0 ? liveSeed.stock : 95;
+  let s0 = liveSeed?.supply?.[0] ?? 40;
+  let s1 = liveSeed?.supply?.[1] ?? 35;
+  let s2 = liveSeed?.supply?.[2] ?? 30;
   const recentDemands: number[] = [18, 20, 22, 19, 21];
 
   for (let h = 0; h <= 168; h += 1) {
@@ -144,13 +163,23 @@ function buildWeekTimeline(scenario: ScenarioId): SimTick[] {
   return ticks;
 }
 
-export const MarketSimulator: React.FC = () => {
-  const [scenario, setScenario] = useState<ScenarioId>("bankrun");
+export const MarketSimulator: React.FC<MarketSimulatorProps> = ({ liveSeed }) => {
+  const [scenario, setScenario] = useState<ScenarioId>("balanced");
+  const [seedLive, setSeedLive] = useState<boolean>(false);
   const [hour, setHour] = useState<number>(0);
   const [playing, setPlaying] = useState<boolean>(false);
   const [speed, setSpeed] = useState<1 | 4 | 12>(4);
 
-  const timeline = useMemo(() => buildWeekTimeline(scenario), [scenario]);
+  const hasLiveSeed = Boolean(
+    liveSeed &&
+      (liveSeed.cashNear !== undefined ||
+        liveSeed.stock !== undefined ||
+        liveSeed.supply !== undefined)
+  );
+  const timeline = useMemo(
+    () => buildWeekTimeline(scenario, seedLive ? liveSeed : null),
+    [scenario, seedLive, liveSeed]
+  );
   const current = timeline[Math.min(168, Math.max(0, hour))];
 
   useEffect(() => {
@@ -208,7 +237,7 @@ export const MarketSimulator: React.FC = () => {
           <h2 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
             1-Week Market Time-Warp
           </h2>
-          <p className="text-xs font-mono text-ash mt-1.5 max-w-2xl leading-relaxed">
+          <p className="text-xs font-mono text-ash mt-1.5 max-w-2xl leading-relaxed text-pretty">
             Deterministic offline projection of 168 hours using on-chain <code className="text-frost">merchant.rs</code> math (0.05 NEAR base, 100 target stock, &plusmn;10% spread, 1.00 NEAR halt floor) and adaptive resistance renormalization.
           </p>
         </div>
@@ -259,6 +288,25 @@ export const MarketSimulator: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {hasLiveSeed && (
+            <button
+              type="button"
+              aria-pressed={seedLive}
+              onClick={() => {
+                setPlaying(false);
+                setHour(0);
+                setSeedLive((prev) => !prev);
+              }}
+              className={`min-h-[44px] px-3.5 py-2 rounded-lg border text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled ${
+                seedLive
+                  ? "bg-jackpot/15 border-jackpot/50 text-jackpot"
+                  : "border-brass/25 bg-panel-dark hover:bg-panel-elevated text-ash hover:text-parchment"
+              }`}
+            >
+              <span>{seedLive ? "Live Chain Seed: ON" : "Seed from Live On-Chain State"}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -293,7 +341,7 @@ export const MarketSimulator: React.FC = () => {
       </div>
 
       {/* SVG Timeline Chart */}
-      <div className="rounded-lg bg-panel-dark p-3.5 sm:p-4 space-y-3">
+      <div className="border-t border-b border-brass/20 py-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
           <div className="flex flex-wrap items-center gap-4">
             <span className="inline-flex items-center gap-1.5 text-solar font-semibold">
@@ -389,35 +437,35 @@ export const MarketSimulator: React.FC = () => {
       </div>
 
       {/* Live Tick Readout */}
-      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1 text-xs font-mono">
-        <div className="p-3 rounded-lg bg-panel-dark">
+      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1 text-xs font-mono">
+        <div className="space-y-1">
           <dt className="text-xs text-pewter">Bazaar Status</dt>
-          <dd className={`text-sm font-bold mt-1 font-mono-numbers ${current.isClosed ? "text-hp-text" : "text-jackpot"}`}>
+          <dd className={`text-sm font-bold font-mono-numbers ${current.isClosed ? "text-hp-text" : "text-jackpot"}`}>
             {current.isClosed ? "CLOSED (<1.0 NEAR)" : "OPEN"} · {current.cashNear.toFixed(2)} NEAR
           </dd>
         </div>
 
-        <div className="p-3 rounded-lg bg-panel-dark">
+        <div className="space-y-1">
           <dt className="text-xs text-pewter">Curve Quote (Ask / Bid)</dt>
-          <dd className="text-sm font-bold mt-1 text-parchment font-mono-numbers">
+          <dd className="text-sm font-bold text-parchment font-mono-numbers">
             <span className="text-frost">{current.buyPrice.toFixed(4)}</span> /{" "}
             <span className="text-solar">{current.sellPrice.toFixed(4)}</span> N
           </dd>
         </div>
 
-        <div className="p-3 rounded-lg bg-panel-dark">
+        <div className="space-y-1">
           <dt className="text-xs text-pewter">Stock &amp; 5h Demand</dt>
-          <dd className="text-sm font-bold mt-1 text-parchment font-mono-numbers">
+          <dd className="text-sm font-bold text-parchment font-mono-numbers">
             {current.stock}/{MERCHANT_TARGET_STOCK} · {current.demandAvg} avg
           </dd>
         </div>
 
-        <div className="p-3 rounded-lg bg-panel-dark">
+        <div className="space-y-1">
           <dt className="text-xs text-pewter flex items-center gap-1">
             <TrendingUp className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
             <span>Boss Resistance (bps)</span>
           </dt>
-          <dd className={`text-sm font-bold mt-1 font-mono-numbers ${maxRes >= TRIBUTE_THRESHOLD_BPS ? "text-hp-text" : "text-jackpot"}`}>
+          <dd className={`text-sm font-bold font-mono-numbers ${maxRes >= TRIBUTE_THRESHOLD_BPS ? "text-hp-text" : "text-jackpot"}`}>
             {current.resistance.join(" / ")}
           </dd>
         </div>

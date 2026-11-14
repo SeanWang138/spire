@@ -9,8 +9,8 @@ The Spire v3.1 / BossVault Protocol is a 5-layer dark-fantasy GameFi protocol on
 1. **Layer 1: Smart Contract Core (`contract/`)**: Deterministic GameFi engine in Rust (`near-sdk`). Implements partial NEP-245 (`mt_balance_of`, `mt_supply`, `mt_transfer`), dynamic SVG NFT (`nft_token`, `nft_metadata`, `nft_total_supply` for `spirefi-trophy-r{round}-f{floor}`), internal vault ledger, 3-floor boss tower (0-indexed `0..2`, HP `[1000, 1600, 2500]`, tickets `[0.10, 0.15, 0.25]` NEAR), automatic supply-driven adaptive resistance (`13,500 bps` total, clamped `[1000, 8500]`, `MAX_SHIFT_BPS = 2500` on `lazy_epoch`), NPC merchant curve (`MERCHANT_BASE_PRICE = 0.05 NEAR`, `target = 100`, `±10%` spread), boss tribute confiscation (`res_eff >= 7000 bps`), 10% next-floor drip + 90/10 jackpot payout, Backer Vault (`BACKER_SHARE_UNIT = 1e16` = `10^-8 NEAR` on deployed testnet build), Ed25519 AI proposal verification gate, and NEP-297 `EVENT_JSON` (`"standard": "spire"`, `"version": "3.1.0"`).
 2. **Layer 2: Relayer & Autonomous Keeper (`relayer/`)**: TypeScript service (`relayer/src/`) that polls contract state (`keeper.ts`), triggers hourly `update_meta()` epoch rollovers (`KEEPER_AI_MODE=epoch-only` for pure-testnet deployments without external AI credits, keeping `1.00x` contract buyback baseline), or when configured with `KEEPER_AI_MODE=near-ai` + `NEAR_AI_API_KEY` requests tactical boss proposals from NEAR AI Cloud (`z-ai/glm-5.3-flash` via `POST /chat/completions` with off-chain `GET /signature/{chat_id}` audit hash), signs canonical `"spire/..."` messages with Ed25519 (`TEE_SIGNING_PRIVATE_KEY`, or opt-in `MOCK_TEE=true` + `MOCK_TEE_SEED` for local tests), and submits `apply_ai_proposal`. Full on-chain hardware TEE attestation is roadmap §13.
 3. **Layer 3: Indexer & Telemetry (`relayer/src/indexer.ts`)**: Event extractor parsing NEP-297 `EVENT_JSON` (`"standard": "spire"`) receipts across protocol events.
-4. **Layer 4: Frontend Web App (`web/`)**: Next.js 14 App Router application with landing sanctuary (`/`), multi-room game citadel (`/game/start`, `/game/raid`, `/game/forge`, `/game/merchant`, `/game/vault`, `/game/ai`), Three.js WebGL boss stage, and **Ephemeral Testnet Guest Sessions** (`FullAccess` browser-stored subaccount funded `0.60 NEAR` via `POST /api/accounts`, returning HTTP `503` when faucet env is unconfigured) alongside wallet sign-in. Client-side deterministic preview helpers mirror contract math.
-5. **Layer 5: Verification & Parity Suite (`tests/`, `scripts/`)**: Hermetic Tiers 1-4 E2E suite against v3 reference simulation (`tests/protocol_models.ts`), cross-layer Rust/Relayer/Web parity checks (`tests/cross_layer_math_parity.ts`, `test-vectors/*.json`), master pipeline (`scripts/verify-all.sh`), and live testnet probe (`scripts/test-all-live.mjs` using `process.env.NEAR_TESTNET_PRIVATE_KEY`).
+4. **Layer 4: Frontend Web App (`web/`)**: Next.js 14 App Router application with landing sanctuary (`/`), multi-room game citadel (`/game/start`, `/game/raid`, `/game/forge`, `/game/merchant`, `/game/vault`, `/game/ai`), Three.js WebGL boss stage, and **100% Walletless Ephemeral Testnet Guest Sessions** (zero external wallet selector: browser-stored Ed25519 subaccount funded `0.60 NEAR` via `POST /api/accounts` with IP/daily caps and Reserve-Floor Circuit Breaker, then auto-claiming starter gear + auto-depositing `0.35 NEAR` into the Citadel Pouch while leaving `~0.245 NEAR` as a Silent Gas Tank). Client-side deterministic preview helpers mirror contract math.
+5. **Layer 5: Verification & Parity Suite (`tests/`, `scripts/`)**: Cross-layer Rust/Relayer/Web parity checks (`tests/cross_layer_math_parity.ts`, `test-vectors/*.json`), read-only live NEAR Testnet view invariant probe (`tests/run_all.ts`), master pipeline (`scripts/verify-all.sh`), and live transaction probe (`scripts/test-all-live.mjs` using `process.env.NEAR_TESTNET_PRIVATE_KEY`).
 
 ---
 
@@ -30,7 +30,7 @@ The Spire v3.1 / BossVault Protocol is a 5-layer dark-fantasy GameFi protocol on
 | 10 | Backer Vault & Cycle Carry-Over | `back_boss_vault(floor)` adds to jackpot (`BACKER_SHARE_UNIT = 1e16` = `10^-8 NEAR` testnet build); earns `15%` ticket dividend until boss defeat | M1-CONTRACT | Implemented |
 | 11 | AI Relayer Ed25519 Gate | `apply_ai_proposal(floor, proposal, chat_id, signature)` verifies Ed25519 over `"spire/..."` (`buyback_multiplier_bps ∈ [10000, 40000]`, `MAX_SHIFT_BPS = 2500`, `altar_recipe_id`) | M1 / M2 | Implemented |
 | 12 | NEP-297 `EVENT_JSON` Logging | Standard `"spire"` (`3.1.0`) logs for all ledger, craft, reforge, raid, settlement, merchant, buyback, backer, tribute, and AI actions | M1-CONTRACT | Implemented |
-| 13 | Cross-Layer Parity & Tests | `cargo test`, `relayer` unit tests, `web` tests, `tests/cross_layer_math_parity.ts`, and v3 `protocol_models.ts` Tiers 1-4 | M-TEST / M4 | Active |
+| 13 | Cross-Layer Parity & Tests | `cargo test`, `relayer` unit tests, `web` tests, `tests/cross_layer_math_parity.ts`, and `tests/run_all.ts` live RPC checks | M-TEST / M4 | Active |
 
 ---
 
@@ -41,7 +41,7 @@ The Spire v3.1 / BossVault Protocol is a 5-layer dark-fantasy GameFi protocol on
 | M1 | M1-CONTRACT: Smart Contract Core | Rust contract (`contract/src/`), deployed & live on `spire.testnet` | none | LIVE (`spire.testnet`) |
 | M2 | M2-RELAYER: Relayer, Keeper & Indexer | Keeper, NEAR AI Cloud integration (`z-ai/glm-5.3-flash`), `"spire/..."` Ed25519 signer, `pricing.ts`, indexer | M1 | IMPLEMENTED |
 | M3 | M3-FRONTEND: Next.js 14 Web App | Landing + multi-route `/game/*` citadel, WebGL 3D boss, Ephemeral Testnet Guest Session, accessible `web/DESIGN.md` tokens | M1, M2 | WAVE 1-2 HARDENING |
-| M-TEST | E2E Reference & Cross-Layer Parity | Historical M-TEST (`tests/protocol_models.ts` Tiers 1-4) + `tests/cross_layer_math_parity.ts` + `test-vectors/*.json` | M1, M2 | IMPLEMENTED |
+| M-TEST | Cross-Layer Parity & Live Probe | `tests/cross_layer_math_parity.ts` + `test-vectors/*.json` + `tests/run_all.ts` live `spire.testnet` invariant checks | M1, M2 | IMPLEMENTED |
 | M4 | M4-INTEGRATION: Security & Audit Gates | Wave 0 security fixes (`LICENSE`, key hygiene, `0.60 NEAR` session subaccount cap) + Wave 1-2 UI/a11y/docs sync | M1, M2, M3 | IN PROGRESS |
 
 ---
@@ -78,7 +78,7 @@ The Spire v3.1 / BossVault Protocol is a 5-layer dark-fantasy GameFi protocol on
 - **Partial NEP-245 Views:** `mt_balance_of(account_id: AccountId, token_id: String) -> U128`, `mt_supply(token_id: String) -> U128`
 - **NEP-171 Views:** `nft_token(token_id: String) -> Option<Token>`, `nft_metadata() -> NFTContractMetadata`, `nft_total_supply() -> U128`
 
-#### Player Change Methods (Ledger-Backed / Testnet Guest Session or Wallet):
+#### Player Change Methods (Ledger-Backed / Walletless Testnet Guest Session):
 - `claim_starter()`: One-time starter kit (`[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4 ore:iron` + `3` each of `essence:solar`, `essence:frost`, `essence:void`)
 - `gather(item_id: String)`: Grants `+2` of chosen material (`30s` cooldown, `20` gathers/epoch cap)
 - `craft_weapon(element: u8)`: Consumes `2 ore:iron + 3 essence:<element>` -> mints `1` weapon (`0=Solar, 1=Frost, 2=Void`)
@@ -158,27 +158,20 @@ spirefi/
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx            # Sanctuary overview & boss intelligence showcase
-│       │   ├── api/accounts/       # Testnet ephemeral subaccount faucet (0.60 NEAR)
-│       │   └── game/               # /start, /raid, /forge, /merchant, /vault, /ai
+│       │   ├── api/accounts/       # Walletless testnet subaccount faucet (0.60 NEAR + rate/reserve guard)
+│       │   └── game/               # /start (auto 0.35N Pouch deposit), /raid, /forge, /merchant, /vault, /ai
 │       ├── components/             # 3D canvas, shared UI, left/center/right panels
 │       └── lib/                    # RPC client, combat rules, simulation mirror, hooks
 ├── test-vectors/                   # Cross-layer deterministic JSON vectors
 │   ├── resistance_vectors.json
 │   ├── merchant_vectors.json
 │   └── event_vectors.json
-├── tests/                          # Layer 5: Reference E2E & parity verification
-│   ├── protocol_models.ts          # Historical v3 TypeScript reference sim
-│   ├── tier1_feature_tests.ts      # Tier 1 feature tests (vs protocol_models.ts)
-│   ├── tier2_boundary_tests.ts     # Tier 2 boundary tests (vs protocol_models.ts)
-│   ├── tier3_pairwise_tests.ts     # Tier 3 pairwise tests (vs protocol_models.ts)
-│   ├── tier4_workload_tests.ts     # Tier 4 workload tests (vs protocol_models.ts)
+├── tests/                          # Layer 5: Cross-layer parity & live RPC invariants
 │   ├── cross_layer_math_parity.ts  # Rust / Relayer / Web parity verification
-│   └── run_all.ts
+│   ├── test_harness.ts             # Lightweight assertions & formatting
+│   └── run_all.ts                  # Parity + read-only live testnet invariant runner
 ├── scripts/                        # Deployment & verification scripts
 │   ├── verify-all.sh
 │   └── test-all-live.mjs           # Live testnet runner (uses NEAR_TESTNET_PRIVATE_KEY)
-├── PROJECT.md
-├── DESIGN.md                       # Root v3.1 design note (defers to web/DESIGN.md)
-├── TEST_INFRA.md
-└── TEST_READY.md
+└── PROJECT.md
 ```

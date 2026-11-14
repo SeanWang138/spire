@@ -82,7 +82,7 @@ export default function HomePage() {
               <h2 className="font-serif text-3xl sm:text-4xl font-bold text-parchment tracking-tight">
                 Three-Floor Citadel Ascension
               </h2>
-              <p className="mt-2.5 text-sm sm:text-base text-ash max-w-2xl leading-relaxed">
+              <p className="mt-2.5 text-sm sm:text-base text-ash max-w-[65ch] leading-relaxed">
                 Every cleared Boss feeds 10% of its defeated bounty upward into the floor above, escalating stakes from no-timer Keep raids to Enraging apex hunts.
               </p>
             </div>
@@ -101,7 +101,7 @@ export default function HomePage() {
                 className={`p-6 border-t ${f.accentBorder} flex flex-col justify-between gap-5`}
               >
                 <div>
-                  <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment mb-2">
+                  <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment mb-2 text-balance">
                     Floor {f.roman}: {f.title}
                   </h3>
 
@@ -150,13 +150,13 @@ export default function HomePage() {
                   <h3 className="font-serif text-lg sm:text-xl font-bold text-parchment">
                     Tribute Seizure Guard &amp; Starter Immunity
                   </h3>
-                  <p className="mt-1 text-sm text-ash leading-relaxed max-w-3xl">
+                  <p className="mt-1 text-sm text-ash leading-relaxed max-w-[52ch] text-pretty">
                     Pressing any saturated element at or above <strong>7,000 bps</strong> resistance risks having crafted non-starter weapons confiscated by the Boss Vault. Starter Kit blades (4x Solar, 1x Frost) are strictly immune to confiscation, giving newcomers a risk-free learning path.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 font-mono text-xs shrink-0 text-hp-text px-3.5 py-2 rounded-lg bg-red-950/55">
+              <div className="flex items-center gap-2 font-mono text-xs shrink-0 text-hp-text">
                 <AlertTriangle className="w-4 h-4 text-hp-text" aria-hidden="true" />
                 <span>Threshold: 7,000 bps</span>
               </div>
@@ -183,10 +183,10 @@ export default function HomePage() {
           <SpireSurface variant="chamfer" className="p-8 sm:p-10 border-t border-solar/45">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
               <div className="max-w-2xl">
-                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-parchment">
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-parchment text-balance">
                   Enter the Spire or Replay a Full Week in Seconds
                 </h2>
-                <p className="mt-2 font-lore italic text-lg sm:text-xl text-ash leading-snug">
+                <p className="mt-2 font-lore italic text-lg sm:text-xl text-ash leading-snug text-pretty">
                   &ldquo;Simulate 168 market hours offline with the deterministic engine, or jump straight into NEAR testnet via a 1-click 0.60 NEAR ephemeral guest subaccount.&rdquo;
                 </p>
               </div>

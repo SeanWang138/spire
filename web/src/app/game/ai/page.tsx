@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -24,7 +24,6 @@ import {
   get_buyback_quote,
   get_inventory,
   get_merchant,
-  get_meta,
   get_quote,
   get_tower,
   sell_to_boss_buyback,
@@ -34,6 +33,7 @@ import {
   type ItemId,
   type MerchantQuote,
 } from "@/lib/contract";
+import { formatContractErrorMessage } from "@/lib/errors";
 import { explainMerchantQuote } from "@/lib/merchant-reasoning";
 import {
   ALTAR_RECIPE_2_TO_1,
@@ -50,7 +50,8 @@ import {
   RESISTANCE_MIN_CLAMP,
   RESISTANCE_TOTAL_BPS,
 } from "@/lib/spire/constants";
-import { useContractView, useSessionAccount } from "@/lib/spire/hooks";
+import { useContractView } from "@/lib/spire/hooks";
+import { useSpireTelemetry } from "@/lib/spire/telemetry";
 import {
   formatNearAmount,
   getExplorerTxUrl,
@@ -125,43 +126,43 @@ const WALKTHROUGH_BEATS: ReadonlyArray<WalkthroughBeat> = [
     window: "0 to 10s",
     title: "Frame the Monoculture Failure",
     detail:
-      "Show how every player spamming one meta weapon drains single-asset dungeons, while SpireFi couples weapon supply directly to Boss resistance.",
+      "Show how spamming one meta weapon breaks naive dungeon economies, while SpireFi couples weapon supply directly to on-chain Boss resistance.",
     href: "/game/raid",
     linkLabel: "Spire Raid",
   },
   {
     id: "beat-2",
     window: "10 to 25s",
-    title: "Instant Session Play and Merchant Pricing",
+    title: "Walletless Guest Onboarding & Dynamic Bazaar",
     detail:
-      "Authorize a testnet session subaccount with zero wallet popups, gather ore/essence, and inspect dynamic stock-adjusted quotes.",
+      "Launch a 1-click guest subaccount (~0.60 NEAR test grant: 0.35 NEAR Citadel Pouch + ~0.245 NEAR Silent Gas Tank), gather ore/essence, and inspect stock-adjusted merchant quotes.",
     href: "/game/merchant",
     linkLabel: "Open Merchant",
   },
   {
     id: "beat-3",
     window: "25 to 45s",
-    title: "Meta Radar and Signed AI Void Buybacks",
+    title: "Deterministic Epoch Guardrails (epoch-only)",
     detail:
-      "Point to crowded Solar resistance vs rare Void weakness; show the Signed Relayer AI boosting Void buyback multipliers (up to 4.00x) and enabling bonus 3->2 altar transmutation.",
+      "Point to crowded Solar resistance vs scarce elements: the contract shifts resistance on lazy_epoch automatically, while Boss Buyback holds the verified 1.00x epoch baseline (NEAR AI Cloud offline / epoch-only mode active).",
     href: "#oracle-feed",
     linkLabel: "Jump to Oracle",
   },
   {
     id: "beat-4",
     window: "45 to 60s",
-    title: "Altar Reforge and Lazy Epoch Shift",
+    title: "Altar Reforge & Lazy Epoch Shift",
     detail:
-      "Burn dominant Solar weapons into Void weapons at the Forge, shrinking Solar share so resistance automatically shifts on lazy_epoch.",
+      "Transmute surplus items via standard 2->1 Altar recipes and forge underused elements, shifting future epoch boss resistance bounds on lazy_epoch.",
     href: "/game/forge",
     linkLabel: "Open Forge",
   },
   {
     id: "beat-5",
     window: "60 to 80s",
-    title: "Raid, Conqueror Trophy, NearBlocks, and Signature Proof",
+    title: "Co-op Raid, Vault Claims & NearBlocks Proof",
     detail:
-      "Strike a boss floor, auto-discover Round 0 payouts and spirefi-trophy-r0-f3 NFT in Vault, verify NearBlocks tx hash, and inspect canonical Ed25519 AI signature.",
+      "Strike a boss floor, auto-discover Round payouts and Floor 3 Trophy NFTs in Vault, and verify every walletless transaction hash on NEAR Testnet NearBlocks.",
     href: "/game/vault",
     linkLabel: "Open Vault",
   },
@@ -170,7 +171,7 @@ const WALKTHROUGH_BEATS: ReadonlyArray<WalkthroughBeat> = [
     window: "80 to 90s",
     title: "1-Week Market Time-Warp Reserve Proof",
     detail:
-      "Fast-forward 168 simulated hours below to demonstrate how anti-monoculture spreads and buyback reserves stabilize without central intervention.",
+      "Fast-forward 168 simulated hours below to demonstrate how anti-monoculture spreads and 1.00 NEAR merchant reserve floors stabilize without central intervention.",
     href: "#time-warp",
     linkLabel: "Jump to Time-Warp",
   },
@@ -187,7 +188,7 @@ function StatusBadge({ status }: { status: InvariantStatus }) {
   }
   if (status === "WARN") {
     return (
-      <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-mono font-bold bg-hp-red/15 text-hp-text shrink-0">
+      <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-mono font-bold bg-hp/15 text-hp-text shrink-0">
         <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
         WARN
       </span>
@@ -202,13 +203,15 @@ function StatusBadge({ status }: { status: InvariantStatus }) {
 }
 
 export default function ProofAndLabPage() {
-  const session = useSessionAccount();
+  const { session, meta, metaError, reloadMeta, reloadBalance } =
+    useSpireTelemetry();
   const accountId = session?.accountId ?? "";
 
   const [floor, setFloor] = useState<number>(1);
   const [sellQty, setSellQty] = useState<number>(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [copiedPreimage, setCopiedPreimage] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
   const [txStatus, setTxStatus] = useState<{
     text: string;
     isError?: boolean;
@@ -228,14 +231,13 @@ export default function ProofAndLabPage() {
   const [checkedBeats, setCheckedBeats] = useState<Record<string, boolean>>({});
 
   const tower = useContractView(get_tower, []);
-  const meta = useContractView(get_meta, []);
   const merchant = useContractView(get_merchant, []);
   const inventory = useContractView(
     async () => (accountId ? await get_inventory(accountId) : null),
     [accountId]
   );
 
-  // Load AI state across all 3 floors for both the Oracle view and 12 Invariants Matrix
+  // Load AI / Epoch Oracle state across all 3 floors
   const allAiStates = useContractView(
     async () =>
       await Promise.all([get_ai_state(1), get_ai_state(2), get_ai_state(3)]),
@@ -253,6 +255,14 @@ export default function ProofAndLabPage() {
   );
 
   useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const safeQty = Math.max(1, Math.min(40, Math.trunc(quoteQty) || 1));
     setQuoteLoading(true);
@@ -267,9 +277,7 @@ export default function ProofAndLabPage() {
       .catch((err: unknown) => {
         if (!cancelled) {
           setLiveQuote(null);
-          setQuoteError(
-            err instanceof Error ? err.message : "Failed to fetch live quote."
-          );
+          setQuoteError(formatContractErrorMessage(err));
         }
       })
       .finally(() => {
@@ -283,7 +291,8 @@ export default function ProofAndLabPage() {
 
   const reloadAll = () => {
     tower.reload();
-    meta.reload();
+    reloadMeta();
+    reloadBalance();
     merchant.reload();
     allAiStates.reload();
     buybackQuotes.reload();
@@ -304,10 +313,7 @@ export default function ProofAndLabPage() {
       reloadAll();
     } catch (err: unknown) {
       setTxStatus({
-        text:
-          err instanceof Error
-            ? err.message
-            : "Sellback failed: verify per-epoch caps or weapon lock status.",
+        text: formatContractErrorMessage(err),
         isError: true,
       });
     } finally {
@@ -321,7 +327,7 @@ export default function ProofAndLabPage() {
 
   const ai: AiStateResponse = selectedAiRaw ?? {
     floor,
-    epoch: meta.data?.epoch ?? 0,
+    epoch: meta?.epoch ?? 0,
     nonce: 0,
     buyback_multiplier_bps: [10000, 10000, 10000],
     altar_recipe_id: ALTAR_RECIPE_2_TO_1,
@@ -341,7 +347,10 @@ export default function ProofAndLabPage() {
     try {
       await navigator.clipboard.writeText(canonicalMessage);
       setCopiedPreimage(true);
-      setTimeout(() => setCopiedPreimage(false), 1800);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedPreimage(false), 1800);
     } catch {
       // clipboard unsupported in this context
     }
@@ -368,7 +377,7 @@ export default function ProofAndLabPage() {
   // Derive 12 Live Protocol Invariants from on-chain RPC snapshots (Ide3 §7)
   const invariants = useMemo<InvariantRow[]>(() => {
     const floors = tower.data?.floors ?? [];
-    const metaVal = meta.data;
+    const metaVal = meta;
     const merchVal = merchant.data;
     const aiList = allAiStates.data ?? [];
 
@@ -512,7 +521,7 @@ export default function ProofAndLabPage() {
         rule: "Starter-locked weapons cannot be sold to Boss Buyback or seized as tribute.",
         observed: session
           ? `Session locked counts: S ${lockedArr[0]} / F ${lockedArr[1]} / V ${lockedArr[2]} (${totalLocked} total)`
-          : "Connect session to verify starter locks",
+          : "Create a guest session to verify starter locks",
       },
       {
         id: 7,
@@ -594,10 +603,11 @@ export default function ProofAndLabPage() {
             : "Awaiting first signed relayer commit on-chain",
       },
     ];
-  }, [tower.data, meta.data, merchant.data, allAiStates.data, inventory.data, session]);
+  }, [tower.data, meta, merchant.data, allAiStates.data, inventory.data, session]);
 
-  const anyRpcFailed = Boolean(meta.error && tower.error && allAiStates.error);
+  const anyRpcFailed = Boolean(metaError && tower.error && allAiStates.error);
   const completedWalkthroughCount = Object.values(checkedBeats).filter(Boolean).length;
+  const passedInvariantsCount = invariants.filter((inv) => inv.status === "PASS").length;
 
   return (
     <div className="flex flex-col gap-8">
@@ -608,8 +618,8 @@ export default function ProofAndLabPage() {
             <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
               Proof &amp; Lab
             </h1>
-            <p className="text-sm text-ash leading-relaxed">
-              Signed Relayer Proposal + NEAR AI Cloud Audit ChatID (Full hardware TEE attestation: roadmap §13). AI proposes per-floor Buyback Multipliers and Bonus Altar Recipe (reforge_3_to_2), while weapon supply automatically drives elemental resistance on lazy_epoch.
+            <p className="text-sm text-ash leading-relaxed max-w-[54ch] text-pretty">
+              Deterministic Epoch Oracle &amp; Protocol Proof: Live NEAR AI Cloud proposals are disabled in this testnet release (<code className="text-frost">epoch-only</code> mode active). Weapon supply automatically drives elemental resistance on <code className="text-frost">lazy_epoch</code>, while Boss Buyback preserves the verified 1.00x baseline and standard 2&rarr;1 Altar reforging.
             </p>
           </div>
           <nav aria-label="Proof & Lab sections" className="flex flex-wrap gap-2">
@@ -623,7 +633,7 @@ export default function ProofAndLabPage() {
               href="#invariants"
               className={`min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-card hover:bg-white/10 border border-white/15 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-1.5 ${CONTROL_RING}`}
             >
-              12 Invariants
+              Protocol Audit
             </a>
             <a
               href="#time-warp"
@@ -646,7 +656,7 @@ export default function ProofAndLabPage() {
           aria-live="polite"
           className={`px-4 py-3 rounded-xl border text-xs font-mono flex flex-wrap items-center justify-between gap-2 ${
             txStatus.isError
-              ? "bg-hp-red/10 border-hp-red/40 text-hp-text"
+              ? "bg-hp/10 border-hp/40 text-hp-text"
               : "bg-jackpot/10 border-jackpot/35 text-jackpot"
           }`}
         >
@@ -679,7 +689,7 @@ export default function ProofAndLabPage() {
               <div className="flex items-center gap-2.5">
                 <Bot className="w-5 h-5 text-frost shrink-0" aria-hidden="true" />
                 <h2 className="font-serif text-xl font-bold text-parchment">
-                  Signed AI Oracle &amp; Reasoning Feed
+                  Deterministic Epoch Oracle &amp; Protocol Reasoning
                 </h2>
               </div>
 
@@ -715,13 +725,13 @@ export default function ProofAndLabPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="space-y-0.5">
                     <h3 className="font-serif text-lg font-bold text-parchment">
-                      Floor {floor} Relayer State &amp; ChatID Proof
+                      Floor {floor} Oracle Mode &amp; Guardrail State
                     </h3>
                     <p className="text-xs font-mono text-pewter">
                       Epoch {ai.epoch} | Nonce {ai.nonce} |{" "}
                       {uncommittedProposal
-                        ? "Awaiting first relayer commit (1.00x baseline active)"
-                        : "Ed25519 signed proposal stored on-chain"}
+                        ? "epoch-only deterministic baseline (1.00x active)"
+                        : "On-chain guardrail proposal committed"}
                     </p>
                   </div>
                   <span
@@ -739,7 +749,7 @@ export default function ProofAndLabPage() {
                     ) : (
                       <>
                         <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                        Baseline Default
+                        Epoch-Only 1.00x
                       </>
                     )}
                   </span>
@@ -749,92 +759,95 @@ export default function ProofAndLabPage() {
                 <div className="rounded-lg bg-panel-dark/75 p-4 space-y-2 text-xs font-mono">
                   <div className="font-bold text-parchment flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-solar shrink-0" aria-hidden="true" />
-                    Deterministic Supply vs Signed AI Separation
+                    Deterministic Supply vs Baseline Separation
                   </div>
                   <p className="text-ash leading-relaxed">
-                    {meta.data
+                    {meta
                       ? (() => {
-                          const res = meta.data.resistance;
+                          const res = meta.resistance;
                           const lowestResIdx = res.reduce(
                             (best, val, idx) => (val < res[best] ? idx : best),
                             0
                           );
                           const supplyTieNote =
-                            meta.data.weak_element !== lowestResIdx
-                              ? `; contract supply tie-break: ${ELEMENT_NAMES[meta.data.weak_element] ?? "Unknown"}`
+                            meta.weak_element !== lowestResIdx
+                              ? `; contract supply tie-break: ${ELEMENT_NAMES[meta.weak_element] ?? "Unknown"}`
                               : "";
-                          return `Live Meta Epoch ${meta.data.epoch}: Lowest resistance is ${ELEMENT_NAMES[lowestResIdx] ?? "Unknown"} (${res[lowestResIdx] ?? 0} bps${supplyTieNote}). Weapon supply [S ${meta.data.supply[0]}, F ${meta.data.supply[1]}, V ${meta.data.supply[2]}] drives resistance shifts (shifted ${meta.data.shifted_by} bps) automatically on lazy_epoch. The Signed Relayer controls only Buyback Multipliers [${ai.buyback_multiplier_bps.map((b) => `${(b / 10000).toFixed(2)}x`).join(" / ")}] and Altar Recipe (${ai.altar_recipe_id || ALTAR_RECIPE_2_TO_1}).`;
+                          return `Live Meta Epoch ${meta.epoch}: Lowest resistance is ${ELEMENT_NAMES[lowestResIdx] ?? "Unknown"} (${res[lowestResIdx] ?? 0} bps${supplyTieNote}). Weapon supply [S ${meta.supply[0]}, F ${meta.supply[1]}, V ${meta.supply[2]}] shifts boss resistance (shifted ${meta.shifted_by} bps) deterministically on lazy_epoch. Buyback multipliers hold [${ai.buyback_multiplier_bps.map((b) => `${(b / 10000).toFixed(2)}x`).join(" / ")}] with standard ${ai.altar_recipe_id || ALTAR_RECIPE_2_TO_1} Altar reforging.`;
                         })()
                       : "Loading live meta supply and resistance telemetry..."}
                   </p>
                 </div>
 
-                {/* Floor AI Taunt & Audit Fields */}
+                {/* Floor Taunt & Collapsible Technical Proof */}
                 <div className="rounded-lg bg-panel-dark/75 p-4 space-y-3 text-xs font-mono">
                   <div>
-                    <div className="text-pewter mb-1">Boss Brain Taunt</div>
+                    <div className="text-pewter mb-1">Floor Tactical Directive</div>
                     <blockquote className="text-parchment text-sm font-lore italic leading-relaxed">
                       &ldquo;
                       {ai.taunt ||
-                        "Hold your preferred element if you dare. Supply shifts resistance on lazy_epoch while buyback bounty follows scarcity."}
+                        "Hold your preferred element if you dare. Weapon supply shifts boss resistance automatically on lazy_epoch while buyback holds its verified 1.00x floor."}
                       &rdquo;
                     </blockquote>
                   </div>
 
                   <dl className="divide-y divide-white/10 pt-2 border-t border-white/10">
                     <div className="py-2 flex flex-wrap items-center justify-between gap-2">
-                      <dt className="text-ash">Altar Recipe Proposal</dt>
+                      <dt className="text-ash">Altar Recipe Active</dt>
                       <dd className="text-jackpot font-bold">
                         {ai.altar_recipe_id || ALTAR_RECIPE_2_TO_1}
                         {ai.altar_recipe_id === ALTAR_RECIPE_3_TO_2
-                          ? " (Bonus 3-to-2 Unlocked)"
+                          ? " (3-to-2)"
                           : " (Standard 2-to-1)"}
                       </dd>
                     </div>
                     <div className="py-2 flex flex-wrap items-center justify-between gap-2">
-                      <dt className="text-ash">NEAR AI Cloud Audit ChatID</dt>
+                      <dt className="text-ash">Oracle Execution Mode</dt>
                       <dd className="text-frost break-all">
                         {ai.chat_id ||
-                          (isEd25519HexValid
-                            ? "None (Signed relayer proposal without NEAR AI Cloud chat)"
-                            : "None committed yet (1.00x baseline active)")}
-                      </dd>
-                    </div>
-                    <div className="py-2 flex flex-wrap items-center justify-between gap-2">
-                      <dt className="text-ash">Relayer Ed25519 Signature Hex</dt>
-                      <dd className="text-parchment break-all">
-                        {ai.signature_hex
-                          ? `${ai.signature_hex.slice(0, 24)}...${ai.signature_hex.slice(-16)}`
-                          : "No signature committed on Floor " + floor + " yet"}
+                          "epoch-only (NEAR AI Cloud disabled; 1.00x baseline active)"}
                       </dd>
                     </div>
                   </dl>
 
-                  <div className="pt-2 border-t border-white/10 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-pewter">Canonical Signed Preimage</span>
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyCanonical()}
-                        className={`min-h-[44px] px-3 py-1.5 rounded-lg bg-panel-elevated hover:bg-white/10 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-1.5 ${CONTROL_RING}`}
-                      >
-                        {copiedPreimage ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
-                            Copied
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
-                            Copy Preimage
-                          </>
-                        )}
-                      </button>
+                  <details className="pt-2 border-t border-white/10 group">
+                    <summary className="cursor-pointer min-h-[44px] inline-flex items-center gap-2 text-xs font-mono font-semibold text-frost hover:text-parchment select-none">
+                      <span>Protocol Proof &amp; Technical Audit (Canonical Preimage &amp; Key)</span>
+                    </summary>
+                    <div className="pt-3 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                        <span className="text-ash">Relayer Ed25519 Signature Hex</span>
+                        <span className="text-parchment break-all">
+                          {ai.signature_hex
+                            ? `${ai.signature_hex.slice(0, 24)}...${ai.signature_hex.slice(-16)}`
+                            : "epoch-only mode (no remote relayer signature attached)"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-pewter">Canonical Signed Preimage</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyCanonical()}
+                          className={`min-h-[44px] px-3 py-1.5 rounded-lg bg-panel-elevated hover:bg-white/10 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-1.5 ${CONTROL_RING}`}
+                        >
+                          {copiedPreimage ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+                              Copy Preimage
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <code className="block w-full rounded bg-oled px-3 py-2 text-xs font-mono text-parchment break-all">
+                        {canonicalMessage}
+                      </code>
                     </div>
-                    <code className="block w-full rounded bg-oled px-3 py-2 text-xs font-mono text-parchment break-all">
-                      {canonicalMessage}
-                    </code>
-                  </div>
+                  </details>
                 </div>
               </div>
 
@@ -933,7 +946,7 @@ export default function ProofAndLabPage() {
                               href="/game/start"
                               className={`min-h-[44px] px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-parchment text-xs font-mono font-semibold inline-flex items-center ${CONTROL_RING}`}
                             >
-                              Connect Session
+                              Create Guest Account
                             </Link>
                           )}
                         </div>
@@ -1087,30 +1100,43 @@ export default function ProofAndLabPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {invariants.map((inv) => (
-                <article
-                  key={inv.id}
-                  className="rounded-lg bg-panel-dark/80 p-4 flex flex-col justify-between gap-2.5"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-parchment font-mono">
-                      {inv.title}
-                    </h3>
-                    <StatusBadge status={inv.status} />
-                  </div>
-                  <p className="text-xs text-ash leading-relaxed">{inv.rule}</p>
-                  <div className="pt-2 border-t border-white/10 text-xs font-mono text-parchment/90 break-words">
-                    {inv.observed}
-                  </div>
-                </article>
-              ))}
-            </div>
+            <details className="pt-2 border-t border-white/10">
+              <summary className="cursor-pointer min-h-[44px] inline-flex items-center gap-2 text-xs font-mono font-semibold text-frost hover:text-parchment select-none">
+                <span>
+                  Protocol Proof &amp; Technical Audit ({passedInvariantsCount}/{invariants.length} Live Invariants Passing)
+                </span>
+              </summary>
+              <div className="pt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {invariants.map((inv) => (
+                  <article
+                    key={inv.id}
+                    className="rounded-lg bg-panel-dark/80 p-4 flex flex-col justify-between gap-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-parchment font-mono">
+                        {inv.title}
+                      </h3>
+                      <StatusBadge status={inv.status} />
+                    </div>
+                    <p className="text-xs text-ash leading-relaxed">{inv.rule}</p>
+                    <div className="pt-2 border-t border-white/10 text-xs font-mono text-parchment/90 break-words">
+                      {inv.observed}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </details>
           </section>
 
           {/* SECTION 3: 1-WEEK MARKET TIME-WARP SIMULATOR */}
           <section className="space-y-2">
-            <MarketSimulator />
+            <MarketSimulator
+              liveSeed={{
+                cashNear: quoteCashNear,
+                stock: merchant.data?.stock?.["ore:iron"],
+                supply: meta?.supply,
+              }}
+            />
           </section>
 
           {/* SECTION 4: 90-SECOND JUDGE WALKTHROUGH CHECKLIST (Ide3 §12) */}
@@ -1199,7 +1225,7 @@ export default function ProofAndLabPage() {
                               {beat.title}
                             </span>
                           </div>
-                          <p className="text-xs text-ash leading-relaxed">
+                          <p className="text-xs text-ash leading-relaxed max-w-[54ch] text-pretty">
                             {beat.detail}
                           </p>
                         </div>

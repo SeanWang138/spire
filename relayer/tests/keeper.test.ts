@@ -315,4 +315,34 @@ describe("Keeper Module - epoch-only mode (testnet without NEAR AI key)", () => 
     assert.ok(result.actions.some((a) => a.startsWith("update_meta:epoch=5:")));
     assert.ok(result.actions.includes("ai_proposals_skipped:epoch_only_mode"));
   });
+
+  it("evaluates live FloorResponse.first_attack_ns enrage ticks and seeds lastNonce above all floors", async () => {
+    const start = EPOCH_NS;
+    assert.strictEqual(
+      evaluateEnrageTick({ floor: 2, hp: 2000, enrage: true, first_attack_ns: "0" }, start + 3n * FLOOR3_ENRAGE_INTERVAL_NS),
+      null
+    );
+    assert.strictEqual(
+      evaluateEnrageTick(
+        { floor: 2, hp: 2000, enrage: true, first_attack_ns: start.toString() },
+        start + 2n * FLOOR3_ENRAGE_INTERVAL_NS
+      ),
+      2n
+    );
+
+    const keeper = new SpireKeeper({ mockMode: true });
+    keeper.setMockTelemetry(
+      state({
+        aiStates: {
+          0: { floor: 0, epoch: 5, buyback_multiplier_bps: [10000, 10000, 10000], nonce: 3 },
+          1: { floor: 1, epoch: 4, buyback_multiplier_bps: [10000, 10000, 10000], nonce: 11 },
+          2: { floor: 2, epoch: 4, buyback_multiplier_bps: [10000, 10000, 10000], nonce: 4 },
+        },
+      })
+    );
+    const result = await keeper.tickOnce(EPOCH_NS);
+    assert.deepStrictEqual(result.errors, []);
+    assert.ok(result.proposals.length >= 2);
+    assert.ok(result.proposals[0].proposal.nonce > 11);
+  });
 });

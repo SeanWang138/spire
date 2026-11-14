@@ -195,33 +195,43 @@ export function calculateMerchantPrice(
   reserveBalanceNear: number = 5.0,
   demand: number = 0
 ): MerchantQuote {
-  const clamp = (v: number, min: number, max: number) =>
-    Math.max(min, Math.min(max, v));
-  const safeStock = Math.max(0, stock);
-  const stockPressure =
-    targetStock > 0
-      ? clamp(
-          Math.floor(((targetStock - safeStock) * 10000) / targetStock),
-          -10000,
-          10000
-        )
-      : 0;
-  const demandPressure =
-    targetStock > 0
-      ? clamp(Math.floor((Math.max(0, demand) * 10000) / targetStock), 0, 10000)
-      : 0;
+  const safeStock = Math.max(0, Math.floor(stock));
+  const safeTarget = Math.max(0, Math.floor(targetStock));
+  const safeDemand = Math.max(0, Math.floor(demand));
+  // Scale NEAR -> micro-yocto (1e6 units/NEAR * 1e18 = yocto) for exact BPS_SQ BigInt integer division.
+  const MICRO = 1_000_000n;
+  const baseScaled = BigInt(Math.max(1, Math.round(basePriceNear * 1_000_000))) * 10n ** 18n;
+  const BPS_SQ = 100_000_000n;
 
-  const factorBps = clamp(
-    10000 +
-      Math.floor((5000 * stockPressure) / 10000) +
-      Math.floor((3000 * demandPressure) / 10000),
-    5000,
-    20000
-  );
+  let stockPressureBpsBig = 0n;
+  let demandPressureBpsBig = 0n;
+  if (safeTarget > 0) {
+    const s = BigInt(safeStock);
+    const t = BigInt(safeTarget);
+    const diff = s < t ? t - s : s - t;
+    const clampedDiff = diff < t ? diff : t;
+    const mag = (clampedDiff * 10000n) / t;
+    stockPressureBpsBig = s < t ? mag : -mag;
+    demandPressureBpsBig = (BigInt(safeDemand) * 10000n) / t;
+  }
 
-  const midPriceNear = Number(((basePriceNear * factorBps) / 10000).toFixed(6));
-  const buyPriceNear = Number((midPriceNear * 1.1).toFixed(6));
-  const sellPriceNear = Number((midPriceNear * 0.9).toFixed(6));
+  const rawAdj = 5000n * stockPressureBpsBig + 3000n * demandPressureBpsBig;
+  const clampedAdj =
+    rawAdj < -9n * BPS_SQ ? -9n * BPS_SQ : rawAdj > 3n * BPS_SQ ? 3n * BPS_SQ : rawAdj;
+  const rawMid = (baseScaled * (BPS_SQ + clampedAdj)) / BPS_SQ;
+  const flooredMid = rawMid > 1n ? rawMid : 1n;
+  const minMid = baseScaled / 2n;
+  const maxMid = baseScaled * 2n;
+  const midYocto = flooredMid < minMid ? minMid : flooredMid > maxMid ? maxMid : flooredMid;
+  const buyYocto = (midYocto * 11000n) / 10000n;
+  const sellYocto = (midYocto * 9000n) / 10000n;
+
+  const toNear6 = (yocto: bigint) =>
+    Number((Number(yocto / (10n ** 12n)) / Number(MICRO * 1_000_000n)).toFixed(6));
+
+  const midPriceNear = toNear6(midYocto);
+  const buyPriceNear = toNear6(buyYocto);
+  const sellPriceNear = toNear6(sellYocto);
   const spreadBps = 1000; // ±10% spread around mid (MERCHANT_SPREAD_BPS)
   const isClosed = reserveBalanceNear < 1.0;
 
@@ -272,6 +282,26 @@ export const STANCE_IDS: Record<TacticalStance, 0 | 1 | 2> = {
   pierce: 2,
 };
 
+export type WeaponTributeTier =
+  | "starter-safe"
+  | "last-weapon-safe"
+  | "safe-below-ward"
+  | "tribute-risk";
+
+/**
+ * Classifies Boss Tribute confiscation risk per `contract/src/tower.rs::should_confiscate_tribute`.
+ */
+export function getWeaponTributeTier(
+  effectiveResBps: number,
+  freeWeapons: number,
+  isOnlyWeapon: boolean
+): WeaponTributeTier {
+  if (effectiveResBps < TRIBUTE_THRESHOLD_BPS) return "safe-below-ward";
+  if (freeWeapons <= 0) return "starter-safe";
+  if (isOnlyWeapon) return "last-weapon-safe";
+  return "tribute-risk";
+}
+
 export interface DamageCalculationResult {
   baseDamage: number;
   effectiveDamage: number;
@@ -289,9 +319,9 @@ export function calculateRaidDamage(
   stance: TacticalStance,
   resistanceBps: number,
   floor: number = 1,
-  isStarterLocked: boolean = false
+  isStarterLocked: boolean = false,
+  totalWeaponsOwned: number = 2
 ): DamageCalculationResult {
-  const stanceInfo = STANCE_PROFILES[stance];
   const rawBaseDamage = ATTACK_BASE_POWER;
   const stanceIdx = STANCE_IDS[stance];
   const stanceDamage = (rawBaseDamage * STANCE_BPS[stanceIdx]) / 10000;
@@ -306,8 +336,9 @@ export function calculateRaidDamage(
     floorModifierPercent = FROST_WARD_BONUS_BPS / 100; // shown as extra resistance %
   }
 
-  // Pierce cuts effective resistance by 1500 bps.
-  let effectiveRes = resistanceBps + (floorModifierPercent * 100);
+  // Pierce cuts effective resistance by 1500 bps for turn damage calculation.
+  const preStanceEffectiveRes = resistanceBps + floorModifierPercent * 100;
+  let effectiveRes = preStanceEffectiveRes;
   if (stance === "pierce") effectiveRes -= PIERCE_RES_CUT_BPS;
   const mitigationRatio = Math.max(0, Math.min(10000, effectiveRes)) / 10000;
 
@@ -317,14 +348,19 @@ export function calculateRaidDamage(
   );
   const mitigatedPercent = Number((mitigationRatio * 100).toFixed(2));
 
-  // Tribute confiscation: single on-chain threshold (starter-locked weapons are spared).
-  const isConfiscated = !isStarterLocked && resistanceBps >= TRIBUTE_THRESHOLD_BPS;
+  // Tribute confiscation checks pre-stance effective resistance (includes Floor 2 Frost Ward),
+  // starter immunity, and last-weapon protection.
+  const tributeTier = getWeaponTributeTier(
+    preStanceEffectiveRes,
+    isStarterLocked ? 0 : 1,
+    totalWeaponsOwned <= 1
+  );
 
   return {
     baseDamage: rawBaseDamage,
     effectiveDamage,
     mitigatedPercent,
-    isConfiscated,
+    isConfiscated: tributeTier === "tribute-risk",
     floorModifierPercent,
   };
 }

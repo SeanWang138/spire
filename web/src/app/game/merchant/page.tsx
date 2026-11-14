@@ -4,17 +4,17 @@ import React, { useState } from "react";
 import Link from "next/link";
 import {
   Store,
-  ArrowUpRight,
-  ArrowDownRight,
   ExternalLink,
   CheckCircle2,
   AlertCircle,
   Hammer,
   FlaskConical,
+  HelpCircle,
 } from "lucide-react";
 import { NpcMerchantBazaar, FloorBuybackDesk } from "@/components/right/NpcMerchantBazaar";
 import { MarketSimulator } from "@/components/right/MarketSimulator";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { SpireTooltip } from "@/components/ui/SpireUi";
 import {
   emptyInventory,
   get_merchant,
@@ -29,7 +29,9 @@ import {
   type MerchantQuote,
   type ElementIndex,
 } from "@/lib/contract";
-import { useContractView, useSessionAccount } from "@/lib/spire/hooks";
+import { useContractView } from "@/lib/spire/hooks";
+import { useSpireTelemetry } from "@/lib/spire/telemetry";
+import { formatContractErrorMessage } from "@/lib/errors";
 import { formatNearAmount, getExplorerTxUrl } from "@/lib/utils/cn";
 import {
   ELEMENT_NAMES,
@@ -49,8 +51,15 @@ const QUOTE_ITEMS: {
   { id: "essence:void", name: "Void Essence" },
 ];
 
+type MatrixRow = {
+  id: Extract<ItemId, "ore:iron" | "essence:solar" | "essence:frost" | "essence:void">;
+  name: string;
+  buy: MerchantQuote | null;
+  sell: MerchantQuote | null;
+};
+
 export default function MerchantPage() {
-  const session = useSessionAccount();
+  const { session, pouchYocto, reloadBalance } = useSpireTelemetry();
   const accountId = session?.accountId ?? "";
 
   const merchant = useContractView(get_merchant, []);
@@ -60,33 +69,35 @@ export default function MerchantPage() {
     [accountId]
   );
 
-  const [quoteItem, setQuoteItem] = useState<
-    "ore:iron" | "essence:solar" | "essence:frost" | "essence:void"
-  >("ore:iron");
-  const [quoteQty, setQuoteQty] = useState<number>(1);
-  const [quotes, setQuotes] = useState<{ buy: MerchantQuote | null; sell: MerchantQuote | null }>({
-    buy: null,
-    sell: null,
-  });
-  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [matrixRows, setMatrixRows] = useState<MatrixRow[]>([]);
+  const [matrixLoading, setMatrixLoading] = useState(false);
   const [banner, setBanner] = useState<{ text: string; type: "success" | "error"; txHash?: string } | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
-    setQuoteLoading(true);
-    Promise.all([
-      get_quote(quoteItem, "buy", quoteQty).catch(() => null),
-      get_quote(quoteItem, "sell", quoteQty).catch(() => null),
-    ]).then(([buy, sell]) => {
-      if (!cancelled) {
-        setQuotes({ buy, sell });
-        setQuoteLoading(false);
-      }
-    });
+    setMatrixLoading(true);
+    Promise.all(
+      QUOTE_ITEMS.map(async (item) => {
+        const [buy, sell] = await Promise.all([
+          get_quote(item.id, "buy", 1).catch(() => null),
+          get_quote(item.id, "sell", 1).catch(() => null),
+        ]);
+        return { id: item.id, name: item.name, buy, sell };
+      })
+    )
+      .then((rows) => {
+        if (!cancelled) {
+          setMatrixRows(rows);
+          setMatrixLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMatrixLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [quoteItem, quoteQty, merchant.data?.cash]);
+  }, [merchant.data?.cash, merchant.data?.stock]);
 
   const handleTrade = async (action: "buy" | "sell", item: ItemId, amount: number) => {
     try {
@@ -100,10 +111,11 @@ export default function MerchantPage() {
         txHash: res.txHash,
       });
       merchant.reload();
+      reloadBalance();
       if (inventory.data) inventory.reload();
     } catch (err: unknown) {
       setBanner({
-        text: err instanceof Error ? err.message : "Trade failed.",
+        text: formatContractErrorMessage(err),
         type: "error",
       });
       throw err;
@@ -119,9 +131,10 @@ export default function MerchantPage() {
         txHash: res.txHash,
       });
       merchant.reload();
+      reloadBalance();
     } catch (err: unknown) {
       setBanner({
-        text: err instanceof Error ? err.message : "Refill failed.",
+        text: formatContractErrorMessage(err),
         type: "error",
       });
       throw err;
@@ -137,10 +150,11 @@ export default function MerchantPage() {
         txHash: res.txHash,
       });
       tower.reload();
+      reloadBalance();
       if (inventory.data) inventory.reload();
     } catch (err: unknown) {
       setBanner({
-        text: err instanceof Error ? err.message : "Floor buyback failed.",
+        text: formatContractErrorMessage(err),
         type: "error",
       });
       throw err;
@@ -149,40 +163,15 @@ export default function MerchantPage() {
 
   const txUrl = getExplorerTxUrl(banner?.txHash);
   const cashNear = merchant.data ? yoctoToNear(merchant.data.cash) : 0;
-  const itemStock = merchant.data ? (merchant.data.stock[quoteItem] ?? 0) : 0;
-
-  const buyReasoning = merchant.data
-    ? explainMerchantQuote({
-        itemId: quoteItem,
-        side: "buy",
-        stock: itemStock,
-        cashNear,
-        unitPriceNear: quotes.buy ? yoctoToNear(quotes.buy.unit_price) : MERCHANT_BASE_PRICE_NEAR,
-        basePriceNear: MERCHANT_BASE_PRICE_NEAR,
-        rawReason: quotes.buy?.reason,
-      })
-    : "Loading contract reasoning...";
-
-  const sellReasoning = merchant.data
-    ? explainMerchantQuote({
-        itemId: quoteItem,
-        side: "sell",
-        stock: itemStock,
-        cashNear,
-        unitPriceNear: quotes.sell ? yoctoToNear(quotes.sell.unit_price) : MERCHANT_BASE_PRICE_NEAR,
-        basePriceNear: MERCHANT_BASE_PRICE_NEAR,
-        rawReason: quotes.sell?.reason,
-      })
-    : "Loading contract reasoning...";
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-5 border-b border-brass/15">
         <div>
-          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide text-balance">
             Material Bazaar &amp; Floor Buyback
           </h1>
-          <p className="text-sm text-ash mt-1.5 max-w-2xl leading-relaxed">
+          <p className="text-sm text-ash mt-1.5 max-w-[65ch] leading-relaxed">
             On-chain material pricing comes directly from <code className="font-mono text-frost">get_quote()</code> with 0.05 NEAR base, 100 target stock, and &plusmn;10% spread. Weapon buybacks settle through the separate Floor Buyback Desk.
           </p>
         </div>
@@ -238,8 +227,8 @@ export default function MerchantPage() {
 
       {!session ? (
         <EmptyState
-          title="Connect session to execute live trades"
-          hint="Launch an Ephemeral Testnet Session Subaccount in 1 click to buy, sell, or refill the merchant reserve. The 1-week market sandbox below runs immediately without sign-in."
+          title="Start a guest session to execute live trades"
+          hint="Launch a Walletless NEAR Testnet Subaccount in 1 click (pre-loaded with 0.35 NEAR Citadel Pouch) to buy, sell, or refill the merchant reserve. The 1-week market sandbox below runs immediately."
           actionHref="/game/start"
           actionLabel="Go to 1-Click Start"
         />
@@ -262,6 +251,7 @@ export default function MerchantPage() {
                 isOpen={merchant.data.is_open}
                 stock={merchant.data.stock}
                 inventory={inventory.data ?? emptyInventory()}
+                pouchYocto={pouchYocto}
                 onTrade={handleTrade}
                 onFundMerchant={handleFundMerchant}
               />
@@ -269,102 +259,75 @@ export default function MerchantPage() {
 
             <div className="lg:col-span-7 space-y-6">
               <section className="obsidian-surface p-4 sm:p-5 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Store className="w-4 h-4 text-frost" aria-hidden="true" />
                     <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
-                      Live Contract Quote Inspector
+                      All-Material Live Spread Matrix (1x Unit)
                     </h2>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label htmlFor="quote-item-select" className="sr-only">
-                      Quote material
-                    </label>
-                    <select
-                      id="quote-item-select"
-                      value={quoteItem}
-                      onChange={(e) =>
-                        setQuoteItem(
-                          e.target.value as
-                            | "ore:iron"
-                            | "essence:solar"
-                            | "essence:frost"
-                            | "essence:void"
-                        )
-                      }
-                      className="min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/25 text-xs font-mono text-parchment focus:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-                    >
-                      {QUOTE_ITEMS.map((qi) => (
-                        <option key={qi.id} value={qi.id}>
-                          {qi.name} (Stock: {merchant.data!.stock[qi.id] ?? 0})
-                        </option>
-                      ))}
-                    </select>
-
-                    <label htmlFor="quote-qty-input" className="sr-only">
-                      Quote quantity
-                    </label>
-                    <input
-                      id="quote-qty-input"
-                      type="number"
-                      min={1}
-                      max={40}
-                      placeholder="1"
-                      value={quoteQty}
-                      onChange={(e) => setQuoteQty(Math.max(1, Math.min(40, Number(e.target.value) || 1)))}
-                      className="w-20 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/25 text-xs font-mono-numbers text-parchment placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-                    />
-                  </div>
+                  <span className={merchant.data.is_open ? "text-xs font-mono text-jackpot font-bold" : "text-xs font-mono text-hp-text font-bold"}>
+                    {merchant.data.is_open ? "OPEN" : "CLOSED (<1.00 NEAR)"} · {formatNearAmount(merchant.data.cash, 2)}
+                  </span>
                 </div>
 
-                <div className="rounded-lg bg-panel-dark divide-y sm:divide-y-0 sm:divide-x divide-brass/15 grid grid-cols-1 sm:grid-cols-2">
-                  <div className="p-4 space-y-2">
-                    <div className="flex items-center justify-between text-xs font-mono uppercase text-ash">
-                      <span>Buy Ask ({quoteQty}x)</span>
-                      <ArrowUpRight className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
-                    </div>
-                    <div className="text-xl font-bold font-mono-numbers text-frost">
-                      {quoteLoading ? "..." : quotes.buy ? formatNearAmount(quotes.buy.total_price, 4) : "N/A"}
-                    </div>
-                    {quotes.buy && (
-                      <div className="text-xs font-mono text-ash font-mono-numbers">
-                        Unit: {formatNearAmount(quotes.buy.unit_price, 4)} · {quotes.buy.is_open ? "Open" : "Closed"}
-                      </div>
-                    )}
-                    <blockquote className="pt-1 font-lore italic text-base text-parchment leading-snug">
-                      {buyReasoning}
-                    </blockquote>
-                  </div>
-
-                  <div className="p-4 space-y-2">
-                    <div className="flex items-center justify-between text-xs font-mono uppercase text-ash">
-                      <span>Sell Bid ({quoteQty}x)</span>
-                      <ArrowDownRight className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
-                    </div>
-                    <div className="text-xl font-bold font-mono-numbers text-solar">
-                      {quoteLoading ? "..." : quotes.sell ? formatNearAmount(quotes.sell.total_price, 4) : "N/A"}
-                    </div>
-                    {quotes.sell && (
-                      <div className="text-xs font-mono text-ash font-mono-numbers">
-                        Unit: {formatNearAmount(quotes.sell.unit_price, 4)} · {quotes.sell.is_open ? "Open" : "Closed"}
-                      </div>
-                    )}
-                    <blockquote className="pt-1 font-lore italic text-base text-parchment leading-snug">
-                      {sellReasoning}
-                    </blockquote>
-                  </div>
-                </div>
-
-                <div className="text-xs font-mono text-ash border-t border-brass/15 pt-3 flex flex-wrap items-center justify-between gap-2">
-                  <span>
-                    On-Chain Reserve:{" "}
-                    <strong className="font-mono-numbers text-parchment">
-                      {formatNearAmount(merchant.data.cash, 2)}
-                    </strong>
-                  </span>
-                  <span className={merchant.data.is_open ? "text-jackpot font-bold" : "text-hp-text font-bold"}>
-                    Status: {merchant.data.is_open ? "OPEN" : "CLOSED (<1.00 NEAR)"}
-                  </span>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-brass/20 text-pewter">
+                        <th className="py-2 pr-3 font-semibold">Commodity</th>
+                        <th className="py-2 px-2 font-semibold">Stock / Bag</th>
+                        <th className="py-2 px-2 font-semibold text-frost">Buy Ask (1x)</th>
+                        <th className="py-2 px-2 font-semibold text-solar">Sell Bid (1x)</th>
+                        <th className="py-2 pl-2 font-semibold text-right">Formula</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-brass/10">
+                      {QUOTE_ITEMS.map((qi) => {
+                        const row = matrixRows.find((r) => r.id === qi.id);
+                        const stockCount = merchant.data!.stock[qi.id] ?? 0;
+                        const bagCount = inventory.data?.materials[qi.id] ?? 0;
+                        const buyReason = explainMerchantQuote({
+                          itemId: qi.id,
+                          side: "buy",
+                          stock: stockCount,
+                          cashNear,
+                          unitPriceNear: row?.buy ? yoctoToNear(row.buy.unit_price) : MERCHANT_BASE_PRICE_NEAR,
+                          basePriceNear: MERCHANT_BASE_PRICE_NEAR,
+                          rawReason: row?.buy?.reason,
+                        });
+                        return (
+                          <tr key={qi.id} className="hover:bg-panel-elevated/40">
+                            <td className="py-2.5 pr-3 text-parchment font-semibold whitespace-nowrap">
+                              {qi.name}
+                            </td>
+                            <td className="py-2.5 px-2 font-mono-numbers text-ash whitespace-nowrap">
+                              {stockCount} <span className="text-pewter">/ {bagCount}</span>
+                            </td>
+                            <td className="py-2.5 px-2 font-mono-numbers text-frost font-bold whitespace-nowrap">
+                              {matrixLoading ? "..." : row?.buy ? formatNearAmount(row.buy.unit_price, 4) : "N/A"}
+                            </td>
+                            <td className="py-2.5 px-2 font-mono-numbers text-solar font-bold whitespace-nowrap">
+                              {matrixLoading ? "..." : row?.sell ? formatNearAmount(row.sell.unit_price, 4) : "N/A"}
+                            </td>
+                            <td className="py-2.5 pl-2 text-right">
+                              <SpireTooltip
+                                triggerLabel={`Inspect pricing logic for ${qi.name}`}
+                                content={
+                                  <div className="space-y-1 text-xs font-mono">
+                                    <div className="font-bold text-solar">{qi.name} Curve Reasoning</div>
+                                    <p className="text-ash leading-relaxed">{buyReason}</p>
+                                  </div>
+                                }
+                              >
+                                <HelpCircle className="w-4 h-4 text-pewter hover:text-frost" aria-hidden="true" />
+                              </SpireTooltip>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </section>
 

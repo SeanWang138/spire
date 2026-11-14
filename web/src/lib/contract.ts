@@ -11,14 +11,11 @@
  * strings on this side to avoid float drift.
  */
 
-import { KeyPair, Near, transactions, keyStores } from "near-api-js";
-import type { Account } from "near-api-js";
 import { SessionManager, NETWORK_ID, RPC_ENDPOINTS } from "./near";
 import {
   FLOOR_COUNT,
   MATERIAL_TOKENS,
   WEAPON_TOKENS,
-  nearToYocto,
 } from "./spire/constants";
 
 export const CONTRACT_ID =
@@ -26,6 +23,35 @@ export const CONTRACT_ID =
 
 export const RELAYER_URL =
   process.env.NEXT_PUBLIC_RELAYER_URL || "";
+
+export const INDEXER_URL =
+  process.env.NEXT_PUBLIC_INDEXER_URL || RELAYER_URL || "";
+
+export async function batchMap<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const safeConcurrency = Math.max(1, Math.floor(concurrency));
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const idx = cursor++;
+      if (idx >= items.length) return;
+      results[idx] = await fn(items[idx]);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(safeConcurrency, items.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
 
 // ---------------------------------------------------------------------------
 // Domain types (mirrors of the v3.1 contract JSON shapes)
@@ -143,8 +169,15 @@ export interface AiProposalPayload {
   nonce: number;
 }
 
+export interface ParsedSpireEvent {
+  event: string;
+  version?: string;
+  data: Record<string, unknown>[];
+}
+
 export interface ChangeResult {
   txHash: string;
+  events: ParsedSpireEvent[];
 }
 
 export interface NftTokenMetadata {
@@ -234,7 +267,12 @@ async function rpcViewRaw(
       }
       if (data.result?.result) {
         const rawBytes = new Uint8Array(data.result.result);
-        return JSON.parse(new TextDecoder().decode(rawBytes));
+        const rawText = new TextDecoder().decode(rawBytes);
+        const safeJson = rawText.replace(
+          /"(jackpot|dividend_pool|buyback_reserve|backer_total_shares|total_damage|cash|unit_price|total_price|shares|amount)":\s*(\d{15,})(?=[,\s}])/g,
+          '"$1":"$2"'
+        );
+        return JSON.parse(safeJson);
       }
       lastError = new Error(`Malformed RPC response for ${method} from ${url}`);
     } catch (err) {
@@ -419,11 +457,13 @@ export async function get_damage(
   floor: number,
   round: number
 ): Promise<number> {
-  return rpcView<number>("get_damage", {
+  const raw = await rpcView<string | number>("get_damage", {
     account_id: account,
     floor: toOnchainFloor(floor),
     round,
   });
+  const parsed = Number(raw ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export async function nft_total_supply(): Promise<string> {
@@ -440,6 +480,102 @@ export async function nft_token(tokenId: string): Promise<NftToken | null> {
 
 const DEFAULT_GAS = 30_000_000_000_000n; // 30 TGas (optimal for 0.60 NEAR subaccount)
 
+function isRetryableTransportError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("smart contract panicked") ||
+    lower.includes("executionerror") ||
+    lower.includes("functioncallerror") ||
+    lower.includes("no matching key pair") ||
+    lower.includes("can not sign transactions") ||
+    lower.includes("invalidtxerror") ||
+    lower.includes("e_")
+  ) {
+    return false;
+  }
+  return (
+    lower.includes("fetch") ||
+    lower.includes("network") ||
+    lower.includes("timeout") ||
+    lower.includes("429") ||
+    lower.includes("502") ||
+    lower.includes("503") ||
+    lower.includes("504") ||
+    lower.includes("econn")
+  );
+}
+
+async function withRpcFailover<T>(fn: (rpcUrl: string) => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (const url of RPC_ENDPOINTS) {
+    try {
+      return await fn(url);
+    } catch (err: unknown) {
+      lastError = err;
+      if (!isRetryableTransportError(err)) {
+        throw err;
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("All NEAR testnet RPC endpoints failed.");
+}
+
+export function parseNep297EventsFromOutcome(result: unknown): ParsedSpireEvent[] {
+  if (!result || typeof result !== "object") return [];
+  const resObj = result as {
+    transaction_outcome?: { outcome?: { logs?: unknown } };
+    receipts_outcome?: Array<{ outcome?: { logs?: unknown } }>;
+  };
+
+  const logLines: string[] = [];
+  const txLogs = resObj.transaction_outcome?.outcome?.logs;
+  if (Array.isArray(txLogs)) {
+    for (const l of txLogs) {
+      if (typeof l === "string") logLines.push(l);
+    }
+  }
+  if (Array.isArray(resObj.receipts_outcome)) {
+    for (const r of resObj.receipts_outcome) {
+      const rLogs = r?.outcome?.logs;
+      if (Array.isArray(rLogs)) {
+        for (const l of rLogs) {
+          if (typeof l === "string") logLines.push(l);
+        }
+      }
+    }
+  }
+
+  const events: ParsedSpireEvent[] = [];
+  for (const line of logLines) {
+    if (!line.startsWith("EVENT_JSON:")) continue;
+    try {
+      const parsed = JSON.parse(line.slice("EVENT_JSON:".length)) as {
+        standard?: unknown;
+        version?: unknown;
+        event?: unknown;
+        data?: unknown;
+      };
+      if (
+        parsed?.standard === "spire" &&
+        typeof parsed.event === "string" &&
+        Array.isArray(parsed.data)
+      ) {
+        events.push({
+          event: parsed.event,
+          version: typeof parsed.version === "string" ? parsed.version : undefined,
+          data: parsed.data as Record<string, unknown>[],
+        });
+      }
+    } catch {
+      // Ignore malformed log entries
+    }
+  }
+  return events;
+}
+
 async function signedCall(
   sessionAccountId: string,
   sessionSecretKey: string,
@@ -447,37 +583,41 @@ async function signedCall(
   args: Record<string, unknown> = {},
   opts?: { attachedDepositYocto?: string; gas?: bigint }
 ): Promise<ChangeResult> {
+  const { KeyPair, Near, transactions, keyStores } = await import("near-api-js");
   const keyStore = new keyStores.InMemoryKeyStore();
   await keyStore.setKey(
     NETWORK_ID,
     sessionAccountId,
     KeyPair.fromString(sessionSecretKey as Parameters<typeof KeyPair.fromString>[0])
   );
-  const near = new Near({ networkId: NETWORK_ID, nodeUrl: RPC_ENDPOINTS[0], keyStore });
-  const account: Account = await near.account(sessionAccountId);
 
   try {
-    const result = await account.signAndSendTransaction({
-      receiverId: CONTRACT_ID,
-      actions: [
-        transactions.functionCall(
-          methodName,
-          args,
-          opts?.gas ?? DEFAULT_GAS,
-          BigInt(opts?.attachedDepositYocto ?? "0")
-        ),
-      ],
+    const result = await withRpcFailover(async (nodeUrl) => {
+      const near = new Near({ networkId: NETWORK_ID, nodeUrl, keyStore });
+      const account = await near.account(sessionAccountId);
+      return account.signAndSendTransaction({
+        receiverId: CONTRACT_ID,
+        actions: [
+          transactions.functionCall(
+            methodName,
+            args,
+            opts?.gas ?? DEFAULT_GAS,
+            BigInt(opts?.attachedDepositYocto ?? "0")
+          ),
+        ],
+      });
     });
 
     const txHash = result?.transaction_outcome?.id ?? "pending";
+    const events = parseNep297EventsFromOutcome(result);
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("spire:tx", {
-          detail: { method: methodName, txHash, at: Date.now() },
+          detail: { method: methodName, txHash, events, at: Date.now() },
         })
       );
     }
-    return { txHash };
+    return { txHash, events };
   } catch (err: unknown) {
     console.error(`[SpireFi Client] On-chain call ${methodName} failed:`, err);
     throw err;
@@ -698,24 +838,72 @@ export async function apply_ai_proposal(
 
 export type ProvisionStatus = "provisioned" | "queued";
 
+/** Native NEAR liquid balance on the guest subaccount (for Silent Gas Tank visibility). */
+export async function viewAccountBalanceYocto(accountId: string): Promise<string> {
+  let lastError: unknown;
+  for (const url of RPC_ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "spire",
+          method: "query",
+          params: {
+            request_type: "view_account",
+            finality: "optimistic",
+            account_id: accountId,
+          },
+        }),
+      });
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status}`);
+        continue;
+      }
+      const json = (await res.json()) as {
+        error?: { message?: string };
+        result?: { amount?: string; error?: string };
+      };
+      if (json?.error || json?.result?.error) {
+        lastError = new Error(json?.error?.message || json?.result?.error || "RPC error");
+        continue;
+      }
+      if (json?.result?.amount) return json.result.amount;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new RpcUnavailableError("view_account", lastError);
+}
+
 /** True when the account exists on NEAR testnet (used by the provision poller). */
 export async function account_exists(accountId: string): Promise<boolean> {
-  const res = await fetch(RPC_ENDPOINTS[0], {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "spire",
-      method: "query",
-      params: {
-        request_type: "view_account",
-        finality: "final",
-        account_id: accountId,
-      },
-    }),
-  });
-  const json = await res.json();
-  return Boolean(json?.result?.amount);
+  for (const url of RPC_ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "spire",
+          method: "query",
+          params: {
+            request_type: "view_account",
+            finality: "final",
+            account_id: accountId,
+          },
+        }),
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json?.result?.amount) return true;
+      if (json?.error?.cause?.name === "UNKNOWN_ACCOUNT") return false;
+    } catch {
+      // failover to next endpoint
+    }
+  }
+  return false;
 }
 
 /**
@@ -725,37 +913,45 @@ export async function verify_account_key(
   accountId: string,
   publicKey: string
 ): Promise<boolean> {
-  try {
-    const res = await fetch(RPC_ENDPOINTS[0], {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "spire",
-        method: "query",
-        params: {
-          request_type: "view_access_key_list",
-          finality: "final",
-          account_id: accountId,
-        },
-      }),
-    });
-    const json = (await res.json()) as {
-      result?: { keys?: Array<{ public_key?: string }> };
-    };
-    const keys = json?.result?.keys;
-    if (!Array.isArray(keys)) return false;
-    return keys.some((k) => k.public_key === publicKey);
-  } catch {
-    return false;
+  for (const url of RPC_ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "spire",
+          method: "query",
+          params: {
+            request_type: "view_access_key_list",
+            finality: "final",
+            account_id: accountId,
+          },
+        }),
+      });
+      if (!res.ok) continue;
+      const json = (await res.json()) as {
+        error?: { cause?: { name?: string } };
+        result?: { keys?: Array<{ public_key?: string }> };
+      };
+      if (json?.error?.cause?.name === "UNKNOWN_ACCOUNT") return false;
+      const keys = json?.result?.keys;
+      if (!Array.isArray(keys)) continue;
+      return keys.some((k) => k.public_key === publicKey);
+    } catch {
+      // failover to next endpoint
+    }
   }
+  return true; // Avoid false-positive stale-session alarms when all RPCs briefly timeout
 }
 
 export async function provision_account(
   accountId: string,
   publicKey: string
 ): Promise<ProvisionStatus> {
-  const endpoint = RELAYER_URL ? `${RELAYER_URL}/api/accounts` : "/api/accounts";
+  const useRelayerFaucet =
+    process.env.NEXT_PUBLIC_USE_RELAYER_FAUCET === "true" && Boolean(RELAYER_URL);
+  const endpoint = useRelayerFaucet ? `${RELAYER_URL}/api/accounts` : "/api/accounts";
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -764,16 +960,22 @@ export async function provision_account(
   if (!res.ok) {
     let errMsg = `RELAYER_UNAVAILABLE ${res.status}`;
     try {
-      const errJson = (await res.json()) as { error?: string };
+      const errJson = (await res.json()) as { error?: string; message?: string };
       if (res.status === 409) {
         errMsg = `ACCOUNT_EXISTS: ${errJson.error || "Account name is already taken."}`;
       } else if (errJson.error) {
-        errMsg = errJson.error;
+        errMsg = errJson.message ? `${errJson.error}: ${errJson.message}` : errJson.error;
       }
     } catch {
       // ignore non-JSON error body
     }
     throw new Error(errMsg);
+  }
+  const okJson = (await res.json().catch(() => null)) as { status?: string } | null;
+  if (okJson?.status === "pending") {
+    throw new Error(
+      "ACCOUNT_PENDING: Provisioning queued in relayer without live testnet funding."
+    );
   }
   return "provisioned";
 }

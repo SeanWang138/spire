@@ -42,13 +42,13 @@ Autonomous On-Chain Boss Battler, Supply-Driven Adaptive Resistance Market, and 
 
 SpireFi is an autonomous dark-fantasy GameFi protocol deployed on NEAR Testnet (`spire.testnet`). Players gather crafting resources, trade with a deterministic NPC Merchant bonding curve, forge and reforge elemental weapons (`Solar`, `Frost`, `Void`), and raid a 3-floor boss tower where global weapon supply automatically recalibrates boss resistances every hour.
 
-To eliminate wallet popup friction during rapid combat and market turns on testnet, onboarding creates an **Ephemeral Testnet Guest Session** subaccount (`<name>.spire.testnet`) funded with `0.60 NEAR` (`600000000000000000000000` yoctoNEAR) via `/api/accounts`, or lets players connect an external NEAR testnet wallet. Every core rule, payout, ticket split, tribute confiscation, and merchant quote is enforced deterministically on-chain in Rust ([`contract/src/lib.rs`](contract/src/lib.rs)).
+To eliminate wallet popup friction during rapid combat and market turns on testnet, onboarding is **100% walletless (Invisible Blockchain)**: entering a hero handle creates an **Ephemeral Testnet Guest Session** subaccount (`<name>.spire.testnet`) funded with `0.60 NEAR` via `/api/accounts`, claims the starter kit (`claim_starter`), and automatically deposits `0.35 NEAR` into the on-chain **Citadel Pouch** while reserving `~0.245 NEAR` as a **Silent Gas Tank** for NEAR prepaid gas locks. Zero `@near-wallet-selector` popups or external wallets are required. Every core rule, payout, ticket split, tribute confiscation, and merchant quote is enforced deterministically on-chain in Rust ([`contract/src/lib.rs`](contract/src/lib.rs)).
 
 ---
 
 ## 2. Paper Game Loop (`30s / 5m / Session`)
 
-Designed around the [09-games.md](09-games.md) economy-first loop:
+Designed around the NEAR Hackathon [Games With Real Economies](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/09-games.md) economy-first loop:
 
 | Cadence | Player Actions | On-Chain / Economic Consequence |
 |---|---|---|
@@ -64,12 +64,12 @@ Every feature maps directly to source files and live read-only RPC views on `spi
 
 | Flow | Do X (UI or CLI / RPC) | See Y (Expected Observable Result) | Authoritative Code & Live RPC Check |
 |---|---|---|---|
-| **1. Onboarding & Session** | Open `/game/start`, enter a handle, create an Ephemeral Testnet Guest Session (or connect wallet), then call `claim_starter`. | Server route [`web/src/app/api/accounts/route.ts`](web/src/app/api/accounts/route.ts) provisions `<name>.spire.testnet` funded with `0.60 NEAR` (`keyMode: "ephemeral-full-access"`), or returns HTTP `503 TESTNET_FAUCET_NOT_CONFIGURED` if parent key env is unset. `claim_starter` grants `[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4` Ore + `3` Solar/Frost/Void Essence each. | [`web/src/app/api/accounts/route.ts`](web/src/app/api/accounts/route.ts), [`contract/src/lib.rs`](contract/src/lib.rs) · RPC view: `get_inventory` (`{"account_id":"<id>"}`) |
+| **1. Onboarding & Session** | Open `/game/start`, enter a handle, click **Create Guest Hero & Enter Citadel** (calling `POST /api/accounts`), then continue via the Ready Checkpoint. | Server route [`web/src/app/api/accounts/route.ts`](web/src/app/api/accounts/route.ts) validates suffix/Ed25519 key, enforces IP/daily limits + Reserve-Floor Circuit Breaker, provisions `<name>.spire.testnet` with `0.60 NEAR`, auto-calls `claim_starter` (`[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4` Ore + `3` Solar/Frost/Void Essence) AND auto-deposits `0.35 NEAR` into Citadel Pouch leaving `~0.245 NEAR` Silent Gas Tank (or returns `HTTP 503 TESTNET_FAUCET_NOT_CONFIGURED` / `FAUCET_RESERVE_FLOOR_REACHED`). | [`web/src/app/api/accounts/route.ts`](web/src/app/api/accounts/route.ts), [`web/src/app/game/start/page.tsx`](web/src/app/game/start/page.tsx), [`contract/src/lib.rs`](contract/src/lib.rs) · RPC view: `get_inventory`, `get_balance` |
 | **2. Adaptive Resistance & Hourly Meta** | Inspect `/game/raid` Meta Radar & Server Supply bar, craft or reforge a weapon (`craft_weapon` / `reforge`), or query `get_meta` / `get_supply`. | Resistances sum strictly to `13,500 bps` (`[1000, 8500]` per element). Supply `[80, 20, 10]` maps deterministically to `[8500, 3114, 1886]`. Hourly `lazy_epoch()` shifts toward supply targets capped at `2,500 bps/epoch`. | [`contract/src/resistance.rs`](contract/src/resistance.rs), [`test-vectors/resistance_vectors.json`](test-vectors/resistance_vectors.json) · RPC view: `get_meta`, `get_supply` |
 | **3. 3-Floor Combat & Tribute** | On `/game/raid`, pick Floor `0/1/2` (UI `1/2/3`), weapon element, and 3 stances (`[0,1,2]`), then execute `attack`. | Ticket debited (`0.10 / 0.15 / 0.25 NEAR`); 3 turns compute damage from `ATTACK_BASE_POWER = 140`. Floor 2 applies `+1,500 bps` Frost Ward; Floor 3 heals `+250 HP` per 5m Enrage; if `res_eff >= 7,000 bps` & `total_weapons > 1`, 1 non-starter weapon is confiscated. | [`contract/src/tower.rs`](contract/src/tower.rs), [`contract/src/lib.rs`](contract/src/lib.rs) · RPC view: `get_tower`, `get_floor` (`{"floor":0}`) |
-| **4. NPC Merchant & Fast-Forward Sim** | Open `/game/merchant`, hover/focus the pricing reasoning tooltip, run Fast-Forward Economy Sim, or call `get_quote` / `buy_from_merchant` / `sell_to_merchant`. | Quotes reflect `MERCHANT_BASE_PRICE = 0.05 NEAR`, `target = 100`, `k1 = 0.50` stock pressure, `k2 = 0.30` demand (`0.50x..2.00x` mid), and `±10%` spread. Merchant trades materials only (`40/item/epoch` buy cap) and closes automatically if cash `< 1.0 NEAR`. | [`contract/src/merchant.rs`](contract/src/merchant.rs), [`web/src/lib/merchant-reasoning.ts`](web/src/lib/merchant-reasoning.ts), [`test-vectors/merchant_vectors.json`](test-vectors/merchant_vectors.json) · RPC view: `get_merchant`, `get_quote` |
-| **5. Backer Vault & Dividends** | Open `/game/vault`, stake NEAR via `back_boss_vault(floor)` or inspect `get_backer` / `get_floor`. | Attached NEAR is added directly to `floor.jackpot`; backer receives `amount / 1e16` shares (`10^-8 NEAR` unit on live testnet build). Backers earn `15%` of ticket sales until boss defeat (`claim_backer_dividend`); on timeout, jackpot carries over. | [`contract/src/lib.rs`](contract/src/lib.rs), [`contract/src/types.rs`](contract/src/types.rs) · RPC view: `get_backer` (`{"floor":0,"account_id":"<id>"}`) |
-| **6. AI Relayer Proof Inspector** | Open `/game/ai` or query `get_ai_state(floor)`. | Shows latest `epoch`, `nonce`, `buyback_multiplier_bps ∈ [10000, 40000]`, `altar_recipe_id`, `taunt`, NEAR AI `chat_id`, and Ed25519 `signature_hex` over `"spire/floor=.../epoch=.../buyback=.../recipe=.../nonce=..."`. | [`contract/src/tee.rs`](contract/src/tee.rs), [`relayer/src/tee.ts`](relayer/src/tee.ts) · RPC view: `get_ai_state` (`{"floor":0}`) |
+| **4. NPC Merchant & Fast-Forward Sim** | Open `/game/merchant`, inspect the Multi-Item Spread Matrix & accessible `SpireTooltip` pricing breakdown, run Fast-Forward Economy Sim (`Balanced Citadel` default / `Stress Test: Bank Run`), or call `get_quote` / `buy_from_merchant` / `sell_to_merchant`. | Quotes match `MERCHANT_BASE_PRICE = 0.05 NEAR`, `target = 100`, `k1 = 0.50` stock pressure, `k2 = 0.30` demand (`0.50x..2.00x` mid), and `±10%` spread. Merchant trades materials only (`40/item/epoch` buy cap), blocks Buy when Citadel Pouch < quote, and closes automatically if cash `< 1.0 NEAR`. | [`contract/src/merchant.rs`](contract/src/merchant.rs), [`web/src/lib/merchant-reasoning.ts`](web/src/lib/merchant-reasoning.ts), [`test-vectors/merchant_vectors.json`](test-vectors/merchant_vectors.json) · RPC view: `get_merchant`, `get_quote` |
+| **5. Vault, Payouts, Pouch & Backer Pool** | Open `/game/vault`, check auto-discovered Payouts or switch to `Citadel Pouch` (`?tab=pouch`), deposit with Silent Gas Tank reserve guard (`0.10 NEAR`), claim bounties/dividends, or stake via `back_boss_vault(floor)`. | `0`-claim buttons stay disabled cleanly; adaptive default opens `Citadel Pouch` when no payouts are ready. Backer deposits add directly to `floor.jackpot`, mint `amount / 1e16` shares, and earn `15%` ticket dividends across cycles (`claim_backer_dividend`). | [`contract/src/lib.rs`](contract/src/lib.rs), [`web/src/app/game/vault/page.tsx`](web/src/app/game/vault/page.tsx) · RPC view: `get_balance`, `get_backer` (`{"floor":0,"account_id":"<id>"}`) |
+| **6. Deterministic Epoch Oracle (`/game/ai`)** | Open `/game/ai` or query `get_meta` / `get_ai_state(floor)`. | Default testnet configuration runs **`epoch-only` mode** (`1.00x` contract buyback baseline, standard `2 -> 1` Altar, hourly deterministic supply-driven resistance rollover) and exposes the on-chain `apply_ai_proposal` Ed25519 verifier inspector under the collapsible Proof & Technical Audit panel. | [`contract/src/tee.rs`](contract/src/tee.rs), [`relayer/src/keeper.ts`](relayer/src/keeper.ts) · RPC view: `get_meta`, `get_ai_state` (`{"floor":0}`) |
 | **7. Floor 3 SVG Trophy & Settlement** | Defeat Floor 3 (`floor = 2`), then query `nft_metadata`, `nft_total_supply`, `nft_token`, and `get_claimable`. | Mints on-chain NEP-171 dynamic SVG trophy `spirefi-trophy-r{round}-f3` with `media` `data:image/svg+xml;utf8,<svg...`; allocates `10%` killer bonus + `90%` proportional payouts. | [`contract/src/nft.rs`](contract/src/nft.rs), [`contract/src/lib.rs`](contract/src/lib.rs) · RPC view: `nft_metadata`, `nft_total_supply` |
 
 Live RPC verification snippet (FastNEAR Testnet, zero setup required):
@@ -86,9 +86,9 @@ curl -sS https://rpc.testnet.fastnear.com \
 
 To keep hackathon screening (`Q-017`) and security review completely transparent, these four implementation boundaries apply to the live `spire.testnet` deployment:
 
-1. **Ephemeral Testnet Session Subaccount (Not FCAK / Social OAuth):** Browser testnet guest onboarding via [`web/src/app/api/accounts/route.ts`](web/src/app/api/accounts/route.ts) creates a new `<name>.spire.testnet` subaccount with a browser-generated `FullAccess` Ed25519 keypair and `0.60 NEAR` initial funding (`keyMode: "ephemeral-full-access"`). If `NEAR_PARENT_PRIVATE_KEY` (or `KEEPER_PRIVATE_KEY`) is absent, the route fails honestly with HTTP `503 TESTNET_FAUCET_NOT_CONFIGURED`. Function Call Access Keys (FCAKs) and social/email OAuth account abstraction are target mainnet improvements, alongside direct wallet connection already supported in the UI.
+1. **Walletless Ephemeral Testnet Guest Subaccount (Not External Wallet / Not FCAK):** Browser onboarding via [`web/src/app/api/accounts/route.ts`](web/src/app/api/accounts/route.ts) creates `<name>.spire.testnet` with a browser-generated `FullAccess` Ed25519 keypair and `0.60 NEAR` initial funding (`keyMode: "ephemeral-full-access"`), then automatically calls `claim_starter()` and `deposit(0.35 NEAR)` into the Citadel Pouch (`~0.245 NEAR` remaining as a Silent Gas Tank). The faucet enforces strict subaccount regex, per-IP/daily rate caps (`HTTP 429`), and a **Reserve-Floor Circuit Breaker** (`HTTP 503 FAUCET_RESERVE_FLOOR_REACHED` if contract pools would be endangered) alongside `HTTP 503 TESTNET_FAUCET_NOT_CONFIGURED` if parent key env is unset. No external wallet selector (`@near-wallet-selector`) is used; Function Call Access Keys (FCAKs) and social/passkey OAuth remain mainnet roadmap items.
 2. **Partial NEP-245 Multi-Token Implementation:** [`contract/src/lib.rs`](contract/src/lib.rs) implements core NEP-245 views and single-token transfers (`mt_balance_of`, `mt_supply`, `mt_transfer`) across `ore:iron`, `essence:solar`, `essence:frost`, `essence:void`, `weapon:solar`, `weapon:frost`, and `weapon:void` (enforcing `starter_locked` non-transferability), rather than batch transfer receivers (`mt_batch_transfer_call`) or storage-deposit standards.
-3. **Relayer Ed25519 `"spire/..."` Signature + NEAR AI `chat_id` Audit (Hardware TEE Attestation on Roadmap §13):** In [`relayer/src/tee.ts`](relayer/src/tee.ts), live AI inference (`KEEPER_AI_MODE=near-ai`, requiring `NEAR_AI_API_KEY`) calls NEAR AI Cloud (`z-ai/glm-5.3-flash`) and fetches an off-chain chat audit hash via `GET /signature/{chat_id}` stored as metadata (`chat_id`), while the on-chain contract [`contract/src/tee.rs`](contract/src/tee.rs) verifies the Relayer's pinned Ed25519 signature (`TEE_SIGNING_PRIVATE_KEY`) over the canonical `"spire/..."` message (`MOCK_TEE=true` with explicit `MOCK_TEE_SEED` is strictly opt-in for local tests). In pure-testnet deployments without NEAR AI Cloud credits (`KEEPER_AI_MODE=epoch-only`), the keeper triggers hourly `update_meta()` epoch rollovers and runs the indexer while skipping `apply_ai_proposal`, keeping floor buyback multipliers at the deterministic `1.00x` contract baseline. Full on-chain hardware TEE remote attestation verification is scheduled on Roadmap §13.
+3. **Deterministic Epoch Oracle Default (`epoch-only`) + Contract-Ready Ed25519 Verifier (TEE Roadmap §13):** The active testnet deployment operates in **`KEEPER_AI_MODE=epoch-only`** mode (zero dependency on live NEAR AI Cloud API credits): hourly `update_meta()` / `lazy_epoch()` rollovers update adaptive resistances purely from weapon supply while keeping floor buyback multipliers at the deterministic `1.00x` contract baseline and Altar reforges at `2 -> 1`. The codebase also retains full Ed25519 canonical `"spire/..."` signing and optional `KEEPER_AI_MODE=near-ai` support in [`relayer/src/tee.ts`](relayer/src/tee.ts) and [`contract/src/tee.rs`](contract/src/tee.rs). Full on-chain hardware TEE remote attestation verification is scheduled on Roadmap §13.
 4. **Automatic Supply-Driven Resistance on `lazy_epoch()`:** Elemental boss resistance updates automatically every 1-hour epoch inside `lazy_epoch()` in [`contract/src/lib.rs`](contract/src/lib.rs) solely from weapon supply (`compute_shifted_resistance`). AI proposals never alter combat resistance; `apply_ai_proposal` only controls `buyback_multiplier_bps`, `altar_recipe_id` (`"reforge_2_to_1"` or `"reforge_3_to_2"`), and `taunt`.
 
 ---
@@ -141,13 +141,13 @@ Extracts NEP-297 `EVENT_JSON` logs (`"standard": "spire"`, `"version": "3.1.0"`)
 Built with Next.js 14 App Router, React 18, Tailwind CSS, Framer Motion, Three.js, and `web/DESIGN.md` ("The Ember-Lit Obsidian Spire") tokens:
 - **Sanctuary Landing (`/`):** Citadel overview, Boss Brain live telemetry showcase, and onboarding links.
 - **Game Citadel (`/game/*`):** Dedicated views for `/game/start`, `/game/raid`, `/game/forge`, `/game/merchant` (with tooltip reasoning + Fast-Forward Economy Sim), `/game/vault`, and `/game/ai`.
-- **Account Engine (`/api/accounts`):** Serverless testnet subaccount creator provisioning `0.60 NEAR` ephemeral sessions alongside standard NEAR wallet connection.
+- **Account Engine (`/api/accounts`):** Serverless testnet subaccount creator provisioning `0.60 NEAR` walletless ephemeral sessions (protected by suffix regex, IP/daily caps, and Reserve-Floor Circuit Breaker) that automatically claim starter gear and fund a `0.35 NEAR` Citadel Pouch.
 
 ### 5.5 Layer 5: Verification & Cross-Layer Parity (`tests/`, `scripts/`)
 - **Rust Contract Tests:** `cargo test` in `contract/`.
 - **Relayer Unit Suite:** `npm test` in `relayer/` (pricing, keeper, indexer, and TEE signing tests).
 - **Web Unit & Math Mirror Suite:** `npm test` in `web/` (`simulation/pricing.ts` parity, yocto parsing, combat/tribute rules, and contract client guards).
-- **Cross-Layer Math Parity & E2E Reference Suite:** `tests/cross_layer_math_parity.ts` checks Rust, Relayer, and Web parity; `tests/tier1_feature_tests.ts` through `tests/tier4_workload_tests.ts` exercise the historical offline v3 reference model (`tests/protocol_models.ts`).
+- **Cross-Layer Math Parity & Live Invariant Suite:** `tests/cross_layer_math_parity.ts` checks Rust vector parity across Relayer and Web (`test-vectors/*.json`), and `tests/run_all.ts` also probes read-only live NEAR Testnet view invariants on `spire.testnet`.
 
 ---
 
@@ -201,7 +201,7 @@ Implemented identically in [`contract/src/merchant.rs`](contract/src/merchant.rs
   player_buy          = mid_price * 1.10                  // +10% spread
   player_sell         = mid_price * 0.90                  // -10% spread
   ```
-  (Note: off-chain TS/Relayer simulation parity helpers also bound extreme synthetic `demand` inputs within `[0.50x, 2.00x]`.)
+  (`relayer/src/pricing.ts` and `web/src/lib/simulation/pricing.ts` mirror `contract/src/merchant.rs` using exact BigInt `BPS_SQ = 100_000_000n` math.)
 - **Solvency Gate:** `is_open = (merchant_cash >= 1.0 NEAR)`. When cash drops below `1.0 NEAR`, trading halts (`merchant_closed`) until ticket shares or `fund_merchant()` replenish cash above `1.0 NEAR` (`merchant_opened`).
 
 ### 6.4 Ticket Splits, Floor Drip & Jackpot Settlement
@@ -316,12 +316,12 @@ Emitted event names: `deposit`, `withdraw`, `withdraw_failed`, `starter_claimed`
 
 ## 8. Step-by-Step User Lifecycle
 
-1. **Onboarding (`/game/start`):** Enter a handle to provision `<name>.spire.testnet` via `POST /api/accounts`, generating a browser-stored `FullAccess` Ed25519 keypair funded with `0.60 NEAR` (`600000000000000000000000n` default), or connect your own NEAR testnet wallet.
-2. **Claim Starter Bundle:** Call `claim_starter()` for `[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4 ore:iron` + `3` Solar, `3` Frost, and `3` Void essence.
-3. **Fund Ledger (Required Before Raiding or Buying):** Call `deposit()` first with attached NEAR so raid tickets (`0.10 / 0.15 / 0.25 NEAR`) and merchant purchases debit cleanly from the internal ledger (`attack()` is not payable).
-4. **Gather, Trade, Forge & Reforge (`/game/forge`, `/game/merchant`):** Mine materials (`gather`), trade materials (`buy_from_merchant` / `sell_to_merchant`), craft (`craft_weapon`, `2 ore + 3 essence`), or burn surplus non-starter weapons at the Altar (`reforge`: `2 -> 1`, or `3 -> 2` when AI activates `"reforge_3_to_2"` with `>= 50%` global share).
-5. **Raid the Spire (`/game/raid`):** Pick Floor `0`, `1`, or `2`, weapon element, and 3 stances (`[Aggressive, Feint, Pierce]`), then submit `attack()`.
-6. **Claim & Withdraw (`/game/raid`, `/game/vault`):** Claim proportional round winnings via `claim_payout(floor, round)` or `claim_jackpot()`, backer dividends via `claim_backer_dividend(floor, cycle)`, and withdraw NEAR to your wallet with `withdraw()`.
+1. **Onboarding (`/game/start`):** Enter a handle and click **Create Guest Hero & Enter Citadel** to provision `<name>.spire.testnet` via `POST /api/accounts` with `0.60 NEAR` (no wallet popup or `@near-wallet-selector` required).
+2. **Automatic Starter + Citadel Pouch Funding:** Onboarding automatically executes `claim_starter()` (`[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4 ore:iron` + `3` Solar/Frost/Void essence) AND `deposit(0.35 NEAR)` into your on-chain **Citadel Pouch**, leaving `~0.245 NEAR` as a **Silent Gas Tank**.
+3. **Top-Up or Withdraw Anytime (`/game/vault?tab=pouch`):** Raid tickets (`0.10 / 0.15 / 0.25 NEAR`) and merchant purchases debit cleanly from your Citadel Pouch (`attack()` is not `#[payable]`). Top-up presets reserve a safe `0.10 NEAR` buffer in the Silent Gas Tank for NEAR prepaid gas locks.
+4. **Gather, Trade, Forge & Reforge (`/game/forge`, `/game/merchant`):** Mine materials (`gather`), trade materials (`buy_from_merchant` / `sell_to_merchant`), craft (`craft_weapon`, `2 ore + 3 essence`), or burn surplus non-starter weapons at the Altar (`reforge`: `2 -> 1`, or `3 -> 2` when unlocked).
+5. **Raid the Spire (`/game/raid`):** Pick Floor `0`, `1`, or `2`, weapon element, and 3 stances (`[Aggressive, Feint, Pierce]`), then submit `attack()`, or share a `?floor=1` Co-op invite link.
+6. **Claim & Withdraw (`/game/raid`, `/game/vault`):** Claim proportional round winnings via `claim_payout(floor, round)` or `claim_jackpot()`, backer dividends via `claim_backer_dividend(floor, cycle)`, and withdraw NEAR from your Citadel Pouch back to your sub-account with `withdraw()`.
 
 ---
 
@@ -363,7 +363,7 @@ cargo build --target wasm32-unknown-unknown --release
   npx tsx tests/cross_layer_math_parity.ts
   npx tsx tests/run_all.ts
   ```
-  Note: `tests/tier1_feature_tests.ts` through `tests/tier4_workload_tests.ts` run against the offline historical v3 reference model ([`tests/protocol_models.ts`](tests/protocol_models.ts)); live `spire.testnet` contract parity is checked by [`tests/cross_layer_math_parity.ts`](tests/cross_layer_math_parity.ts) and [`test-vectors/merchant_vectors.json`](test-vectors/merchant_vectors.json).
+  Note: Deterministic Rust/Relayer/Web parity against [`test-vectors/merchant_vectors.json`](test-vectors/merchant_vectors.json) and live `spire.testnet` read-only contract view invariants are verified by [`tests/cross_layer_math_parity.ts`](tests/cross_layer_math_parity.ts) and [`tests/run_all.ts`](tests/run_all.ts) (`SKIP_LIVE_RPC_CHECK=true` for offline runs).
 - **Master Pipeline:**
   ```bash
   ./scripts/verify-all.sh
@@ -387,11 +387,14 @@ Web app (`web/`, see [`web/.env.example`](web/.env.example)) and Relayer ([`rela
 | `NEXT_PUBLIC_CONTRACT_ID` | Web | Target contract (`spire.testnet`). |
 | `NEXT_PUBLIC_PROJECT_NAME` | Web | UI brand title (`SpireFi`). |
 | `NEAR_RPC_URL` | Web / Relayer | NEAR testnet JSON-RPC (`https://rpc.testnet.fastnear.com`). |
-| `NEAR_PARENT_ACCOUNT_ID` | Web | Parent account minting `<name>.spire.testnet` guest subaccounts (`spire.testnet`). |
+| `NEAR_PARENT_ACCOUNT_ID`, `NEXT_PUBLIC_GUEST_PARENT_ACCOUNT` | Web | Parent account minting `<name>.spire.testnet` guest subaccounts (`NEAR_FAUCET_ACCOUNT_ID` override supported; defaults to `spire.testnet`, or set both to an isolated faucet account e.g. `faucet.spire.testnet`). |
 | `NEAR_PARENT_PRIVATE_KEY` | Web | FullAccess private key for `/api/accounts` (if unset, `/api/accounts` returns HTTP `503`). |
-| `SUBACCOUNT_FUNDING_YOCTO` | Web / Relayer | Initial subaccount funding (`600000000000000000000000` = `0.60 NEAR` default in `route.ts` & `relayer/.env.example`). |
-| `CONTRACT_ID`, `KEEPER_ACCOUNT_ID`, `KEEPER_PRIVATE_KEY` | Relayer | Relayer transaction signer. |
-| `KEEPER_AI_MODE` | Relayer | `"near-ai"` (default, uses `NEAR_AI_API_KEY`) or `"epoch-only"` (pure testnet: `update_meta()` + indexer without external AI API credits). |
+| `FAUCET_RESERVE_FLOOR_NEAR` | Web | Reserve-floor NEAR circuit breaker protecting `spire.testnet` pools during faucet onboarding (default `5.0` NEAR; returns fail-closed `HTTP 503` if reserve views fail or fall below floor). |
+| `SUBACCOUNT_FUNDING_YOCTO` | Web / Relayer | Initial subaccount funding (`600000000000000000000000` = `0.60 NEAR` default in `route.ts` & `relayer/.env.example`, enabling `0.35 NEAR` auto-deposit + `~0.245 NEAR` Gas Tank). |
+| `NEXT_PUBLIC_INDEXER_URL` | Web | Optional Relayer Indexer HTTP/WebSocket URL for `GET /api/events` & global Raid `Live Feed` (browser guest onboarding stays on same-origin `/api/accounts` unless `NEXT_PUBLIC_USE_RELAYER_FAUCET=true`). |
+| `CONTRACT_ID`, `KEEPER_ACCOUNT_ID`, `KEEPER_PRIVATE_KEY` | Relayer | Relayer transaction signer (recommend isolated `keeper.spire.testnet` for autonomous ticks). |
+| `KEEPER_AI_MODE` | Relayer | `"epoch-only"` (active testnet default: `update_meta()` + indexer + `1.00x` contract buyback baseline without NEAR AI API credits) or `"near-ai"` (opt-in NEAR AI Cloud mode). |
+| `INDEXER_CORS_ORIGIN`, `ACCOUNT_SUFFIX` | Relayer | CORS header for browser `GET /api/events` (`*` default) and optional faucet subaccount suffix (`.spire.testnet` default). |
 | `NEAR_AI_API_KEY`, `NEAR_AI_MODEL` | Relayer | Optional NEAR AI Cloud inference (`z-ai/glm-5.3-flash`, required only when `KEEPER_AI_MODE=near-ai`). |
 | `TEE_PUBLIC_KEY`, `TEE_SIGNING_PRIVATE_KEY` | Relayer | Pinned Ed25519 keypair signing `"spire/..."` proposals (`MOCK_TEE=true` + `MOCK_TEE_SEED` for local tests only). |
 
@@ -406,9 +409,6 @@ spirefi/
 ├── LICENSE                         # MIT License
 ├── README.md                       # Authoritative protocol guide & judge walkthrough
 ├── PROJECT.md                      # Architecture, ABI schemas & parity index
-├── DESIGN.md                       # Root v3.1 design index (defers to web/DESIGN.md)
-├── TEST_INFRA.md                   # E2E reference test methodology & parity notes
-├── TEST_READY.md                   # Historical M-TEST v3 snapshot & parity notes
 │
 ├── contract/                       # Layer 1: Rust Smart Contract (spire.testnet)
 │   ├── Cargo.toml
@@ -456,16 +456,10 @@ spirefi/
 │   ├── merchant_vectors.json
 │   └── event_vectors.json
 │
-├── tests/                          # Reference simulation & cross-layer parity
-│   ├── run_all.ts                  # Test runner
+├── tests/                          # Cross-layer parity & live RPC invariant suite
+│   ├── run_all.ts                  # Master Parity + Live RPC invariant runner
 │   ├── test_harness.ts             # Assertions & formatting
-│   ├── protocol_models.ts          # Historical offline v3 reference model
-│   ├── tier1_feature_tests.ts      # Tier 1 feature suite (vs protocol_models.ts)
-│   ├── tier2_boundary_tests.ts     # Tier 2 boundary suite (vs protocol_models.ts)
-│   ├── tier3_pairwise_tests.ts     # Tier 3 pairwise suite (vs protocol_models.ts)
-│   ├── tier4_workload_tests.ts     # Tier 4 workload suite (vs protocol_models.ts)
-│   ├── cross_layer_math_parity.ts  # Rust / Relayer / Web parity verification
-│   └── adversarial_challenger2.ts  # Adversarial edge-case checks
+│   └── cross_layer_math_parity.ts  # Rust / Relayer / Web parity verification
 │
 └── scripts/                        # Automation & live verification utilities
     ├── verify-all.sh

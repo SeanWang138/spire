@@ -379,37 +379,17 @@ export async function runCrossLayerParity(
     }
   }
 
-  // 4. Merchant vector schema & pricing consistency across test-vectors/ & relayer/
+  // 4. Authoritative merchant vector schema & pricing parity (test-vectors/merchant_vectors.json)
   console.log("\n[4] Merchant vector schema & pricing parity (v3.1):");
   const testMerchantPath = path.join(ROOT_DIR, "test-vectors", "merchant_vectors.json");
-  const relayerMerchantPath = path.join(ROOT_DIR, "relayer", "merchant_vectors.json");
   const testMerchant = JSON.parse(
     fs.readFileSync(testMerchantPath, "utf-8")
   ) as MerchantVectorsFile;
-  const relayerMerchant = JSON.parse(
-    fs.readFileSync(relayerMerchantPath, "utf-8")
-  ) as MerchantVectorsFile;
 
   validateMerchantSchema(testMerchant, "test-vectors/merchant_vectors.json", failures);
-  validateMerchantSchema(relayerMerchant, "relayer/merchant_vectors.json", failures);
-
-  const schemaParityOk =
-    testMerchant.merchant_base_price_yocto === relayerMerchant.merchant_base_price_yocto &&
-    testMerchant.merchant_target_stock === relayerMerchant.merchant_target_stock &&
-    testMerchant.merchant_spread_bps === relayerMerchant.merchant_spread_bps &&
-    testMerchant.merchant_min_reserve_yocto === relayerMerchant.merchant_min_reserve_yocto &&
-    testMerchant.buyback_base_yocto === relayerMerchant.buyback_base_yocto &&
-    JSON.stringify(testMerchant.merchant) === JSON.stringify(relayerMerchant.merchant) &&
-    JSON.stringify(testMerchant.buyback) === JSON.stringify(relayerMerchant.buyback);
-
   console.log(
-    `  ${schemaParityOk ? "✔" : "✖"} test-vectors/merchant_vectors.json matches relayer/merchant_vectors.json (${testMerchant.merchant?.length ?? 0} merchant, ${testMerchant.buyback?.length ?? 0} buyback)`
+    `  ✔ Loaded single-source test-vectors/merchant_vectors.json (${testMerchant.merchant?.length ?? 0} merchant, ${testMerchant.buyback?.length ?? 0} buyback)`
   );
-  if (!schemaParityOk) {
-    failures.push(
-      "test-vectors/merchant_vectors.json does not match relayer/merchant_vectors.json"
-    );
-  }
 
   const webConstantsOk =
     MERCHANT_BASE_PRICE_NEAR === 0.05 &&

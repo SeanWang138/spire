@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -8,6 +8,7 @@ import {
   LogOut,
   Swords,
   Hammer,
+  Store,
   Vault,
   BrainCircuit,
   Shield,
@@ -24,11 +25,12 @@ import {
   ChevronRight,
   ShieldCheck,
   Hourglass,
+  AlertTriangle,
 } from "lucide-react";
 import { AtmosphericBackdrop, type ElementalTheme } from "@/components/background/AtmosphericBackdrop";
 import { useMotionControl } from "@/lib/spire/motion";
-import { useSessionAccount, useContractView } from "@/lib/spire/hooks";
-import { get_balance, get_meta } from "@/lib/contract";
+import { SpireTelemetryProvider, useSpireTelemetry } from "@/lib/spire/telemetry";
+import { verify_account_key } from "@/lib/contract";
 import { formatNearAmount, getExplorerTxUrl } from "@/lib/utils/cn";
 import { SessionManager } from "@/lib/near";
 
@@ -38,79 +40,106 @@ const NAV_ITEMS = [
     href: "/game/forge",
     label: "Town & Forge",
     mobileLabel: "Forge",
-    hint: "Craft, gather & bazaar",
+    hint: "Gather, craft & reforge",
     icon: <Hammer className="w-4 h-4 shrink-0" aria-hidden="true" />,
-    matches: ["/game/forge", "/game/merchant"],
+    matches: ["/game/forge"],
   },
   {
     step: "2.",
+    href: "/game/merchant",
+    label: "Npc Bazaar",
+    mobileLabel: "Bazaar",
+    hint: "Trade & pricing math",
+    icon: <Store className="w-4 h-4 shrink-0" aria-hidden="true" />,
+    matches: ["/game/merchant"],
+  },
+  {
+    step: "3.",
     href: "/game/raid",
     label: "Spire Raid",
     mobileLabel: "Raid",
-    hint: "3-floor boss arena",
+    hint: "3-floor co-op arena",
     icon: <Swords className="w-4 h-4 shrink-0" aria-hidden="true" />,
     matches: ["/game/raid"],
   },
   {
-    step: "3.",
+    step: "4.",
     href: "/game/vault",
     label: "Vault & Trophies",
     mobileLabel: "Vault",
-    hint: "Payouts, backers & NFTs",
+    hint: "Pouch, claims & backers",
     icon: <Vault className="w-4 h-4 shrink-0" aria-hidden="true" />,
     matches: ["/game/vault"],
   },
   {
-    step: "4.",
+    step: "5.",
     href: "/game/ai",
     label: "Proof & Lab",
     mobileLabel: "Lab",
-    hint: "AI oracle & time-warp",
+    hint: "Epoch oracle & sim",
     icon: <BrainCircuit className="w-4 h-4 shrink-0" aria-hidden="true" />,
     matches: ["/game/ai"],
   },
 ];
 
-interface RecentTx {
-  method: string;
-  txHash: string;
-}
-
-/**
- * Game shell: obsidian sticky header (brand, epoch/ledger telemetry,
- * adventurer account chip opening the Account & Recovery Drawer, accessible logout)
- * + 4-Hub sidebar rail & mobile bottom tab bar (>=48px touch targets).
- */
-export default function GameShell({ children }: { children: React.ReactNode }) {
+function GameShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const session = useSessionAccount();
+  const { session, meta, pouchYocto, gasTankYocto, lastTx } = useSpireTelemetry();
   const { paused, togglePaused } = useMotionControl();
   const reduced = useReducedMotion();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showDrawerKey, setShowDrawerKey] = useState(false);
   const [copiedDrawerKey, setCopiedDrawerKey] = useState(false);
+  const [staleKeyDetected, setStaleKeyDetected] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: balance, reload: reloadBalance } = useContractView(
-    async () => (session ? get_balance(session.accountId) : null),
-    [session?.accountId]
-  );
-  const { data: meta, reload: reloadMeta } = useContractView(get_meta, []);
-
-  const [lastTx, setLastTx] = useState<RecentTx | null>(null);
   useEffect(() => {
-    const onTx = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ method: string; txHash: string }>).detail;
-      if (detail?.txHash) {
-        setLastTx({ method: detail.method, txHash: detail.txHash });
-      }
-      reloadBalance();
-      reloadMeta();
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     };
-    window.addEventListener("spire:tx", onTx);
-    return () => window.removeEventListener("spire:tx", onTx);
-  }, [reloadBalance, reloadMeta]);
+  }, []);
+
+  // Verify on-chain key matches stored local guest session to recover stale browser keys cleanly
+  // Wait for provision === "confirmed" and recheck after brief RPC propagation delay before alerting
+  useEffect(() => {
+    if (!session?.accountId || !session?.publicKey || session.provision === "pending") {
+      setStaleKeyDetected(false);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const { accountId, publicKey } = session;
+
+    const verifyWithRetry = async () => {
+      try {
+        const ok = await verify_account_key(accountId, publicKey);
+        if (cancelled) return;
+        if (ok) {
+          setStaleKeyDetected(false);
+          return;
+        }
+        // Newly provisioned testnet subaccounts can lag 1-2s across load-balanced RPC nodes
+        timer = setTimeout(async () => {
+          try {
+            const retryOk = await verify_account_key(accountId, publicKey);
+            if (!cancelled) setStaleKeyDetected(!retryOk);
+          } catch {
+            if (!cancelled) setStaleKeyDetected(false);
+          }
+        }, 1800);
+      } catch {
+        if (!cancelled) setStaleKeyDetected(false);
+      }
+    };
+
+    void verifyWithRetry();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [session?.accountId, session?.publicKey, session?.provision]);
 
   // Close drawer on route change
   useEffect(() => {
@@ -150,7 +179,8 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
   const handleLogout = useCallback(() => {
     SessionManager.getInstance().clearSession();
     setDrawerOpen(false);
-    router.push("/");
+    setStaleKeyDetected(false);
+    router.push("/game/start");
   }, [router]);
 
   const handleCopyDrawerKey = async () => {
@@ -158,7 +188,8 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
     try {
       await navigator.clipboard.writeText(session.secretKey);
       setCopiedDrawerKey(true);
-      setTimeout(() => setCopiedDrawerKey(false), 2500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedDrawerKey(false), 2500);
     } catch {
       // Clipboard blocked in restricted contexts
     }
@@ -189,21 +220,39 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex-1 min-w-0 px-2.5 sm:px-6 lg:px-8 py-2 flex items-center">
             <div className="max-w-[1200px] mx-auto w-full flex items-center justify-between gap-2 sm:gap-4 min-w-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="hidden sm:flex items-center gap-3 font-mono text-xs text-ash whitespace-nowrap">
-                  <span>
-                    Epoch{" "}
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 overflow-hidden">
+                <div className="flex items-center gap-1.5 sm:gap-3 font-mono text-xs text-ash whitespace-nowrap min-w-0 truncate">
+                  <span className="shrink-0">
+                    <span className="hidden sm:inline">Epoch </span>
+                    <span className="sm:hidden text-pewter">E</span>
                     <span className="font-mono-numbers text-frost font-bold">
                       {meta ? meta.epoch : "..."}
                     </span>
                   </span>
-                  <span className="text-pewter" aria-hidden="true">/</span>
-                  <span>
-                    Ledger{" "}
-                    <span className="font-mono-numbers font-bold text-jackpot">
-                      {session ? formatNearAmount(balance ?? "0") : "0.00 NEAR"}
-                    </span>
-                  </span>
+                  {session && (
+                    <>
+                      <span className="text-pewter shrink-0" aria-hidden="true">/</span>
+                      <span
+                        className="truncate"
+                        title="Playable balance inside the Citadel contract (Raid & Bazaar)"
+                      >
+                        <span className="hidden sm:inline">Pouch </span>
+                        <span className="font-mono-numbers font-bold text-jackpot">
+                          {formatNearAmount(pouchYocto ?? "0", 2)}
+                        </span>
+                      </span>
+                      <span className="hidden lg:inline text-pewter" aria-hidden="true">·</span>
+                      <span
+                        className="hidden lg:inline text-pewter"
+                        title="Silent Gas Tank left in your guest subaccount for fee-free UX"
+                      >
+                        Gas{" "}
+                        <span className="font-mono-numbers text-frost font-semibold">
+                          {formatNearAmount(gasTankYocto ?? "0", 2)}
+                        </span>
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 {lastTx && explorerUrl && (
@@ -211,7 +260,7 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                     href={explorerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-jackpot/30 bg-jackpot/10 text-jackpot text-xs font-mono hover:bg-jackpot/20 transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                    className="hidden xl:inline-flex min-h-[44px] items-center gap-1.5 px-3 py-1.5 rounded border border-jackpot/30 bg-jackpot/10 text-jackpot text-xs font-mono hover:bg-jackpot/20 transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
                     title={`View ${lastTx.method} on NearBlocks testnet`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-jackpot shrink-0" aria-hidden="true" />
@@ -247,12 +296,15 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                   onClick={() => setDrawerOpen(true)}
                   aria-expanded={drawerOpen}
                   aria-controls="account-recovery-drawer"
-                  aria-label={session ? `Adventurer account ${session.accountId}` : "Open guest access and recovery"}
-                  className="min-h-[44px] px-2.5 sm:px-3 py-1.5 rounded-lg border border-brass/25 bg-panel-card hover:border-solar/50 hover:bg-panel-elevated text-xs font-mono text-parchment inline-flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap max-w-[132px] sm:max-w-[230px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                  aria-label={session ? `Adventurer account ${session.accountId}` : "Open 1-click guest access"}
+                  className="min-h-[44px] px-2 sm:px-3 py-1.5 rounded-lg border border-brass/25 bg-panel-card hover:border-solar/50 hover:bg-panel-elevated text-xs font-mono text-parchment inline-flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap max-w-[104px] sm:max-w-[230px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
                 >
                   {session ? (
                     <>
-                      <span className="w-2 h-2 rounded-full bg-jackpot shrink-0" aria-hidden="true" />
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${staleKeyDetected ? "bg-hp" : "bg-jackpot"}`}
+                        aria-hidden="true"
+                      />
                       <span className="truncate">{session.accountId}</span>
                     </>
                   ) : (
@@ -263,17 +315,18 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  disabled={!session}
-                  aria-label="Log out"
-                  title="Log out and clear browser session"
-                  className="hidden sm:inline-flex min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-transparent hover:border-hp/35 hover:bg-hp/15 text-ash hover:text-hp-text text-xs font-mono font-semibold items-center justify-center gap-1.5 whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Log out</span>
-                </button>
+                {session && (
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    aria-label="Log out"
+                    title="Clear browser guest session"
+                    className="hidden sm:inline-flex min-h-[44px] min-w-[44px] px-2.5 rounded-lg border border-transparent hover:border-hp/35 hover:bg-hp/15 text-ash hover:text-hp-text text-xs font-mono font-semibold items-center justify-center gap-1.5 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+                  >
+                    <LogOut className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Log out</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -323,15 +376,23 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
             <div className="px-1">
               <div className="flex items-center gap-2 font-mono text-xs text-parchment font-semibold">
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${session ? "bg-jackpot" : "bg-pewter"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    !session ? "bg-pewter" : staleKeyDetected ? "bg-hp" : "bg-jackpot"
+                  }`}
                   aria-hidden="true"
                 />
-                <span>{session ? "Testnet Session Ready" : "Guest Access Open"}</span>
+                <span>
+                  {!session
+                    ? "Walletless Testnet"
+                    : staleKeyDetected
+                    ? "Session Needs Reset"
+                    : "Invisible Chain Ready"}
+                </span>
               </div>
-              <p className="text-xs text-pewter mt-1 leading-relaxed">
+              <p className="text-xs text-pewter mt-1 leading-relaxed text-pretty">
                 {session
-                  ? "Ephemeral FullAccess subaccount stored locally."
-                  : "Launch a 0.60 NEAR testnet subaccount in one click."}
+                  ? "No popups, no seed prompts — runs silently on NEAR Testnet."
+                  : "1 click spawns a 0.60 NEAR subaccount & stocks 0.35 NEAR Pouch."}
               </p>
             </div>
 
@@ -349,9 +410,9 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
           </div>
         </nav>
 
-        {/* Solid Mobile bottom tab bar (>=48px touch targets, gap-2) */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-panel-dark border-t border-brass/25 px-2 py-1.5">
-          <nav className="grid grid-cols-4 gap-2 items-stretch" aria-label="Game hubs mobile navigation">
+        {/* Solid Mobile bottom tab bar (>=48px touch targets) */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-panel-dark border-t border-brass/25 px-1.5 py-1.5">
+          <nav className="grid grid-cols-5 gap-1 items-stretch" aria-label="Game hubs mobile navigation">
             {NAV_ITEMS.map((item) => {
               const isActive = item.matches.some((m) => pathname?.startsWith(m));
               return (
@@ -379,6 +440,27 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
           tabIndex={-1}
           className="relative flex-1 min-w-0 px-4 sm:px-6 lg:px-8 pt-6 pb-24 md:py-8 focus:outline-none"
         >
+          {staleKeyDetected && session && (
+            <div
+              role="alert"
+              className="max-w-[1200px] mx-auto mb-5 rounded-xl border border-hp/45 bg-hp/15 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-2.5 text-xs font-mono text-hp-text">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                <span>
+                  Browser key for <strong className="text-parchment">{session.accountId}</strong> is no longer registered on NEAR Testnet (stale session or reset). Create a fresh guest raider to continue.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-hp text-oled font-mono font-bold text-xs uppercase tracking-wider shrink-0 hover:opacity-90 transition-opacity"
+              >
+                Reset &amp; Create Fresh Raider
+              </button>
+            </div>
+          )}
+
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={pathname}
@@ -428,7 +510,7 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                   <div className="p-4 rounded-lg bg-panel-card space-y-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <span className="text-xs text-pewter block">Active Subaccount</span>
+                        <span className="text-xs text-pewter block">Active Guest Subaccount</span>
                         <span className="font-mono text-sm font-bold text-parchment break-all block mt-0.5">
                           {session.accountId}
                         </span>
@@ -446,11 +528,19 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                       )}
                     </div>
 
-                    <div className="pt-3 border-t border-brass/15 flex items-center justify-between text-xs font-mono">
-                      <span className="text-ash">Citadel Ledger</span>
-                      <span className="font-mono-numbers font-bold text-jackpot">
-                        {formatNearAmount(balance ?? "0", 4)}
-                      </span>
+                    <div className="pt-3 border-t border-brass/15 space-y-1.5 text-xs font-mono">
+                      <div className="flex items-center justify-between">
+                        <span className="text-ash">Citadel Pouch (Playable)</span>
+                        <span className="font-mono-numbers font-bold text-jackpot">
+                          {formatNearAmount(pouchYocto ?? "0", 4)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-pewter">Silent Gas Tank (Subaccount)</span>
+                        <span className="font-mono-numbers font-semibold text-frost">
+                          {formatNearAmount(gasTankYocto ?? "0", 4)}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -496,9 +586,8 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                   </div>
 
                   <p className="text-xs text-ash leading-relaxed">
-                    Ephemeral Testnet Session Subaccount: browser-held{" "}
-                    <code className="font-mono text-parchment">FullAccess</code> Ed25519 keypair funded 0.60 NEAR via{" "}
-                    <code className="font-mono text-parchment">/api/accounts</code> on NEAR testnet only.
+                    100% walletless NEAR Testnet guest session: browser-held keypair auto-funded{" "}
+                    <strong className="text-parchment">0.60 NEAR</strong> (<strong className="text-jackpot">0.35 NEAR</strong> loaded into Citadel Pouch + <strong className="text-frost">~0.245 NEAR</strong> reserved silently for on-chain gas). No external wallet needed.
                   </p>
 
                   <div className="flex flex-col gap-2 pt-1">
@@ -511,11 +600,11 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
                       <ChevronRight className="w-4 h-4" aria-hidden="true" />
                     </Link>
                     <Link
-                      href="/game/vault"
+                      href="/game/vault?tab=pouch"
                       onClick={() => setDrawerOpen(false)}
                       className="min-h-[44px] px-4 py-2.5 rounded-lg bg-panel-card hover:bg-panel-elevated border border-brass/25 text-parchment text-xs font-mono font-semibold flex items-center justify-between gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
                     >
-                      <span>Deposit or Withdraw in Vault</span>
+                      <span>Manage Pouch, Rewards &amp; Withdrawals</span>
                       <ChevronRight className="w-4 h-4" aria-hidden="true" />
                     </Link>
                   </div>
@@ -523,7 +612,7 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
               ) : (
                 <div className="space-y-4">
                   <p className="text-sm text-ash leading-relaxed">
-                    No Ephemeral Testnet Session Subaccount is active in this browser yet. Create one in 1 click (funded 0.60 NEAR on testnet) or import an existing Recovery Key.
+                    No active testnet session in this browser yet. Launch a 1-click guest subaccount (auto-funded 0.35 NEAR Citadel Pouch + Silent Gas Tank) with zero external wallet popups.
                   </p>
                   <Link
                     href="/game/start"
@@ -553,5 +642,13 @@ export default function GameShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
     </div>
+  );
+}
+
+export default function GameShell({ children }: { children: React.ReactNode }) {
+  return (
+    <SpireTelemetryProvider>
+      <GameShellInner>{children}</GameShellInner>
+    </SpireTelemetryProvider>
   );
 }

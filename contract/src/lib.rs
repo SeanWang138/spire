@@ -658,6 +658,7 @@ impl Spire {
         if material_index(&item_id).is_none() {
             panic!("{}", E_INVALID_ARGS);
         }
+        self.lazy_epoch();
         let now = env::block_timestamp();
         let last = self.last_gather_ns.get(&who).copied().unwrap_or(0);
         if last != 0 && now.saturating_sub(last) < GATHER_COOLDOWN_NS {
@@ -784,7 +785,7 @@ impl Spire {
         if fl.backer_total_shares > 0 {
             let dpf = to_backer * DIVIDEND_SCALE / fl.backer_total_shares;
             fl.backer_acc_dividend_per_share += dpf;
-            let credited = dpf * fl.backer_total_shares / DIVIDEND_SCALE;
+            let credited = (dpf * fl.backer_total_shares).div_ceil(DIVIDEND_SCALE);
             fl.dividend_pool += credited;
             fl.jackpot += to_jackpot + (to_backer - credited);
         } else {
@@ -918,6 +919,7 @@ impl Spire {
         if material_index(&item).is_none() || qty == 0 {
             panic!("{}", E_INVALID_ARGS);
         }
+        self.lazy_epoch();
         if !merchant::is_merchant_open(self.merchant_cash) {
             panic!("{}", E_SHOP_CLOSED);
         }
@@ -942,6 +944,7 @@ impl Spire {
         if material_index(&item).is_none() || qty == 0 {
             panic!("{}", E_INVALID_ARGS);
         }
+        self.lazy_epoch();
         if !merchant::is_merchant_open(self.merchant_cash) {
             panic!("{}", E_SHOP_CLOSED);
         }
@@ -974,6 +977,7 @@ impl Spire {
         if !tower::valid_floor(floor) || element > 2 || qty == 0 {
             panic!("{}", E_INVALID_ARGS);
         }
+        self.lazy_epoch();
         if !self.floors[floor as usize].unlocked {
             panic!("{}", E_FLOOR_LOCKED);
         }
@@ -1033,8 +1037,19 @@ impl Spire {
         let acc = self.floors[i].backer_acc_dividend_per_share;
         let mut pos = self.backers.get(&(floor, who.clone())).cloned().unwrap_or_default();
         if pos.shares > 0 {
-            // Weighted-average accumulator base so new shares only accrue new dividends.
-            pos.dps_base = (pos.dps_base * pos.shares + acc * shares) / (pos.shares + shares);
+            let raw_pending =
+                pos.shares.saturating_mul(acc.saturating_sub(pos.dps_base)) / DIVIDEND_SCALE;
+            let pending = raw_pending
+                .saturating_sub(pos.claimed_amount)
+                .min(self.floors[i].dividend_pool);
+            if pending > 0 {
+                self.floors[i].dividend_pool -= pending;
+                self.ledger.credit(&who, pending);
+                events::log_dividend_claimed(&who, floor, pending, cycle);
+                pos.last_claimed_cycle = cycle;
+            }
+            pos.claimed_amount = 0;
+            pos.dps_base = acc;
         } else {
             pos.join_cycle = cycle;
             pos.dps_base = acc;
@@ -1060,12 +1075,13 @@ impl Spire {
             panic!("{}", E_NOTHING_TO_CLAIM);
         }
         let acc = self.floors[i].backer_acc_dividend_per_share;
-        let pending = pos.shares * (acc - pos.dps_base) / DIVIDEND_SCALE - pos.claimed_amount;
+        let raw_pending =
+            pos.shares.saturating_mul(acc.saturating_sub(pos.dps_base)) / DIVIDEND_SCALE;
+        let pending = raw_pending
+            .saturating_sub(pos.claimed_amount)
+            .min(self.floors[i].dividend_pool);
         if pending == 0 {
             panic!("{}", E_NOTHING_TO_CLAIM);
-        }
-        if self.floors[i].dividend_pool < pending {
-            panic!("{}", E_RESERVE_LOW);
         }
         self.floors[i].dividend_pool -= pending;
         pos.claimed_amount += pending;
@@ -1314,11 +1330,16 @@ impl Spire {
                 quote.reason = "out_of_stock".to_string();
                 return quote;
             }
-            let used = self
-                .merchant_epoch_buys
-                .get(&(item.clone(), self.epoch))
-                .copied()
-                .unwrap_or(0);
+            let elapsed =
+                env::block_timestamp() >= self.epoch_start_ns.saturating_add(EPOCH_DURATION_NS);
+            let used = if elapsed {
+                0
+            } else {
+                self.merchant_epoch_buys
+                    .get(&(item.clone(), self.epoch))
+                    .copied()
+                    .unwrap_or(0)
+            };
             if used + qty > MERCHANT_CAP_PER_ITEM_EPOCH {
                 quote.reason = "volume_cap".to_string();
                 return quote;
@@ -1435,6 +1456,20 @@ impl Spire {
 
     pub fn nft_total_supply(&self) -> U128 {
         U128(self.nft_total_supply as u128)
+    }
+
+    /// Total NEAR still owed to raiders across settled rounds (`proportional_pool + last_bonus - paid`).
+    pub fn get_unclaimed_rounds_yocto(&self) -> U128 {
+        let mut total: u128 = 0;
+        for idx in 0..self.results_index.len() {
+            if let Some(key) = self.results_index.get(idx)
+                && let Some(r) = self.results.get(key)
+            {
+                let pool = r.proportional_pool.saturating_add(r.last_bonus);
+                total = total.saturating_add(pool.saturating_sub(r.paid));
+            }
+        }
+        U128(total)
     }
 }
 
@@ -1848,5 +1883,112 @@ mod tests {
         assert_eq!(compute_payout(&r, 600, &alice()), 5_400);
         assert_eq!(compute_payout(&r, 400, &bob()), 4_600);
         assert_eq!(compute_payout(&r, 0, &acc("carol.testnet")), 0);
+    }
+
+    #[test]
+    fn test_backer_rounding_no_reserve_low_lockup() {
+        let mut c = fresh();
+        let t0 = 1_000_000_000_000;
+        let carol = acc("carol.testnet");
+
+        set_ctx(&bob(), t0, 107 * BACKER_SHARE_UNIT, 1);
+        c.back_boss_vault(0);
+        set_ctx(&carol, t0, 103 * BACKER_SHARE_UNIT, 2);
+        c.back_boss_vault(0);
+
+        set_ctx(&alice(), t0, 0, 1);
+        c.claim_starter();
+        set_ctx(&alice(), t0, 10 * NEAR, 2);
+        c.deposit();
+        for seed in 1..=4u64 {
+            set_ctx(&alice(), t0, 0, seed);
+            c.attack(0, 0, [0, 0, 0]);
+        }
+
+        // Bob adds stake mid-cycle; auto-settlement must preserve dividend solvency.
+        let bob_before_restake = c.get_balance(bob()).0;
+        set_ctx(&bob(), t0, 17 * BACKER_SHARE_UNIT, 3);
+        c.back_boss_vault(0);
+        assert!(c.get_balance(bob()).0 > bob_before_restake);
+
+        for seed in 5..=7u64 {
+            set_ctx(&alice(), t0, 0, seed);
+            c.attack(0, 0, [0, 0, 0]);
+        }
+
+        set_ctx(&bob(), t0, 0, 4);
+        let bob_before_claim = c.get_balance(bob()).0;
+        c.claim_backer_dividend(0, 0);
+        assert!(c.get_balance(bob()).0 > bob_before_claim);
+
+        set_ctx(&carol, t0, 0, 5);
+        let carol_before = c.get_balance(carol.clone()).0;
+        c.claim_backer_dividend(0, 0);
+        assert!(c.get_balance(carol).0 > carol_before);
+    }
+
+    #[test]
+    fn test_lazy_epoch_resets_gather_merchant_buyback() {
+        let mut c = fresh();
+        let t0 = 1_000_000_000_000;
+        set_ctx(&owner(), t0, 2 * NEAR, 1);
+        c.seed_merchant(TOKEN_ORE_IRON.to_string(), 100);
+
+        set_ctx(&alice(), t0, 0, 1);
+        c.claim_starter();
+        set_ctx(&alice(), t0, 30 * NEAR, 2);
+        c.deposit();
+
+        // Hit gather epoch cap (10 gathers * 2 = 20 units, > 30s apart, well under 1h).
+        for step in 1..=10u64 {
+            set_ctx(&alice(), near_ts(t0, step * 35), 0, step);
+            c.gather(TOKEN_ORE_IRON.to_string());
+        }
+        set_ctx(&alice(), near_ts(t0, 11 * 35), 0, 11);
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.gather(TOKEN_ORE_IRON.to_string());
+        }));
+        assert!(err.is_err());
+
+        // Hit merchant buy cap + fund floor 0 buyback reserve across 30 raids.
+        set_ctx(&alice(), near_ts(t0, 400), 0, 12);
+        c.buy_from_merchant(TOKEN_ORE_IRON.to_string(), MERCHANT_CAP_PER_ITEM_EPOCH);
+        assert_eq!(c.get_quote(TOKEN_ORE_IRON.to_string(), "buy".into(), 1).reason, "volume_cap");
+        c.craft_weapon(0);
+        c.craft_weapon(1);
+        c.craft_weapon(2);
+        for seed in 1..=30u64 {
+            set_ctx(&alice(), near_ts(t0, 400), 0, seed);
+            c.attack(0, 0, [0, 0, 0]);
+        }
+        set_ctx(&alice(), near_ts(t0, 400), 0, 31);
+        c.sell_to_boss_buyback(0, 1, 1);
+        c.sell_to_boss_buyback(0, 2, 1);
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.sell_to_boss_buyback(0, 0, 1);
+        }));
+        assert!(err.is_err());
+
+        // Advance epoch without attack()/update_meta(): get_quote + gather/buy/buyback/sell reset.
+        let t1 = t0 + EPOCH_DURATION_NS + 1_000;
+        set_ctx(&alice(), t1, 0, 40);
+        assert_eq!(c.get_quote(TOKEN_ORE_IRON.to_string(), "buy".into(), 1).reason, "ok");
+        c.gather(TOKEN_ORE_IRON.to_string());
+        assert_eq!(c.get_meta().epoch, 1);
+
+        let t2 = t0 + 2 * EPOCH_DURATION_NS + 1_000;
+        set_ctx(&alice(), t2, 0, 41);
+        c.buy_from_merchant(TOKEN_ORE_IRON.to_string(), 1);
+        assert_eq!(c.get_meta().epoch, 2);
+
+        let t3 = t0 + 3 * EPOCH_DURATION_NS + 1_000;
+        set_ctx(&alice(), t3, 0, 42);
+        c.sell_to_boss_buyback(0, 0, 1);
+        assert_eq!(c.get_meta().epoch, 3);
+
+        let t4 = t0 + 4 * EPOCH_DURATION_NS + 1_000;
+        set_ctx(&alice(), t4, 0, 43);
+        c.sell_to_merchant(TOKEN_ORE_IRON.to_string(), 1);
+        assert_eq!(c.get_meta().epoch, 4);
     }
 }

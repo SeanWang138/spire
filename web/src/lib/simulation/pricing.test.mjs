@@ -144,8 +144,8 @@ test("NPC Merchant: demand pressure & closure below 1.0 NEAR", () => {
   assert.equal(closed.isClosed, true);
 });
 
-test("NPC Merchant: full parity against relayer/merchant_vectors.json", () => {
-  const vectorsPath = path.join(REPO_ROOT, "relayer/merchant_vectors.json");
+test("NPC Merchant: full parity against test-vectors/merchant_vectors.json", () => {
+  const vectorsPath = path.join(REPO_ROOT, "test-vectors/merchant_vectors.json");
   const vectorsDoc = JSON.parse(fs.readFileSync(vectorsPath, "utf8"));
   const baseNear = Number(cn.parseYoctoSafe(vectorsDoc.merchant_base_price_yocto)) / 1e24;
 
@@ -225,6 +225,20 @@ test("Boss Damage & Stances (v3.1: Aggressive / Feint / Pierce)", () => {
   const frostF1 = pricing.calculateRaidDamage(1, "feint", 3000, 1, false);
   const frostF2 = pricing.calculateRaidDamage(1, "feint", 3000, 2, false);
   assert.ok(frostF2.effectiveDamage < frostF1.effectiveDamage);
+
+  // Floor 2 Frost Ward (+1500 bps) pushes 5500 bps Frost to 7000 bps -> Tribute risk!
+  const frostWardTribute = pricing.calculateRaidDamage(1, "aggressive", 5500, 2, false, 3);
+  assert.equal(frostWardTribute.isConfiscated, true);
+
+  // Last remaining weapon is never confiscated even when effective resistance >= 7000 bps.
+  const lastWeaponSafe = pricing.calculateRaidDamage(1, "aggressive", 5500, 2, false, 1);
+  assert.equal(lastWeaponSafe.isConfiscated, false);
+
+  // High demand without artificial 10000 bps cap clamps at 2.0x (0.10 NEAR) matching merchant.rs
+  const highDemand = pricing.calculateMerchantPrice(0, 100, 0.05, 5.0, 200);
+  assert.equal(highDemand.midPriceNear, 0.1);
+  assert.equal(highDemand.buyPriceNear, 0.11);
+  assert.equal(highDemand.sellPriceNear, 0.09);
 });
 
 test("Jackpot Split: 90% Proportional / 10% Last Attack Executioner", () => {
@@ -417,5 +431,130 @@ test("contract.ts: throws RpcUnavailableError on RPC failure, rejects weapon:*, 
     );
   } finally {
     globalThis.fetch = prevFetch;
+  }
+});
+
+test("Error Mapper: translates current Rust panic codes and faucet guard errors cleanly", () => {
+  const errorsMod = loadTsModule(path.join(SRC_ROOT, "lib/errors.ts"));
+  const cases = [
+    ["Smart contract panicked: E_SHOP_CLOSED", "Merchant Reserve Paused"],
+    ["Smart contract panicked: E_OUT_OF_STOCK", "Merchant Out of Stock"],
+    ["Smart contract panicked: E_VOLUME_CAP", "Epoch Volume Cap Reached"],
+    ["Smart contract panicked: E_RESERVE_LOW", "Pool Reserve Too Low"],
+    ["Smart contract panicked: E_FLOOR_LOCKED", "Floor Locked"],
+    ["Smart contract panicked: E_REPLAY_DETECTED", "Relayer Proposal Guard Triggered"],
+    ["Smart contract panicked: E_INVALID_PROPOSAL", "Relayer Proposal Guard Triggered"],
+    ["Smart contract panicked: E_EXCEEDS_MAX_SHIFT", "Relayer Proposal Guard Triggered"],
+    ["Smart contract panicked: E_UNAUTHORIZED", "Relayer Proposal Guard Triggered"],
+    ["RESERVE_CHECK_UNAVAILABLE: RPC failed", "Reserve Guard Busy"],
+  ];
+
+  for (const [raw, expectedTitle] of cases) {
+    const formatted = errorsMod.formatContractError(new Error(raw));
+    assert.equal(formatted.title, expectedTitle, `Expected title '${expectedTitle}' for ${raw}`);
+    assert.ok(!/https?:\/\//i.test(formatted.message), "Formatted message must not leak URLs");
+  }
+});
+
+test("Contract Adapter: parseNep297EventsFromOutcome extracts Spire NEP-297 logs safely", () => {
+  const contractMod = loadTsModule(path.join(SRC_ROOT, "lib/contract.ts"));
+  const fakeOutcome = {
+    transaction_outcome: {
+      outcome: {
+        logs: [
+          "non-event log line",
+          'EVENT_JSON:{"standard":"other","version":"1.0.0","event":"raid","data":[{"damage":1}]}',
+          'EVENT_JSON:{"standard":"spire","version":"3.1.0","event":"raid","data":[{"floor":1,"damage":256,"boss_remaining_hp":744,"tribute_taken":true}]}',
+        ],
+      },
+    },
+    receipts_outcome: [
+      {
+        outcome: {
+          logs: [
+            "EVENT_JSON:{broken-json",
+            'EVENT_JSON:{"standard":"spire","version":"3.1.0","event":"boss_defeated","data":[{"floor":1,"round":3}]}',
+          ],
+        },
+      },
+    ],
+  };
+
+  const parsed = contractMod.parseNep297EventsFromOutcome(fakeOutcome);
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[0].event, "raid");
+  assert.equal(parsed[0].data[0].damage, 256);
+  assert.equal(parsed[0].data[0].tribute_taken, true);
+  assert.equal(parsed[1].event, "boss_defeated");
+  assert.equal(parsed[1].data[0].round, 3);
+});
+
+test("Contract Adapter: batchMap bounds concurrency and preserves input order", async () => {
+  const contractMod = loadTsModule(path.join(SRC_ROOT, "lib/contract.ts"));
+  let active = 0;
+  let maxActive = 0;
+  const inputs = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  const outputs = await contractMod.batchMap(inputs, 3, async (n) => {
+    active += 1;
+    if (active > maxActive) maxActive = active;
+    await new Promise((r) => setTimeout(r, (9 - n) * 2));
+    active -= 1;
+    return n * 10;
+  });
+
+  assert.ok(maxActive <= 3 && maxActive >= 1, `Expected bounded concurrency <= 3, saw ${maxActive}`);
+  assert.deepEqual(outputs, [10, 20, 30, 40, 50, 60, 70, 80]);
+});
+
+test("Contract Adapter: provision_account uses /api/accounts even with INDEXER_URL set and rejects pending", async () => {
+  const contractPath = path.resolve(SRC_ROOT, "lib/contract.ts");
+  const prevFetch = globalThis.fetch;
+  const prevIndexerUrl = process.env.NEXT_PUBLIC_INDEXER_URL;
+  const prevRelayerUrl = process.env.NEXT_PUBLIC_RELAYER_URL;
+  const prevUseRelayerFaucet = process.env.NEXT_PUBLIC_USE_RELAYER_FAUCET;
+
+  process.env.NEXT_PUBLIC_INDEXER_URL = "https://indexer.example.test";
+  delete process.env.NEXT_PUBLIC_RELAYER_URL;
+  delete process.env.NEXT_PUBLIC_USE_RELAYER_FAUCET;
+  moduleCache.delete(contractPath);
+
+  const seenUrls = [];
+  globalThis.fetch = async (url) => {
+    seenUrls.push(String(url));
+    if (seenUrls.length === 1) {
+      return new Response(JSON.stringify({ status: "pending", account_id: "q.spire.testnet" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ error: "already_exists" }), {
+      status: 409,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const freshContract = loadTsModule(contractPath);
+    assert.equal(freshContract.INDEXER_URL, "https://indexer.example.test");
+
+    await assert.rejects(
+      freshContract.provision_account("q.spire.testnet", "ed25519:" + "aa".repeat(32)),
+      /ACCOUNT_PENDING/
+    );
+    await assert.rejects(
+      freshContract.provision_account("dup.spire.testnet", "ed25519:" + "bb".repeat(32)),
+      /ACCOUNT_EXISTS/
+    );
+    assert.deepEqual(seenUrls, ["/api/accounts", "/api/accounts"]);
+  } finally {
+    globalThis.fetch = prevFetch;
+    if (prevIndexerUrl === undefined) delete process.env.NEXT_PUBLIC_INDEXER_URL;
+    else process.env.NEXT_PUBLIC_INDEXER_URL = prevIndexerUrl;
+    if (prevRelayerUrl === undefined) delete process.env.NEXT_PUBLIC_RELAYER_URL;
+    else process.env.NEXT_PUBLIC_RELAYER_URL = prevRelayerUrl;
+    if (prevUseRelayerFaucet === undefined) delete process.env.NEXT_PUBLIC_USE_RELAYER_FAUCET;
+    else process.env.NEXT_PUBLIC_USE_RELAYER_FAUCET = prevUseRelayerFaucet;
+    moduleCache.delete(contractPath);
   }
 });

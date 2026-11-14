@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Timer,
@@ -12,6 +12,9 @@ import {
   Coins,
   Layers,
   ShieldAlert,
+  Copy,
+  Check,
+  Users,
 } from "lucide-react";
 import { BossArena, BOSS_PROFILES } from "@/components/center/BossArena";
 import { LiveHpBar } from "@/components/center/LiveHpBar";
@@ -22,12 +25,12 @@ import { JackpotCounter } from "@/components/center/JackpotCounter";
 import { CitadelDiorama } from "@/components/three/CitadelDiorama";
 import { EmptyState } from "@/components/shared/EmptyState";
 import {
+  CONTRACT_ID,
+  batchMap,
   emptyInventory,
   get_tower,
   get_floor,
-  get_meta,
   get_inventory,
-  get_balance,
   get_damage,
   get_claimable,
   get_claimable_loot,
@@ -41,7 +44,9 @@ import type {
   StanceIndex,
   FloorResponse,
 } from "@/lib/contract";
-import { useContractView, useSessionAccount } from "@/lib/spire/hooks";
+import { formatContractErrorMessage } from "@/lib/errors";
+import { useContractView } from "@/lib/spire/hooks";
+import { useSpireTelemetry } from "@/lib/spire/telemetry";
 import { useMotionControl } from "@/lib/spire/motion";
 import {
   getEffectiveResistances,
@@ -58,7 +63,6 @@ import {
   parseYoctoSafe,
 } from "@/lib/utils/cn";
 import {
-  FLOOR_COUNT,
   FLOOR_MAX_HP,
   FLOOR_TICKET_COST_NEAR,
   FROST_WARD_FLOOR,
@@ -85,40 +89,27 @@ const STANCE_BY_ID: Record<number, TacticalStance> = {
   2: "pierce",
 };
 
-const MAX_RECENT_ROUNDS_SCAN = 25;
-
-function formatRpcError(err: unknown, fallback: string): string {
-  const raw = err instanceof Error ? err.message : String(err ?? fallback);
-  if (/E_ROUND_LOCKED|locked/i.test(raw)) {
-    return "This floor is still locked. Defeat the preceding floor first.";
-  }
-  if (/E_INSUFFICIENT_BALANCE|insufficient balance|not enough balance/i.test(raw)) {
-    return "Ledger NEAR balance is below the floor ticket cost. Deposit NEAR in Vault first.";
-  }
-  if (/E_NO_WEAPON/i.test(raw)) {
-    return "No weapon of the selected element is available in your arsenal.";
-  }
-  if (/E_SAME_EPOCH/i.test(raw)) {
-    return "Epoch shift cooldown is still active on the contract.";
-  }
-  if (/E_NOTHING_TO_CLAIM/i.test(raw)) {
-    return "No unclaimed payout or loot remains for that round.";
-  }
-  return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw || fallback;
-}
+const MAX_RECENT_ROUNDS_SCAN = 6;
+const STORAGE_RAID_LOG_PREFIX = "spirefi.raid.log.v1";
 
 export default function RaidPage() {
-  const session = useSessionAccount();
+  const {
+    session,
+    meta,
+    metaLoading,
+    metaError,
+    pouchYocto,
+    pouchLoading,
+    recentGlobalEvents,
+    indexerConnected,
+    reloadBalance,
+    reloadMeta,
+  } = useSpireTelemetry();
   const accountId = session?.accountId ?? "";
 
   const tower = useContractView(get_tower, []);
-  const meta = useContractView(get_meta, []);
   const inventory = useContractView(
     async () => (accountId ? await get_inventory(accountId) : null),
-    [accountId]
-  );
-  const balance = useContractView(
-    async () => (accountId ? await get_balance(accountId) : null),
     [accountId]
   );
 
@@ -128,6 +119,10 @@ export default function RaidPage() {
   const [busy, setBusy] = useState<"attack" | "claim" | "claimAll" | "meta" | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [statusBanner, setStatusBanner] = useState<StatusBannerState | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const lastDmgTimerRef = useRef<number | null>(null);
+  const copyInviteTimerRef = useRef<number | null>(null);
 
   const [completedRounds, setCompletedRounds] = useState<CompletedRoundClaim[]>([]);
   const [loadingClaims, setLoadingClaims] = useState(false);
@@ -154,13 +149,48 @@ export default function RaidPage() {
   const { paused, reducedMotion } = useMotionControl();
   const disableMotion = paused || reducedMotion;
 
-  const contractLive = Boolean(tower.data && meta.data);
-  const baseResistances: [number, number, number] = meta.data?.resistance ?? [4500, 4500, 4500];
+  const contractLive = Boolean(tower.data && meta);
+  const baseResistances: [number, number, number] = meta?.resistance ?? [4500, 4500, 4500];
   const effectiveResistances = getEffectiveResistances(baseResistances, activeFloor);
   const isRoundExpired = Boolean(
     floorData &&
       (floorData.expired || (floorData.deadline_ns > 0 && floorData.time_left_ns === 0))
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawFloor = Number.parseInt(
+      new URLSearchParams(window.location.search).get("floor") ?? "",
+      10
+    );
+    if (rawFloor >= 1 && rawFloor <= 3) {
+      setSelectedFloor(rawFloor);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (lastDmgTimerRef.current !== null) {
+        window.clearTimeout(lastDmgTimerRef.current);
+      }
+      if (copyInviteTimerRef.current !== null) {
+        window.clearTimeout(copyInviteTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!accountId) {
+      setLogs([]);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`${STORAGE_RAID_LOG_PREFIX}:${accountId}`);
+      setLogs(raw ? (JSON.parse(raw) as LogEntry[]) : []);
+    } catch {
+      setLogs([]);
+    }
+  }, [accountId]);
 
   // Scan completed rounds (0 .. round - 1) on the selected floor for claimable NEAR payouts and seized weapon loot.
   useEffect(() => {
@@ -187,8 +217,10 @@ export default function RaidPage() {
           roundIndices.push(r);
         }
 
-        const results = await Promise.all(
-          roundIndices.map(async (r): Promise<CompletedRoundClaim> => {
+        const results = await batchMap(
+          roundIndices,
+          6,
+          async (r): Promise<CompletedRoundClaim> => {
             const [dmg, claimableYocto, claimableLoot] = await Promise.all([
               get_damage(accountId, targetFloor, r).catch(() => 0),
               get_claimable(accountId, targetFloor, r).catch(() => "0"),
@@ -203,7 +235,7 @@ export default function RaidPage() {
               claimableYocto,
               claimableLoot,
             };
-          })
+          }
         );
 
         if (!cancelled) {
@@ -211,7 +243,7 @@ export default function RaidPage() {
         }
       } catch (err: unknown) {
         if (!cancelled) {
-          setClaimsError(formatRpcError(err, "Unable to scan completed rounds for claims."));
+          setClaimsError(formatContractErrorMessage(err));
         }
       } finally {
         if (!cancelled) {
@@ -228,16 +260,45 @@ export default function RaidPage() {
   }, [accountId, floorData?.floor, floorData?.round, scanAllRounds, claimRefreshSeq]);
 
   const pushLog = (entry: Omit<LogEntry, "id" | "timestamp">) => {
-    setLogs((prev) =>
-      [
+    setLogs((prev) => {
+      const next = [
         {
           ...entry,
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           timestamp: new Date().toLocaleTimeString(),
         },
         ...prev,
-      ].slice(0, 30)
-    );
+      ].slice(0, 30);
+      if (accountId) {
+        try {
+          localStorage.setItem(
+            `${STORAGE_RAID_LOG_PREFIX}:${accountId}`,
+            JSON.stringify(next)
+          );
+        } catch {
+          // ignore localStorage quota errors
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleCopyInvite = async () => {
+    if (typeof window === "undefined") return;
+    const targetFloor = floorData?.floor ?? selectedFloor;
+    const inviteUrl = `${window.location.origin}/game/raid?floor=${targetFloor}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setInviteCopied(true);
+      if (copyInviteTimerRef.current !== null) {
+        window.clearTimeout(copyInviteTimerRef.current);
+      }
+      copyInviteTimerRef.current = window.setTimeout(() => {
+        setInviteCopied(false);
+      }, 1800);
+    } catch {
+      // clipboard permission unavailable
+    }
   };
 
   const handleAttack = async (
@@ -284,11 +345,34 @@ export default function RaidPage() {
         projected += calc.effectiveDamage;
       }
 
+      const raidEv = res.events?.find((e) => e.event === "raid")?.data?.[0];
+      const defeatEv = res.events?.find((e) => e.event === "boss_defeated")?.data?.[0];
+      const parsedDamage =
+        typeof raidEv?.damage === "number"
+          ? raidEv.damage
+          : typeof raidEv?.damage === "string"
+            ? Number(raidEv.damage)
+            : Number.NaN;
+      const actualDamage =
+        Number.isFinite(parsedDamage) && parsedDamage >= 0 ? parsedDamage : projected;
+      const hasExactDamage = Number.isFinite(parsedDamage) && parsedDamage >= 0;
+      const parsedRemainingHp =
+        typeof raidEv?.boss_remaining_hp === "number"
+          ? raidEv.boss_remaining_hp
+          : typeof raidEv?.boss_remaining_hp === "string"
+            ? Number(raidEv.boss_remaining_hp)
+            : Number.NaN;
+      const exactTributeTaken =
+        typeof raidEv?.tribute_taken === "boolean" ? raidEv.tribute_taken : null;
+
       if (!disableMotion) {
         setShockwaveSeq((s) => s + 1);
       }
-      setLastDamage(projected);
-      setTimeout(() => setLastDamage(null), 1400);
+      setLastDamage(actualDamage);
+      if (lastDmgTimerRef.current !== null) {
+        window.clearTimeout(lastDmgTimerRef.current);
+      }
+      lastDmgTimerRef.current = window.setTimeout(() => setLastDamage(null), 1400);
 
       let postFloor: FloorResponse | null = null;
       try {
@@ -297,7 +381,8 @@ export default function RaidPage() {
         postFloor = null;
       }
 
-      const roundAdvanced = Boolean(postFloor && postFloor.round > preRound);
+      const roundAdvanced =
+        Boolean(defeatEv) || Boolean(postFloor && postFloor.round > preRound);
       let unlockedReward = false;
       if (roundAdvanced) {
         const [claimable, claimableLoot] = await Promise.all([
@@ -308,30 +393,33 @@ export default function RaidPage() {
         ]);
         const lootSum =
           (claimableLoot[0] ?? 0) + (claimableLoot[1] ?? 0) + (claimableLoot[2] ?? 0);
-        unlockedReward = parseYoctoSafe(claimable) > 0n || lootSum > 0;
+        unlockedReward = Boolean(defeatEv) || parseYoctoSafe(claimable) > 0n || lootSum > 0;
         if (unlockedReward) {
           setHighlightedRound({ floor, round: preRound });
         }
       }
 
       const bannerText = unlockedReward
-        ? `Victory on Floor ${floor} Round ${preRound}. Reward unlocked in Completed Rounds below.`
+        ? `Victory on Floor ${floor} Round ${preRound} (${actualDamage} dmg). Reward unlocked in Completed Rounds below.`
         : roundAdvanced && wasExpired
-          ? `Expired Round ${preRound} settled lazily. Floor ${floor} struck for ${projected} dmg.`
-          : `Strike hit Floor ${floor} for ${projected} estimated damage.`;
+          ? `Expired Round ${preRound} settled lazily. Floor ${floor} struck for ${actualDamage} ${hasExactDamage ? "on-chain" : "est."} dmg.`
+          : `Strike hit Floor ${floor} for ${actualDamage} ${hasExactDamage ? "on-chain" : "estimated"} damage.`;
 
       setStatusBanner({ text: bannerText, txHash: res.txHash });
 
       pushLog({
         accountId,
         element: (["solar", "frost", "void"] as const)[weaponElement],
-        damage: projected,
+        damage: actualDamage,
+        isExact: hasExactDamage,
         remainingHp: unlockedReward
           ? 0
-          : postFloor
-            ? postFloor.hp
-            : Math.max(0, preHp - projected),
-        isConfiscated: tribute.atRisk,
+          : Number.isFinite(parsedRemainingHp) && parsedRemainingHp >= 0
+            ? parsedRemainingHp
+            : postFloor
+              ? postFloor.hp
+              : Math.max(0, preHp - actualDamage),
+        isConfiscated: exactTributeTaken !== null ? exactTributeTaken : tribute.atRisk,
         note: unlockedReward
           ? `Boss defeated (Round ${preRound}); payout unlocked`
           : roundAdvanced && wasExpired
@@ -343,11 +431,11 @@ export default function RaidPage() {
       tower.reload();
       if (inventory.data) inventory.reload();
       damage.reload();
-      balance.reload();
+      reloadBalance();
       setClaimRefreshSeq((s) => s + 1);
     } catch (err: unknown) {
       setStatusBanner({
-        text: formatRpcError(err, `Attack failed on Floor ${floor}.`),
+        text: formatContractErrorMessage(err),
         isError: true,
       });
     } finally {
@@ -379,14 +467,11 @@ export default function RaidPage() {
       });
       damage.reload();
       inventory.reload();
-      balance.reload();
+      reloadBalance();
       setClaimRefreshSeq((s) => s + 1);
     } catch (err: unknown) {
       setStatusBanner({
-        text: formatRpcError(
-          err,
-          `Unable to claim Floor ${targetFloor} Round ${targetRound}.`
-        ),
+        text: formatContractErrorMessage(err),
         isError: true,
       });
     } finally {
@@ -402,7 +487,7 @@ export default function RaidPage() {
     try {
       const res = await claim_jackpot();
       setStatusBanner({
-        text: "All unclaimed round payouts and loot swept to your ledger and arsenal.",
+        text: "All unclaimed round payouts and loot swept to your Pouch and arsenal.",
         txHash: res.txHash,
       });
       setHighlightedRound(null);
@@ -416,11 +501,11 @@ export default function RaidPage() {
       });
       damage.reload();
       inventory.reload();
-      balance.reload();
+      reloadBalance();
       setClaimRefreshSeq((s) => s + 1);
     } catch (err: unknown) {
       setStatusBanner({
-        text: formatRpcError(err, "Failed to sweep unclaimed payouts."),
+        text: formatContractErrorMessage(err),
         isError: true,
       });
     } finally {
@@ -439,10 +524,10 @@ export default function RaidPage() {
         text: "Epoch resistance shift submitted.",
         txHash: res.txHash,
       });
-      meta.reload();
+      reloadMeta();
     } catch (err: unknown) {
       setStatusBanner({
-        text: formatRpcError(err, "Epoch shift rejected by contract."),
+        text: formatContractErrorMessage(err),
         isError: true,
       });
     } finally {
@@ -454,25 +539,26 @@ export default function RaidPage() {
     return (
       <div className="max-w-4xl mx-auto py-8">
         <EmptyState
-          title="Signless session not started"
-          hint="Create or unlock your Spire account on the Session Key screen first so your browser holds an active Function Call Key."
+          headingAs="h1"
+          title="Guest raid session not started"
+          hint="Create or unlock your Spire guest account on the Start screen so your browser holds an active Walletless Guest Session Key."
           actionHref="/game/start"
-          actionLabel="Go to Session Key"
+          actionLabel="Go to Start Screen"
         />
       </div>
     );
   }
 
-  if ((tower.loading || meta.loading) && !contractLive && !tower.error && !meta.error) {
+  if ((tower.loading || metaLoading) && !contractLive && !tower.error && !metaError) {
     return (
       <div className="max-w-4xl mx-auto py-8">
         <div
           role="status"
           aria-live="polite"
-          className="panel-gothic p-6 flex items-center justify-between gap-4"
+          className="obsidian-surface p-6 flex items-center justify-between gap-4"
         >
           <div className="space-y-1">
-            <h1 className="text-xl font-bold text-parchment font-display tracking-wide">
+            <h1 className="text-xl font-bold text-parchment font-serif tracking-wide">
               Syncing Spire Raid Telemetry
             </h1>
             <p className="text-sm text-ash">
@@ -491,11 +577,12 @@ export default function RaidPage() {
     return (
       <div className="max-w-4xl mx-auto py-8">
         <EmptyState
+          headingAs="h1"
           title="Boss arena unavailable"
           hint="Unable to connect to Boss Arena telemetry on NEAR Testnet. Check your connection or reload."
           onReload={() => {
             tower.reload();
-            meta.reload();
+            reloadMeta();
           }}
         />
       </div>
@@ -503,12 +590,15 @@ export default function RaidPage() {
   }
 
   const playerDamage = damage.data ?? 0;
+  const totalRoundDamage = Number(floorData.total_damage ?? "0");
+  const playerSharePct =
+    totalRoundDamage > 0 ? Math.min(100, Math.round((playerDamage / totalRoundDamage) * 100)) : 0;
   const txLink = getExplorerTxUrl(statusBanner?.txHash);
   const dominantElement = effectiveResistances.indexOf(
     Math.max(...effectiveResistances)
   ) as ElementIndex;
   const bossProfile = BOSS_PROFILES[floorData.floor] ?? BOSS_PROFILES[1];
-  const ledgerBalanceNear = formatNearAmount(balance.data ?? "0", 3);
+  const ledgerBalanceNear = formatNearAmount(pouchYocto ?? "0", 3);
 
   const actionableClaims = completedRounds.filter((entry) => {
     const lootTotal =
@@ -544,12 +634,18 @@ export default function RaidPage() {
       </AnimatePresence>
 
       {/* Page Masthead: H1 precedes all H2 section headings in DOM order (no kickers above H1) */}
-      <header className="panel-gothic px-5 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <header className="obsidian-surface px-5 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="space-y-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-bold text-parchment font-display tracking-wide">
+            <h1 className="text-2xl sm:text-3xl font-bold text-parchment font-serif tracking-wide">
               Floor {floorData.floor}: {bossProfile.title}
             </h1>
+            <span
+              title={`Shared multi-player testnet instance on ${CONTRACT_ID}: all raiders fight the same live HP & Round pool.`}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-frost/10 border border-frost/30 text-xs font-mono font-bold text-frost"
+            >
+              Global Shared Boss · {CONTRACT_ID}
+            </span>
             {isRoundExpired && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-solar/15 border border-solar/40 text-xs font-mono font-bold text-solar">
                 <Timer className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -568,38 +664,48 @@ export default function RaidPage() {
             <span className="font-mono font-mono-numbers text-parchment font-semibold">
               {round}
             </span>{" "}
-            · Ledger Balance:{" "}
+            · Citadel Pouch:{" "}
             <span className="font-mono font-mono-numbers text-frost font-semibold">
-              {balance.loading ? "..." : ledgerBalanceNear}
+              {pouchLoading && pouchYocto === null ? "..." : ledgerBalanceNear}
             </span>
           </p>
         </div>
 
-        {/* Floor Quick Switcher */}
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Floor selector">
-          {Array.from({ length: FLOOR_COUNT }, (_, idx) => {
-            const floorNum = idx + 1;
-            const summary = floors.find((f) => f.floor === floorNum);
-            const active = floorNum === floorData.floor;
-            return (
-              <button
-                type="button"
-                key={floorNum}
-                onClick={() => setSelectedFloor(floorNum)}
-                aria-pressed={active}
-                className={`min-h-[44px] px-3.5 py-2 rounded-lg border text-xs font-mono font-bold uppercase tracking-wider inline-flex items-center gap-2 transition-colors ${
-                  active
-                    ? "bg-solar/15 border-solar text-parchment"
-                    : "bg-panel-dark border-brass/25 text-ash hover:border-brass/50 hover:text-parchment"
-                }`}
-              >
-                <span>Floor {floorNum}</span>
-                {summary && !summary.unlocked && (
-                  <Lock className="w-3.5 h-3.5 text-solar shrink-0" aria-hidden="true" />
-                )}
-              </button>
-            );
-          })}
+        {/* Co-op Floor Telemetry & Invite */}
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <div className="px-3.5 py-2 rounded-lg bg-panel-dark/80 border border-brass/20 text-xs font-mono flex items-center gap-3">
+            <Users className="w-4 h-4 text-jackpot shrink-0" aria-hidden="true" />
+            <div className="leading-tight">
+              <div className="text-pewter">
+                Co-op Team DMG:{" "}
+                <span className="text-parchment font-bold font-mono-numbers">
+                  {totalRoundDamage.toLocaleString()}
+                </span>
+              </div>
+              <div className="text-ash font-mono-numbers">
+                Yours: <span className="text-frost font-semibold">{playerDamage.toLocaleString()}</span>{" "}
+                ({playerSharePct}%)
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleCopyInvite()}
+            className="min-h-[44px] px-3.5 py-2 rounded-lg border border-brass/35 bg-panel-dark hover:bg-white/10 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors"
+          >
+            {inviteCopied ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-jackpot shrink-0" aria-hidden="true" />
+                <span className="text-jackpot">Floor Invite Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 text-frost shrink-0" aria-hidden="true" />
+                <span>Copy Co-op Floor Invite</span>
+              </>
+            )}
+          </button>
         </div>
       </header>
 
@@ -618,8 +724,12 @@ export default function RaidPage() {
               className="w-full"
             />
 
-            {/* Compact Floor Telemetry Index */}
-            <div className="divide-y divide-brass/15 border-t border-brass/20 bg-oled/90">
+            <div className="px-4 py-2 text-xs font-mono uppercase tracking-wider text-pewter bg-oled/95 border-t border-brass/20">
+              Floor Selector &amp; HP Telemetry
+            </div>
+
+            {/* Unified Floor Telemetry Index */}
+            <div className="divide-y divide-brass/15 border-t border-brass/15 bg-oled/90">
               {floors.map((f) => {
                 const idx = Math.min(Math.max(f.floor, 1), 3) - 1;
                 const isActive = f.floor === floorData.floor;
@@ -678,8 +788,8 @@ export default function RaidPage() {
             resistances={effectiveResistances}
             baseResistances={baseResistances}
             floor={floorData.floor}
-            epoch={meta.data?.epoch}
-            nextEpochInNs={meta.data?.next_epoch_in_ns}
+            epoch={meta?.epoch}
+            nextEpochInNs={meta?.next_epoch_in_ns}
             onUpdateMeta={handleUpdateMeta}
             updatingMeta={busy === "meta"}
           />
@@ -753,13 +863,13 @@ export default function RaidPage() {
           </motion.div>
 
           {/* Completed Rounds Claim Panel (scans prior rounds because settle_defeat auto-advances round) */}
-          <section className="panel-gothic p-4 space-y-3" aria-labelledby="completed-rounds-heading">
+          <section className="obsidian-surface p-4 space-y-3" aria-labelledby="completed-rounds-heading">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Trophy className="w-4 h-4 text-jackpot shrink-0" aria-hidden="true" />
                 <h2
                   id="completed-rounds-heading"
-                  className="text-sm font-bold text-parchment font-display uppercase tracking-wider"
+                  className="text-sm font-bold text-parchment font-serif uppercase tracking-wider"
                 >
                   Completed Rounds &amp; Claims
                 </h2>
@@ -935,14 +1045,19 @@ export default function RaidPage() {
             floor={floorData.floor}
             onAttack={handleAttack}
             disabled={busy !== null || !floorData.unlocked}
-            ledgerBalanceYocto={balance.data}
-            ledgerLoading={balance.loading}
+            ledgerBalanceYocto={pouchYocto}
+            ledgerLoading={pouchLoading}
             roundExpired={isRoundExpired}
             floorLocked={!floorData.unlocked}
             bossHp={floorData.hp}
           />
 
-          <DamageLog logs={logs} />
+          <DamageLog
+            logs={logs}
+            accountId={accountId}
+            globalEvents={recentGlobalEvents}
+            indexerConnected={indexerConnected}
+          />
         </div>
       </div>
     </section>

@@ -105,10 +105,10 @@ export const BossBrainPreview: React.FC = () => {
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
         <div>
           <h2 className="font-serif text-3xl sm:text-4xl font-bold text-parchment tracking-tight">
-            Adaptive Meta Defense &amp; Verifiable AI Oracle
+            Adaptive Meta Defense &amp; Epoch Guardrails
           </h2>
-          <p className="mt-2.5 text-sm sm:text-base text-ash max-w-2xl leading-relaxed">
-            Weapon supply shifts Boss resistance deterministically on-chain across a strict 13,500 bps pool during lazy epochs, while the AI Relayer proposes buyback multipliers, bonus Altar unlocks, and combat taunts within hard smart contract bounds.
+          <p className="mt-2.5 text-sm sm:text-base text-ash max-w-[65ch] leading-relaxed">
+            Weapon supply shifts Boss resistance deterministically on-chain across a strict 13,500 bps pool during <code className="text-parchment font-mono">lazy_epoch</code>. Live testnet runs <code className="text-frost font-mono">epoch-only</code> mode (1.00x baseline &amp; 2&rarr;1 Altar) while smart-contract bounds enforce optional relayer proposals.
           </p>
         </div>
 
@@ -213,10 +213,10 @@ export const BossBrainPreview: React.FC = () => {
           </div>
 
           <div
-            className={`rounded-lg px-4 py-3 text-xs leading-relaxed border-t ${
+            className={`px-4 py-3 text-xs leading-relaxed border-l-2 ${
               anyTributeRisk
-                ? "bg-red-950/50 border-red-500/50 text-hp-text"
-                : "bg-[#090A10]/90 border-jackpot/50 text-ash"
+                ? "bg-hp/10 border-hp text-hp-text"
+                : "bg-jackpot/5 border-jackpot/60 text-ash"
             }`}
           >
             {anyTributeRisk ? (
@@ -235,36 +235,36 @@ export const BossBrainPreview: React.FC = () => {
         <SpireSurface variant="surface" className="lg:col-span-6 p-6 flex flex-col justify-between gap-5">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
-                AI Proposes, Smart Contract Validates
+              <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment text-balance">
+                Oracle Proposes, Contract Decides
               </h3>
               <SpireTooltip
-                triggerLabel="Explain signed relayer proposal and NEAR AI Cloud audit flow"
-                content="Signed Relayer Proposal + NEAR AI Cloud Audit ChatID (Full hardware TEE attestation: roadmap §13). lib.rs verifies the Ed25519 signature over canonical preimage strings and rejects out-of-range multipliers or invalid Altar recipes."
+                triggerLabel="Explain deterministic epoch-only mode and contract guardrails"
+                content="Live Testnet runs deterministic epoch-only mode (1.00x buyback baseline, standard 2->1 Altar). If optional Ed25519 relayer proposals are enabled later, lib.rs strictly enforces clamped multipliers [10,000-40,000 bps] and recipes on-chain."
               >
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs text-void-text">
                   <Lock className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Ed25519 Relayer Gate</span>
+                  <span>Epoch-Only Guardrails</span>
                 </span>
               </SpireTooltip>
             </div>
 
-            <p className="text-sm text-ash leading-relaxed">
-              The off-chain Relayer submits NEAR AI Cloud reasoning proposals via <code className="font-mono text-frost">apply_ai_proposal</code>. AI never chooses winners or alters elemental armor directly; weapon supply drives resistance automatically on <code className="font-mono text-frost">lazy_epoch</code>:
+            <p className="text-sm text-ash leading-relaxed max-w-[65ch]">
+              Weapon supply automatically drives boss armor every <code className="font-mono text-frost">lazy_epoch</code> without any AI intervention. Optional relayer proposals are strictly bounded on-chain:
             </p>
 
-            {/* Clean flat rule table (no double card nesting) */}
-            <dl className="divide-y divide-brass/15 bg-[#090A10]/85 rounded-lg px-4">
+            {/* Clean flat rule table (no nested card box) */}
+            <dl className="divide-y divide-brass/15 border-t border-b border-brass/15">
               <div className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <dt className="font-mono text-pewter uppercase">AI Buyback Multiplier</dt>
+                <dt className="font-mono text-pewter uppercase">Live Buyback Mode</dt>
                 <dd className="font-mono-numbers font-bold text-solar">
-                  Clamped [10,000 - 40,000 bps] (1.0x - 4.0x)
+                  Epoch-Only 1.00x Active (Contract Clamps 1.0x–4.0x)
                 </dd>
               </div>
               <div className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <dt className="font-mono text-pewter uppercase">Altar Bonus Unlocks</dt>
+                <dt className="font-mono text-pewter uppercase">Altar Transmutation</dt>
                 <dd className="font-mono font-bold text-frost">
-                  reforge_2_to_1 (always) / AI reforge_3_to_2
+                  reforge_2_to_1 Active (Deterministic Anytime)
                 </dd>
               </div>
               <div className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -280,25 +280,25 @@ export const BossBrainPreview: React.FC = () => {
           <div className="pt-4 border-t border-brass/20 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-serif text-sm font-bold text-parchment">
-                {activePreset.bossName} <span className="font-mono text-xs font-normal text-pewter">(Preset Preview)</span>
+                {activePreset.bossName} <span className="font-mono text-xs font-normal text-pewter">(Simulator Preview)</span>
               </span>
               <div className="flex items-center gap-2 font-mono text-xs text-pewter">
                 <span>Altar: <strong className="text-frost">{activePreset.altarRecipe}</strong></span>
                 <span aria-hidden="true">·</span>
-                <span>Void Quote: <strong className="text-void-text">{(activePreset.buybackBps[2] / 10000).toFixed(2)}x</strong></span>
+                <span>Sim Quote: <strong className="text-void-text">{(activePreset.buybackBps[2] / 10000).toFixed(2)}x</strong></span>
               </div>
             </div>
 
-            <blockquote className="font-lore italic text-lg sm:text-xl text-parchment leading-snug rounded-lg bg-[#090A10]/90 px-4 py-3">
+            <blockquote className="font-lore italic text-lg sm:text-xl text-parchment leading-snug border-l-2 border-brass/45 pl-4 py-1">
               &ldquo;{activePreset.taunt}&rdquo;
             </blockquote>
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-mono text-xs text-pewter">
               <span className="inline-flex items-center gap-1.5 text-jackpot">
                 <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Sample Signed Relayer {activePreset.sigPrefix}</span>
+                <span>Epoch-Only Default On-Chain · Preset {activePreset.sigPrefix}</span>
               </span>
-              <span>Audit ChatID: {activePreset.chatId}</span>
+              <span>Mode: epoch-only</span>
             </div>
           </div>
         </SpireSurface>
