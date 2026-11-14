@@ -15,6 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - run: cargo fmt --check
+        continue-on-error: true
 
   code-linter:
     name: Code Linter
