@@ -83,7 +83,7 @@ Thumbs.db
 *.swp
 *.swo
 
-# Test Coverage, QA Screenshots & Temporary Scratch Files
+# Test Coverage, QA Screenshots, Demo Videos & Temporary Scratch Files
 coverage/
 scratch/
 .tmp/
@@ -92,3 +92,6 @@ scratch/
 playwright-report/
 test-results/
 qa_*.png
+docs/demo/*.mp4
+docs/demo/*.webm
+scripts/demo/.tmp/

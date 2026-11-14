@@ -25,6 +25,18 @@ export const RPC_ENDPOINTS = [
   "https://rpc.testnet.near.org",
 ];
 
+/**
+ * Returns the prioritized RPC endpoints for the current runtime.
+ * In the browser, routes through the same-origin `/api/rpc` Next.js gateway
+ * first to eliminate cross-origin 429 CORS errors and coalesce concurrent views.
+ */
+export function getActiveRpcEndpoints(): string[] {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return [`${window.location.origin}/api/rpc`, ...RPC_ENDPOINTS];
+  }
+  return RPC_ENDPOINTS;
+}
+
 export const STORAGE_SESSION_KEY = "spire_session_v3";
 
 export interface SessionData {

@@ -826,31 +826,63 @@ export class SpireIndexer extends EventEmitter {
     return this.wss;
   }
 
+  private getRpcCandidates(): string[] {
+    if (
+      !this.rpcUrl.includes("fastnear.com") &&
+      !this.rpcUrl.includes("testnet.near.org")
+    ) {
+      return [this.rpcUrl];
+    }
+    return Array.from(
+      new Set([
+        this.rpcUrl,
+        "https://rpc.testnet.near.org",
+        "https://test.rpc.fastnear.com",
+        "https://rpc.testnet.fastnear.com",
+      ])
+    );
+  }
+
   private async rpcView<T>(methodName: string, args: Record<string, unknown> = {}): Promise<T> {
-    const response = await fetch(this.rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `spirefi-view-${methodName}`,
-        method: "query",
-        params: {
-          request_type: "call_function",
-          finality: "final",
-          account_id: this.contractId,
-          method_name: methodName,
-          args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
-        },
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(`RPC HTTP ${response.status}: ${await response.text()}`);
+    let lastErr: unknown;
+    for (const url of this.getRpcCandidates()) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: `spirefi-view-${methodName}`,
+            method: "query",
+            params: {
+              request_type: "call_function",
+              finality: "final",
+              account_id: this.contractId,
+              method_name: methodName,
+              args_base64: Buffer.from(JSON.stringify(args)).toString("base64"),
+            },
+          }),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          lastErr = new Error(`RPC HTTP ${response.status}: ${text}`);
+          if (response.status === 429 || response.status >= 500) continue;
+          throw lastErr;
+        }
+        const json = (await response.json()) as any;
+        if (json.error) {
+          lastErr = new Error(`RPC error in ${methodName}: ${JSON.stringify(json.error)}`);
+          if (json.error?.code === -429 || /rate limit/i.test(String(json.error?.message ?? ""))) {
+            continue;
+          }
+          throw lastErr;
+        }
+        return JSON.parse(Buffer.from(json.result.result).toString("utf-8")) as T;
+      } catch (err) {
+        lastErr = err;
+      }
     }
-    const json = (await response.json()) as any;
-    if (json.error) {
-      throw new Error(`RPC error in ${methodName}: ${JSON.stringify(json.error)}`);
-    }
-    return JSON.parse(Buffer.from(json.result.result).toString("utf-8")) as T;
+    throw lastErr instanceof Error ? lastErr : new Error(`RPC failed for ${methodName}`);
   }
 
   /**
@@ -1022,6 +1054,9 @@ export class SpireIndexer extends EventEmitter {
     this.isRunning = true;
     if (startBlockHeight) this.lastBlockHeight = startBlockHeight;
 
+    // Seed initial stats snapshot from on-chain state on boot
+    void this.fetchLiveStats().catch(() => {});
+
     const poll = async () => {
       if (!this.isRunning) return;
       try {
@@ -1048,23 +1083,30 @@ export class SpireIndexer extends EventEmitter {
   }
 
   private async rpcCall<T>(method: string, params: unknown): Promise<T | null> {
-    try {
-      const response = await fetch(this.rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `spirefi-indexer-${method}`,
-          method,
-          params,
-        }),
-      });
-      if (!response.ok) return null;
-      const data = (await response.json()) as any;
-      return (data?.result ?? null) as T | null;
-    } catch {
-      return null;
+    for (const url of this.getRpcCandidates()) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: `spirefi-indexer-${method}`,
+            method,
+            params,
+          }),
+        });
+        if (!response.ok) {
+          if (response.status === 429 || response.status >= 500) continue;
+          return null;
+        }
+        const data = (await response.json()) as any;
+        if (data?.error?.code === -429) continue;
+        return (data?.result ?? null) as T | null;
+      } catch {
+        continue;
+      }
     }
+    return null;
   }
 
   private rememberTxHash(txHash: string): void {

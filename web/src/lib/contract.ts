@@ -11,7 +11,12 @@
  * strings on this side to avoid float drift.
  */
 
-import { SessionManager, NETWORK_ID, RPC_ENDPOINTS } from "./near";
+import {
+  SessionManager,
+  NETWORK_ID,
+  RPC_ENDPOINTS,
+  getActiveRpcEndpoints,
+} from "./near";
 import {
   FLOOR_COUNT,
   MATERIAL_TOKENS,
@@ -241,7 +246,7 @@ async function rpcViewRaw(
   };
 
   let lastError: unknown;
-  for (const url of RPC_ENDPOINTS) {
+  for (const url of getActiveRpcEndpoints()) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -508,7 +513,7 @@ function isRetryableTransportError(err: unknown): boolean {
 
 async function withRpcFailover<T>(fn: (rpcUrl: string) => Promise<T>): Promise<T> {
   let lastError: unknown;
-  for (const url of RPC_ENDPOINTS) {
+  for (const url of getActiveRpcEndpoints()) {
     try {
       return await fn(url);
     } catch (err: unknown) {
@@ -841,7 +846,7 @@ export type ProvisionStatus = "provisioned" | "queued";
 /** Native NEAR liquid balance on the guest subaccount (for Silent Gas Tank visibility). */
 export async function viewAccountBalanceYocto(accountId: string): Promise<string> {
   let lastError: unknown;
-  for (const url of RPC_ENDPOINTS) {
+  for (const url of getActiveRpcEndpoints()) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -879,7 +884,7 @@ export async function viewAccountBalanceYocto(accountId: string): Promise<string
 
 /** True when the account exists on NEAR testnet (used by the provision poller). */
 export async function account_exists(accountId: string): Promise<boolean> {
-  for (const url of RPC_ENDPOINTS) {
+  for (const url of getActiveRpcEndpoints()) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -913,7 +918,7 @@ export async function verify_account_key(
   accountId: string,
   publicKey: string
 ): Promise<boolean> {
-  for (const url of RPC_ENDPOINTS) {
+  for (const url of getActiveRpcEndpoints()) {
     try {
       const res = await fetch(url, {
         method: "POST",

@@ -182,22 +182,54 @@ export class SpireKeeper {
 
   // ---------------------------------------------------------------- contract IO
 
+  private getRpcCandidates(): string[] {
+    if (
+      !this.rpcUrl.includes("fastnear.com") &&
+      !this.rpcUrl.includes("testnet.near.org")
+    ) {
+      return [this.rpcUrl];
+    }
+    return Array.from(
+      new Set([
+        this.rpcUrl,
+        "https://rpc.testnet.near.org",
+        "https://test.rpc.fastnear.com",
+        "https://rpc.testnet.fastnear.com",
+      ])
+    );
+  }
+
   private async rpcQuery<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    const response = await fetch(this.rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: `spirefi-${method}`, method, params }),
-    });
+    let lastErr: unknown;
+    for (const url of this.getRpcCandidates()) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: `spirefi-${method}`, method, params }),
+        });
 
-    if (!response.ok) {
-      throw new Error(`RPC HTTP ${response.status}: ${await response.text()}`);
-    }
+        if (!response.ok) {
+          const text = await response.text();
+          lastErr = new Error(`RPC HTTP ${response.status}: ${text}`);
+          if (response.status === 429 || response.status >= 500) continue;
+          throw lastErr;
+        }
 
-    const json = (await response.json()) as any;
-    if (json.error) {
-      throw new Error(`RPC error in ${method}: ${JSON.stringify(json.error)}`);
+        const json = (await response.json()) as any;
+        if (json.error) {
+          lastErr = new Error(`RPC error in ${method}: ${JSON.stringify(json.error)}`);
+          if (json.error?.code === -429 || /rate limit/i.test(String(json.error?.message ?? ""))) {
+            continue;
+          }
+          throw lastErr;
+        }
+        return json.result as T;
+      } catch (err) {
+        lastErr = err;
+      }
     }
-    return json.result as T;
+    throw lastErr instanceof Error ? lastErr : new Error(`RPC query failed for ${method}`);
   }
 
   public async callViewMethod<T>(methodName: string, args: Record<string, unknown> = {}): Promise<T> {
