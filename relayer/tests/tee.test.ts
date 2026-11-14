@@ -1,9 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { KeyPair } from "near-api-js";
 import {
   getMockTeeKeyPair,
   requireMockSeed,
   requireTeePublicKey,
+  parseTeeSigningKeyPair,
   buildCanonicalMessage,
   serializeProposal,
   toProposalPayload,
@@ -181,11 +183,19 @@ describe("TEE Module - Invariant Validation", () => {
     assert.ok(result.errors.some((e) => e.includes("taunt length")));
   });
 
-  it("rejects a non-positive nonce and unknown floor", () => {
+  it("accepts 0-indexed floors 0..2 and rejects non-positive nonce or out-of-range floors", () => {
+    for (const floor of [0, 1, 2]) {
+      const ok = validateProposalInvariants({ ...baseProposal, floor, buyback_multiplier_bps: [10000, 10000, 10000] }, { currentBuyback: current });
+      assert.strictEqual(ok.valid, true, `floor ${floor} should be valid`);
+    }
+
     const badNonce = validateProposalInvariants({ ...baseProposal, nonce: 0 }, { currentBuyback: current });
     assert.strictEqual(badNonce.valid, false);
 
-    const badFloor = validateProposalInvariants({ ...baseProposal, floor: 4 }, { currentBuyback: current });
+    const negFloor = validateProposalInvariants({ ...baseProposal, floor: -1 }, { currentBuyback: current });
+    assert.strictEqual(negFloor.valid, false);
+
+    const badFloor = validateProposalInvariants({ ...baseProposal, floor: 3 }, { currentBuyback: current });
     assert.strictEqual(badFloor.valid, false);
   });
 });
@@ -307,7 +317,7 @@ describe("TEE Module - Strict AI payload parsing", () => {
 describe("TEE Module - Mock proposal invariants", () => {
   it("honours an explicit taunt and rejects invalid input", () => {
     const signed = generateMockAiProposal({
-      floor: 3,
+      floor: 2,
       epoch: 9,
       currentBuyback: [10000, 10000, 10000],
       supply: [1, 1, 1],
@@ -320,7 +330,7 @@ describe("TEE Module - Mock proposal invariants", () => {
     assert.throws(
       () =>
         generateMockAiProposal({
-          floor: 1,
+          floor: 0,
           epoch: 1,
           currentBuyback: [10000, 10000, 10000],
           supply: [1, 1, 1],
@@ -329,6 +339,161 @@ describe("TEE Module - Mock proposal invariants", () => {
           seedString: TEST_SEED,
         }),
       /failed invariants/
+    );
+  });
+});
+
+describe("TEE Module - Live reasoning + canonical signing separation", () => {
+  it("parses TEE_SIGNING_PRIVATE_KEY from ed25519:<base58>, 64-byte hex, and 32-byte hex seed", () => {
+    const nearKp = KeyPair.fromRandom("ed25519");
+    const fromNear = parseTeeSigningKeyPair(nearKp.toString());
+    assert.strictEqual(
+      Buffer.from(fromNear.publicKey).toString("hex"),
+      Buffer.from(nearKp.getPublicKey().data).toString("hex")
+    );
+
+    const hexSecret = Buffer.from(fromNear.secretKey).toString("hex");
+    const fromHex64 = parseTeeSigningKeyPair(hexSecret);
+    assert.strictEqual(Buffer.from(fromHex64.publicKey).toString("hex"), Buffer.from(fromNear.publicKey).toString("hex"));
+
+    const hexSeed = Buffer.from(fromNear.secretKey.subarray(0, 32)).toString("hex");
+    const fromSeed32 = parseTeeSigningKeyPair(hexSeed);
+    assert.strictEqual(Buffer.from(fromSeed32.publicKey).toString("hex"), Buffer.from(fromNear.publicKey).toString("hex"));
+
+    assert.throws(() => parseTeeSigningKeyPair(""), /TEE_SIGNING_PRIVATE_KEY/);
+    assert.throws(() => parseTeeSigningKeyPair("bad-key"), /TEE_SIGNING_PRIVATE_KEY/);
+  });
+
+  it("separates NEAR AI Cloud /signature/{chatId} audit proof from canonical spire/... signature via TEE_SIGNING_PRIVATE_KEY", async () => {
+    const signingKp = getMockTeeKeyPair(TEST_SEED);
+    const signingPubHex = Buffer.from(signingKp.publicKey).toString("hex");
+    const signingPrivHex = Buffer.from(signingKp.secretKey).toString("hex");
+    const auditSigHex = "aa".repeat(65); // 65-byte ECDSA audit signature over chat hash
+
+    const mockFetch: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/chat/completions")) {
+        return new Response(
+          JSON.stringify({
+            id: "chatcmpl-live-audit-123",
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    floor: 0,
+                    epoch: 12,
+                    buyback_multiplier_bps: [10000, 12500, 12500],
+                    altar_recipe_id: null,
+                    taunt: "Solar overflows; frost and void beckon.",
+                    nonce: 7,
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/signature/chatcmpl-live-audit-123")) {
+        return new Response(
+          JSON.stringify({
+            signature: `0x${auditSigHex}`,
+            signing_address: "0x1111222233334444555566667777888899990000",
+            signing_algo: "ecdsa",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    };
+
+    const client = new NearAiTeeClient({
+      mockMode: false,
+      apiKey: "test-live-key",
+      teePublicKey: signingPubHex,
+      teeSigningPrivateKey: signingPrivHex,
+      fetchImpl: mockFetch,
+    });
+
+    const signed = await client.getProposal({
+      floor: 0,
+      epoch: 12,
+      currentBuyback: [10000, 10000, 10000],
+      supply: [80, 20, 10],
+      nonce: 7,
+    });
+
+    assert.strictEqual(signed.chatId, "chatcmpl-live-audit-123");
+    assert.strictEqual(signed.auditSignature, auditSigHex);
+    assert.strictEqual(signed.auditPublicKey, "0x1111222233334444555566667777888899990000");
+    assert.strictEqual(signed.publicKey, signingPubHex);
+    assert.strictEqual(verifyProposalSignature(signed.proposal, signed.signature, signingPubHex), true);
+  });
+
+  it("fails fast if TEE_SIGNING_PRIVATE_KEY is missing when /signature/{chatId} only signs chat audit hash", async () => {
+    const signingKp = getMockTeeKeyPair(TEST_SEED);
+    const pubHex = Buffer.from(signingKp.publicKey).toString("hex");
+    const mockFetch: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/chat/completions")) {
+        return new Response(
+          JSON.stringify({
+            id: "chat-audit-only",
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    floor: 1,
+                    epoch: 3,
+                    buyback_multiplier_bps: [10000, 10000, 10000],
+                    altar_recipe_id: null,
+                    taunt: "Audit only.",
+                    nonce: 2,
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(
+        JSON.stringify({ signature: "bb".repeat(64), public_key: pubHex }),
+        { status: 200 }
+      );
+    };
+
+    const client = new NearAiTeeClient({
+      mockMode: false,
+      apiKey: "test-key",
+      teePublicKey: pubHex,
+      fetchImpl: mockFetch,
+    });
+
+    await assert.rejects(
+      () =>
+        client.getProposal({
+          floor: 1,
+          epoch: 3,
+          currentBuyback: [10000, 10000, 10000],
+          supply: [10, 10, 10],
+          nonce: 2,
+        }),
+      /TEE_SIGNING_PRIVATE_KEY/
+    );
+  });
+
+  it("fails fast at construction when TEE_SIGNING_PRIVATE_KEY mismatches TEE_PUBLIC_KEY", () => {
+    const kp1 = getMockTeeKeyPair(TEST_SEED);
+    assert.throws(
+      () =>
+        new NearAiTeeClient({
+          mockMode: false,
+          apiKey: "test-key",
+          teePublicKey: "ff".repeat(32),
+          teeSigningPrivateKey: Buffer.from(kp1.secretKey).toString("hex"),
+        }),
+      /does not match TEE_PUBLIC_KEY/
     );
   });
 });

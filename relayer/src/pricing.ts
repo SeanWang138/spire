@@ -18,6 +18,7 @@ import {
   JackpotDistribution,
   Triple,
   BuybackQuote,
+  parseYoctoSafe,
 } from "./types.js";
 
 /** Boss buyback base price: 0.10 NEAR in yocto (v3.1 ABI BUYBACK_BASE). */
@@ -168,14 +169,16 @@ function clampInt(value: number, min: number, max: number): number {
 
 export const MERCHANT_TARGET_STOCK = 100;
 export const MERCHANT_SPREAD_BPS = 1000; // 10% applied on both sides of mid
+/** Default merchant base price: 0.05 NEAR in yocto (MERCHANT_BASE_PRICE in contract/src/types.rs). */
+export const MERCHANT_BASE_PRICE_YOCTO = 50_000_000_000_000_000_000_000n;
 
 export interface MerchantQuoteParams {
   stock: number;
   targetStock?: number;
-  basePriceYocto?: bigint | string;
+  basePriceYocto?: bigint | string | number;
   /** Demand pressure in units (e.g. units bought since the last reprice). */
   demand?: number;
-  treasuryReserveYocto?: bigint | string;
+  treasuryReserveYocto?: bigint | string | number;
 }
 
 export interface MerchantQuoteDetail {
@@ -200,9 +203,9 @@ export interface MerchantQuoteDetail {
 export function calculateMerchantQuote(params: MerchantQuoteParams): MerchantQuoteDetail {
   const stock = Math.max(0, params.stock);
   const targetStock = params.targetStock ?? MERCHANT_TARGET_STOCK;
-  const basePriceYocto = BigInt(params.basePriceYocto ?? "100000000000000000000000"); // 0.1 NEAR
+  const basePriceYocto = parseYoctoSafe(params.basePriceYocto ?? "50000000000000000000000"); // 0.05 NEAR
   const demand = Math.max(0, params.demand ?? 0);
-  const treasuryReserveYocto = BigInt(params.treasuryReserveYocto ?? ONE_NEAR_YOCTO * 5n);
+  const treasuryReserveYocto = parseYoctoSafe(params.treasuryReserveYocto ?? ONE_NEAR_YOCTO * 5n);
 
   // Stock pressure is signed: scarcity (+), surplus (-), both capped at 100%.
   const stockPressureBps =
@@ -263,7 +266,7 @@ export function calculateBuybackQuote(params: {
   buybackMultiplierBps: number;
   qty?: number;
   /** Current boss vault balance; omit to check pricing only. */
-  vaultBalanceYocto?: bigint | string;
+  vaultBalanceYocto?: bigint | string | number;
 }): BuybackQuote {
   const multiplierBps = clampInt(
     Math.floor(Number(params.buybackMultiplierBps)),
@@ -276,7 +279,7 @@ export function calculateBuybackQuote(params: {
   const isOpen =
     params.vaultBalanceYocto === undefined
       ? true
-      : BigInt(params.vaultBalanceYocto) >= totalPriceYocto;
+      : parseYoctoSafe(params.vaultBalanceYocto) >= totalPriceYocto;
 
   return {
     floor: params.floor,
@@ -359,12 +362,12 @@ export function checkBossTribute(params: BossTributeCheckParams): BossTributeRes
  * - 90% proportional pool shared strictly by relative damage dealt.
  */
 export function calculateJackpotDistribution(
-  totalJackpotYocto: bigint | string,
+  totalJackpotYocto: bigint | string | number,
   totalDamage: number,
   playerDamage: number,
   isKiller: boolean
 ): JackpotDistribution {
-  const totalJackpot = BigInt(totalJackpotYocto);
+  const totalJackpot = parseYoctoSafe(totalJackpotYocto);
   if (totalJackpot === 0n) {
     return {
       totalJackpot: 0n,

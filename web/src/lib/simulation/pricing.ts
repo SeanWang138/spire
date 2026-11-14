@@ -176,9 +176,10 @@ export function analyzeResistance(
 }
 
 /**
- * NPC Merchant Bonding Curve & 10% Dynamic Spread
+ * NPC Merchant Bonding Curve & 10% Dynamic Spread (mirror of contract/src/merchant.rs)
  */
 export interface MerchantQuote {
+  midPriceNear: number;
   buyPriceNear: number;
   sellPriceNear: number;
   spreadBps: number;
@@ -189,22 +190,43 @@ export interface MerchantQuote {
 
 export function calculateMerchantPrice(
   stock: number,
-  targetStock: number = 50,
-  basePriceNear: number = 0.5,
+  targetStock: number = 100,
+  basePriceNear: number = 0.05,
   reserveBalanceNear: number = 5.0,
-  aiMultiplierBps: number = 10000
+  demand: number = 0
 ): MerchantQuote {
+  const clamp = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+  const safeStock = Math.max(0, stock);
+  const stockPressure =
+    targetStock > 0
+      ? clamp(
+          Math.floor(((targetStock - safeStock) * 10000) / targetStock),
+          -10000,
+          10000
+        )
+      : 0;
+  const demandPressure =
+    targetStock > 0
+      ? clamp(Math.floor((Math.max(0, demand) * 10000) / targetStock), 0, 10000)
+      : 0;
+
+  const factorBps = clamp(
+    10000 +
+      Math.floor((5000 * stockPressure) / 10000) +
+      Math.floor((3000 * demandPressure) / 10000),
+    5000,
+    20000
+  );
+
+  const midPriceNear = Number(((basePriceNear * factorBps) / 10000).toFixed(6));
+  const buyPriceNear = Number((midPriceNear * 1.1).toFixed(6));
+  const sellPriceNear = Number((midPriceNear * 0.9).toFixed(6));
+  const spreadBps = 1000; // ±10% spread around mid (MERCHANT_SPREAD_BPS)
   const isClosed = reserveBalanceNear < 1.0;
-  const scarcityFactor = Math.max(0, targetStock - stock) / targetStock;
-  const pMid = basePriceNear * (1 + scarcityFactor);
-  
-  const buyPriceNear = Number(pMid.toFixed(4));
-  // 10% spread base: sell price is 90% of buy price, modulated by AI buyback multiplier [10000, 40000] bps
-  const buybackRatio = aiMultiplierBps / 10000;
-  const sellPriceNear = Number((buyPriceNear * 0.90 * buybackRatio).toFixed(4));
-  const spreadBps = Math.round(((buyPriceNear - sellPriceNear) / buyPriceNear) * 10000);
 
   return {
+    midPriceNear,
     buyPriceNear,
     sellPriceNear,
     spreadBps,

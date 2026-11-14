@@ -10,12 +10,17 @@
  * Payload JSON submitted to apply_ai_proposal:
  *   {"floor","epoch","buyback_multiplier_bps":[3],"altar_recipe_id":string|null,"taunt":string|null,"nonce"}
  *
- * Live mode talks to NEAR AI Cloud (chat/completions + GET /signature/{chat_id}).
+ * Live mode separates:
+ * 1. NEAR AI Cloud reasoning (`POST /chat/completions`) + chat audit proof (`GET /signature/{chat_id}`,
+ *    which signs the HTTP chat audit hash/payload rather than the SpireFi canonical string).
+ * 2. On-chain canonical signing over `"spire/..."` bytes via `TEE_SIGNING_PRIVATE_KEY`
+ *    (`nacl.sign.detached`), whose public key matches the contract's `tee_public_key`.
  * Mock signing exists only when MOCK_TEE=true; a live failure always throws so a
  * mock signature can never be submitted by accident.
  */
 
 import { createHash } from "node:crypto";
+import { KeyPair, utils } from "near-api-js";
 import nacl from "tweetnacl";
 import {
   AiProposal,
@@ -76,6 +81,77 @@ export function requireTeePublicKey(explicit?: string): string {
     );
   }
   return raw.toLowerCase();
+}
+
+/**
+ * Parses an Ed25519 signing private key for canonical `"spire/..."` proposal signing.
+ * Supports `ed25519:<base58>` (32-byte seed or 64-byte NEAR extended secret key),
+ * 64-byte hex secret keys, and 32-byte hex seeds.
+ */
+export function parseTeeSigningKeyPair(rawKey: string): nacl.SignKeyPair {
+  const trimmed = (rawKey ?? "").trim();
+  if (!trimmed) {
+    throw new Error(
+      "TEE_SIGNING_PRIVATE_KEY is not set: live canonical proposal signing requires an Ed25519 private key matching on-chain tee_public_key."
+    );
+  }
+
+  const withoutPrefix = trimmed.startsWith("ed25519:")
+    ? trimmed.slice("ed25519:".length)
+    : trimmed;
+  const hexCandidate = withoutPrefix.replace(/^0x/i, "");
+
+  if (/^[0-9a-fA-F]{128}$/.test(hexCandidate)) {
+    const secretKey = new Uint8Array(Buffer.from(hexCandidate, "hex"));
+    const fromSeed = nacl.sign.keyPair.fromSeed(secretKey.subarray(0, 32));
+    if (!Buffer.from(fromSeed.publicKey).equals(Buffer.from(secretKey.subarray(32, 64)))) {
+      throw new Error(
+        "TEE_SIGNING_PRIVATE_KEY 64-byte hex key has a mismatched public key suffix"
+      );
+    }
+    return nacl.sign.keyPair.fromSecretKey(secretKey);
+  }
+
+  if (/^[0-9a-fA-F]{64}$/.test(hexCandidate)) {
+    const seed = new Uint8Array(Buffer.from(hexCandidate, "hex"));
+    return nacl.sign.keyPair.fromSeed(seed);
+  }
+
+  if (trimmed.startsWith("ed25519:")) {
+    try {
+      const nearKp = KeyPair.fromString(trimmed as Parameters<typeof KeyPair.fromString>[0]);
+      const extendedSecret = (nearKp as unknown as { extendedSecretKey?: string }).extendedSecretKey;
+      if (extendedSecret) {
+        const secretKey = new Uint8Array(utils.serialize.base_decode(extendedSecret));
+        if (secretKey.length === 64) {
+          return nacl.sign.keyPair.fromSecretKey(secretKey);
+        }
+      }
+      const rawSecret = (nearKp as unknown as { secretKey?: string }).secretKey;
+      if (rawSecret) {
+        const decoded = new Uint8Array(utils.serialize.base_decode(rawSecret));
+        if (decoded.length === 32) {
+          return nacl.sign.keyPair.fromSeed(decoded);
+        }
+        if (decoded.length === 64) {
+          return nacl.sign.keyPair.fromSecretKey(decoded);
+        }
+      }
+    } catch (err: any) {
+      throw new Error(`Invalid TEE_SIGNING_PRIVATE_KEY: ${err?.message || String(err)}`);
+    }
+  }
+
+  throw new Error(
+    "TEE_SIGNING_PRIVATE_KEY must be an ed25519:<base58> NEAR private key, 64-byte hex secret key, or 32-byte hex seed"
+  );
+}
+
+/**
+ * Resolves the live canonical signing keypair from TEE_SIGNING_PRIVATE_KEY (or explicit value).
+ */
+export function requireTeeSigningKeyPair(explicit?: string): nacl.SignKeyPair {
+  return parseTeeSigningKeyPair(explicit ?? process.env.TEE_SIGNING_PRIVATE_KEY ?? "");
 }
 
 /**
@@ -150,8 +226,8 @@ export function validateProposalInvariants(
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  if (!Number.isInteger(proposal.floor) || proposal.floor < 1 || proposal.floor > MAX_FLOOR) {
-    errors.push(`floor (${proposal.floor}) must be an integer in [1, ${MAX_FLOOR}]`);
+  if (!Number.isInteger(proposal.floor) || proposal.floor < 0 || proposal.floor >= MAX_FLOOR) {
+    errors.push(`floor (${proposal.floor}) must be an integer in [0, ${MAX_FLOOR - 1}]`);
   }
   if (!Number.isInteger(proposal.epoch) || proposal.epoch < 1) {
     errors.push(`epoch (${proposal.epoch}) must be a positive integer`);
@@ -339,8 +415,10 @@ export interface NearAiCloudConfig {
   mockMode?: boolean;
   /** Mock seed (MOCK_TEE_SEED). Required when mockMode; no default exists. */
   seedString?: string;
-  /** Live TEE Ed25519 public key (TEE_PUBLIC_KEY, 32-byte hex). Required for live mode. */
+  /** Live TEE Ed25519 public key (TEE_PUBLIC_KEY, 32-byte hex). Required when TEE_SIGNING_PRIVATE_KEY is unset. */
   teePublicKey?: string;
+  /** Ed25519 private key (TEE_SIGNING_PRIVATE_KEY) used to sign canonical "spire/..." bytes for apply_ai_proposal. */
+  teeSigningPrivateKey?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -426,6 +504,8 @@ export class NearAiTeeClient {
   private mockMode: boolean;
   private seedString: string;
   private teePublicKey: string;
+  private teeSigningPrivateKey: string;
+  private signingKeyPair: nacl.SignKeyPair | null = null;
   private fetchImpl: typeof fetch;
 
   constructor(config: NearAiCloudConfig = {}) {
@@ -437,6 +517,8 @@ export class NearAiTeeClient {
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.apiKey = config.apiKey ?? process.env.NEAR_AI_API_KEY ?? "";
     this.teePublicKey = config.teePublicKey ?? process.env.TEE_PUBLIC_KEY ?? "";
+    this.teeSigningPrivateKey =
+      config.teeSigningPrivateKey ?? process.env.TEE_SIGNING_PRIVATE_KEY ?? "";
 
     if (this.mockMode) {
       // Fail fast without an explicit seed; nothing is hardcoded in source.
@@ -447,9 +529,21 @@ export class NearAiTeeClient {
       if (!this.apiKey) {
         throw new Error(
           "NEAR_AI_API_KEY is not set: the relayer fails fast instead of silently mocking. " +
-            "Set NEAR_AI_API_KEY for live NEAR AI Cloud signing, or MOCK_TEE=true plus " +
+            "Set NEAR_AI_API_KEY for live NEAR AI Cloud reasoning, or MOCK_TEE=true plus " +
             "MOCK_TEE_SEED for local tests only."
         );
+      }
+      if (this.teeSigningPrivateKey.trim()) {
+        this.signingKeyPair = parseTeeSigningKeyPair(this.teeSigningPrivateKey);
+        if (this.teePublicKey.trim()) {
+          const expectedPub = requireTeePublicKey(this.teePublicKey);
+          const actualPub = Buffer.from(this.signingKeyPair.publicKey).toString("hex");
+          if (expectedPub !== actualPub) {
+            throw new Error(
+              `TEE_SIGNING_PRIVATE_KEY public key (${actualPub}) does not match TEE_PUBLIC_KEY (${expectedPub})`
+            );
+          }
+        }
       }
       this.seedString = "";
     }
@@ -464,13 +558,16 @@ export class NearAiTeeClient {
   }
 
   /**
-   * Ed25519 public key of the TEE signer. Mock mode derives it from the
-   * MOCK_TEE_SEED keypair; live mode resolves the pinned key from
-   * TEE_PUBLIC_KEY (32-byte hex, no default).
+   * Ed25519 public key of the canonical proposal signer. Mock mode derives it from
+   * MOCK_TEE_SEED; live mode derives it from TEE_SIGNING_PRIVATE_KEY when configured,
+   * otherwise resolves the pinned key from TEE_PUBLIC_KEY (32-byte hex, no default).
    */
   public getPublicKey(): string {
     if (this.mockMode) {
       return Buffer.from(getMockTeeKeyPair(this.seedString).publicKey).toString("hex");
+    }
+    if (this.signingKeyPair) {
+      return Buffer.from(this.signingKeyPair.publicKey).toString("hex");
     }
     return requireTeePublicKey(this.teePublicKey || undefined);
   }
@@ -513,9 +610,13 @@ export class NearAiTeeClient {
       throw new Error(`NEAR AI Cloud returned an unusable proposal: ${err.message || String(err)}`);
     }
 
-    if (proposal.floor !== params.floor || proposal.epoch !== params.epoch) {
+    if (
+      proposal.floor !== params.floor ||
+      proposal.epoch !== params.epoch ||
+      proposal.nonce !== params.nonce
+    ) {
       throw new Error(
-        `NEAR AI Cloud proposed floor/epoch ${proposal.floor}/${proposal.epoch}, expected ${params.floor}/${params.epoch}`
+        `NEAR AI Cloud proposed floor/epoch/nonce ${proposal.floor}/${proposal.epoch}/${proposal.nonce}, expected ${params.floor}/${params.epoch}/${params.nonce}`
       );
     }
 
@@ -526,23 +627,40 @@ export class NearAiTeeClient {
       throw new Error(`NEAR AI Cloud proposal failed contract invariants: ${validation.errors.join("; ")}`);
     }
 
-    const proof = await this.getSignatureProof(chat.chatId);
-    const signature = proof.signature;
-    const publicKey = proof.publicKey ?? this.getPublicKey();
+    // NEAR AI Cloud /signature/{chatId} proves chat completion inside the TEE over the
+    // HTTP chat audit hash — it does NOT sign SpireFi's canonical "spire/..." string.
+    const auditProof = await this.getSignatureProof(chat.chatId);
 
-    if (/^[0-9a-f]{64}$/.test(publicKey) && !verifyProposalSignature(proposal, signature, publicKey)) {
-      throw new Error(
-        "NEAR AI Cloud signature does not verify over the canonical message (check TEE signing format with the contract owner)"
-      );
+    if (this.signingKeyPair) {
+      const publicKey = Buffer.from(this.signingKeyPair.publicKey).toString("hex");
+      const signature = signProposal(proposal, this.signingKeyPair.secretKey);
+      return {
+        proposal,
+        signature,
+        publicKey,
+        chatId: chat.chatId,
+        auditSignature: auditProof.signature,
+        auditPublicKey: auditProof.auditPublicKey ?? auditProof.publicKey,
+        message: buildCanonicalMessage(proposal),
+      };
     }
 
-    return {
-      proposal,
-      signature,
-      publicKey,
-      chatId: chat.chatId,
-      message: buildCanonicalMessage(proposal),
-    };
+    const publicKey = auditProof.publicKey ?? this.getPublicKey();
+    if (/^[0-9a-f]{64}$/.test(publicKey) && verifyProposalSignature(proposal, auditProof.signature, publicKey)) {
+      return {
+        proposal,
+        signature: auditProof.signature,
+        publicKey,
+        chatId: chat.chatId,
+        auditSignature: auditProof.signature,
+        auditPublicKey: auditProof.auditPublicKey ?? auditProof.publicKey,
+        message: buildCanonicalMessage(proposal),
+      };
+    }
+
+    throw new Error(
+      "TEE_SIGNING_PRIVATE_KEY is not configured and NEAR AI Cloud /signature/{chatId} signed the HTTP chat audit hash rather than canonical 'spire/...' bytes. Configure TEE_SIGNING_PRIVATE_KEY matching on-chain tee_public_key to sign apply_ai_proposal."
+    );
   }
 
   private async postChatCompletion(
@@ -593,7 +711,9 @@ export class NearAiTeeClient {
     return { content, chatId };
   }
 
-  private async getSignatureProof(chatId: string): Promise<{ signature: string; publicKey?: string }> {
+  private async getSignatureProof(
+    chatId: string
+  ): Promise<{ signature: string; publicKey?: string; auditPublicKey?: string }> {
     const response = await this.fetchImpl(`${this.baseUrl}/signature/${encodeURIComponent(chatId)}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${this.apiKey}` },
@@ -609,19 +729,22 @@ export class NearAiTeeClient {
       throw new Error("NEAR AI Cloud signature response missing signature field");
     }
     const signature = toHex(rawSignature);
-    if (signature === null || signature.length !== 128) {
-      throw new Error("NEAR AI Cloud signature is not a 64-byte value");
+    // NEAR AI Cloud audit endpoint may return 64-byte Ed25519 or 65-byte ECDSA signatures.
+    if (signature === null || (signature.length !== 128 && signature.length !== 130)) {
+      throw new Error("NEAR AI Cloud signature is not a valid 64-byte Ed25519 or 65-byte ECDSA value");
     }
 
-    const rawPublicKey = json?.public_key ?? json?.public_key_hex ?? json?.publicKey;
+    const rawPublicKey =
+      json?.public_key ?? json?.public_key_hex ?? json?.publicKey ?? json?.signing_address;
     let publicKey: string | undefined;
-    if (typeof rawPublicKey === "string") {
+    let auditPublicKey: string | undefined;
+    if (typeof rawPublicKey === "string" && rawPublicKey.trim().length > 0) {
+      auditPublicKey = rawPublicKey.trim();
       const hex = toHex(rawPublicKey);
-      // shortcut: only 32-byte hex keys are verified locally; ed25519:base58 keys are
-      // trusted from the TEE endpoint and verified on-chain.
+      // Only 32-byte Ed25519 hex keys can be verified locally against canonical bytes.
       publicKey = hex !== null && hex.length === 64 ? hex : undefined;
     }
 
-    return { signature, publicKey };
+    return { signature, publicKey, auditPublicKey };
   }
 }

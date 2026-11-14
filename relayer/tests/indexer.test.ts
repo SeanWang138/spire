@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { KeyPair } from "near-api-js";
 import {
   parseEventJson,
   extractEventsFromLogs,
@@ -12,7 +13,10 @@ import {
   handleApiRequest,
   handleApiRequestAsync,
   normalizeAccountName,
+  createPlayableSubaccount,
   createSubaccountWithFunctionKey,
+  parseEd25519PublicKey,
+  DEFAULT_SUBACCOUNT_FUNDING_YOCTO,
   SUPPORTED_EVENTS,
 } from "../dist/indexer.js";
 import type { LiveStatsSnapshot } from "../dist/indexer.js";
@@ -416,8 +420,92 @@ describe("Indexer Module - Landing page API", () => {
       return null;
     });
     if (result) {
-      assert.strictEqual(result.public_key, "ed25519:" + "cd".repeat(32));
+      assert.strictEqual(result.public_key.startsWith("ed25519:"), true);
       assert.strictEqual(result.private_key, null);
+    }
+  });
+
+  it("parses both ed25519:<base58> and 64-hex public keys and enforces >= 0.60 NEAR default funding", async () => {
+    assert.ok(BigInt(DEFAULT_SUBACCOUNT_FUNDING_YOCTO) >= 600_000_000_000_000_000_000_000n);
+    assert.strictEqual(createSubaccountWithFunctionKey, createPlayableSubaccount);
+
+    const browserKp = KeyPair.fromRandom("ed25519");
+    const browserPubStr = browserKp.getPublicKey().toString();
+    assert.ok(browserPubStr.startsWith("ed25519:"));
+
+    const parsedBase58 = parseEd25519PublicKey(browserPubStr);
+    assert.strictEqual(parsedBase58.toString(), browserPubStr);
+    assert.strictEqual(parsedBase58.data.length, 32);
+
+    const parsedHex = parseEd25519PublicKey("cd".repeat(32));
+    assert.strictEqual(parsedHex.data.length, 32);
+    assert.strictEqual(
+      parseEd25519PublicKey("ed25519:" + "cd".repeat(32)).toString(),
+      parsedHex.toString()
+    );
+
+    assert.throws(() => parseEd25519PublicKey(""), /invalid_public_key/);
+    assert.throws(() => parseEd25519PublicKey("not-a-hex-key"), /invalid_public_key/);
+    assert.throws(() => parseEd25519PublicKey("ed25519:1111"), /invalid_public_key/);
+    assert.throws(() => parseEd25519PublicKey("secp256k1:abc"), /invalid_public_key/);
+
+    // Browser ed25519:<base58> key passes validation cleanly in createPlayableSubaccount
+    await createPlayableSubaccount(
+      "parent.testnet",
+      KeyPair.fromRandom("ed25519").toString(),
+      "https://invalid.example",
+      "player.spire.testnet",
+      undefined,
+      browserPubStr
+    ).catch((err) => {
+      assert.ok(!/invalid_public_key/.test(err.message), `unexpected key error: ${err.message}`);
+    });
+  });
+
+  it("fetchLiveStats reads floor.hp (0-indexed 0..2) with fallback to boss_hp", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as {
+        params?: { method_name?: string };
+      };
+      const method = payload.params?.method_name;
+      let resData: unknown = null;
+      if (method === "get_tower") {
+        resData = {
+          floors: [
+            { floor: 0, hp: 1000, max_hp: 1000, unlocked: true },
+            { floor: 1, hp: 0, max_hp: 1600, unlocked: true },
+            { floor: 2, boss_hp: 2500, max_hp: 2500, unlocked: false },
+          ],
+        };
+      } else if (method === "get_meta") {
+        resData = {
+          epoch: 8,
+          resistance: [4500, 4500, 4500],
+          next_epoch_in_ns: 0,
+          shifted_by: 1,
+          supply: [10, 20, 30],
+          weak_element: 0,
+        };
+      } else if (method === "get_supply") {
+        resData = [10, 20, 30];
+      } else if (method === "get_merchant") {
+        resData = { cash: "2.3683e+24", stock: {}, is_open: true };
+      }
+      const bytes = Array.from(Buffer.from(JSON.stringify(resData), "utf-8"));
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: { result: bytes } }), {
+        status: 200,
+      });
+    }) as typeof fetch;
+
+    try {
+      const indexer = new SpireIndexer({ rpcUrl: "https://mock-rpc.example", contractId: "spire.testnet" });
+      const snap = await indexer.fetchLiveStats();
+      assert.strictEqual(snap.total.floors, 3);
+      assert.strictEqual(snap.total.defeatedFloors, 1);
+      assert.strictEqual(snap.total.bossHpTotal, "3500");
+    } finally {
+      globalThis.fetch = origFetch;
     }
   });
 });

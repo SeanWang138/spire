@@ -7,6 +7,7 @@ import {
   calculateMerchantPrice,
   TRIBUTE_THRESHOLD_BPS,
 } from "@/lib/simulation/pricing";
+import { explainMerchantQuote } from "@/lib/merchant-reasoning";
 import {
   MERCHANT_BASE_PRICE_NEAR,
   MERCHANT_TARGET_STOCK,
@@ -20,6 +21,8 @@ interface SimTick {
   day: number;
   cashNear: number;
   stock: number;
+  demandAvg: number;
+  midPrice: number;
   buyPrice: number;
   sellPrice: number;
   isClosed: boolean;
@@ -31,15 +34,18 @@ interface SimTick {
 const SCENARIOS: Record<ScenarioId, { label: string; summary: string }> = {
   balanced: {
     label: "Balanced Citadel",
-    summary: "Healthy player crafting across Solar/Frost/Void keeps ticket inflows ahead of bazaar sells.",
+    summary:
+      "Steady raiding and crafting across Solar, Frost, and Void keeps stock near 100 and reserves comfortably above 1.00 NEAR.",
   },
   monoculture: {
     label: "Solar Monoculture",
-    summary: "Crowd spams Solar weapons until Solar resistance surges past 7,000 bps Tribute confiscation.",
+    summary:
+      "Crowd stacks Solar blades until Solar resistance breaches 7,000 bps Tribute seizure and demand spikes material prices.",
   },
   bankrun: {
     label: "Merchant Bank Run",
-    summary: "Artisans dump surplus weapons continuously, draining merchant cash under 1.00 NEAR until rescue.",
+    summary:
+      "Artisans dump surplus materials continuously, draining merchant cash below 1.00 NEAR until rescue liquidity arrives.",
   },
 };
 
@@ -50,64 +56,88 @@ function buildWeekTimeline(scenario: ScenarioId): SimTick[] {
   let s0 = 40;
   let s1 = 35;
   let s2 = 30;
+  const recentDemands: number[] = [18, 20, 22, 19, 21];
 
   for (let h = 0; h <= 168; h += 1) {
+    let hourlyBuys = 20;
+
     if (h > 0) {
       if (scenario === "balanced") {
-        // Sinusoidal crafting & raid replenishment
         const wave = Math.sin((h / 18) * Math.PI);
         s0 += h % 4 === 0 ? 2 : 0;
         s1 += h % 4 === 1 ? 2 : 0;
         s2 += h % 4 === 2 ? 2 : 0;
         const deltaCash = wave > 0 ? 0.14 : -0.09;
-        cash = Math.max(0.4, cash + deltaCash);
-        stock = Math.max(25, Math.min(180, Math.round(stock - wave * 2)));
+        cash = Math.max(2.4, Math.min(9.5, cash + deltaCash));
+        stock = Math.max(70, Math.min(130, Math.round(stock - wave * 3)));
+        hourlyBuys = Math.max(10, Math.round(22 + wave * 12));
       } else if (scenario === "monoculture") {
         s0 += h < 96 ? 3 : 1;
         s1 += h > 96 ? 4 : 0;
         s2 += h > 110 ? 2 : 0;
         const delta = h < 84 ? -0.03 : 0.08;
-        cash = Math.max(1.2, cash + delta);
-        stock = Math.min(195, Math.max(40, stock + (h < 84 ? 1 : -1)));
+        cash = Math.max(1.2, Math.min(8.8, cash + delta));
+        stock = Math.min(160, Math.max(30, stock + (h < 84 ? -2 : 2)));
+        hourlyBuys = h < 84 ? 58 : 28;
       } else {
-        // Bank run hits 1.0 NEAR closure floor around hour 58, rescued by vault injection around hour 108
+        // Bank run hits 1.00 NEAR closure floor around hour 56, rescued at hour 108
         s0 += 2;
         s1 += 1;
         if (h < 108) {
           cash = Math.max(0.65, cash - (cash > MERCHANT_MIN_CASH_NEAR ? 0.08 : 0.01));
           stock = Math.min(190, stock + 1);
+          hourlyBuys = cash < MERCHANT_MIN_CASH_NEAR ? 0 : 6;
         } else if (h === 108) {
           cash += 4.5; // Rescue fund_merchant() + raid ticket inflow
           stock = Math.max(60, stock - 25);
+          hourlyBuys = 32;
         } else {
           cash = Math.min(8.5, cash + 0.07);
-          stock = Math.max(50, stock - 1);
+          stock = Math.max(65, stock - 1);
+          hourlyBuys = 26;
         }
       }
     }
+
+    recentDemands.push(hourlyBuys);
+    if (recentDemands.length > 5) recentDemands.shift();
+    const demandAvg = Math.round(
+      recentDemands.reduce((acc, v) => acc + v, 0) / recentDemands.length
+    );
 
     const quote = calculateMerchantPrice(
       stock,
       MERCHANT_TARGET_STOCK,
       MERCHANT_BASE_PRICE_NEAR,
       cash,
-      10000
+      demandAvg
     );
     const resistance = calculateAdaptiveResistance([s0, s1, s2]);
+    const cashFixed = Number(cash.toFixed(2));
+    const reason = explainMerchantQuote({
+      itemId: "ore:iron",
+      side: "buy",
+      stock,
+      demand: demandAvg,
+      cashNear: cashFixed,
+      unitPriceNear: quote.buyPriceNear,
+      basePriceNear: MERCHANT_BASE_PRICE_NEAR,
+      rawReason: quote.isClosed ? "shop_closed" : undefined,
+    });
 
     ticks.push({
       hour: h,
       day: Math.floor(h / 24) + 1,
-      cashNear: Number(cash.toFixed(2)),
+      cashNear: cashFixed,
       stock,
+      demandAvg,
+      midPrice: quote.midPriceNear,
       buyPrice: quote.buyPriceNear,
       sellPrice: quote.sellPriceNear,
       isClosed: quote.isClosed,
       supply: [s0, s1, s2],
       resistance,
-      reason: quote.isClosed
-        ? "Merchant closed: cash reserve dropped below 1.00 NEAR minimum until refunded."
-        : "Merchant active within 10% base spread.",
+      reason,
     });
   }
 
@@ -125,7 +155,6 @@ export const MarketSimulator: React.FC = () => {
 
   useEffect(() => {
     if (!playing) return;
-    // Target ~60s for full 168h at 1x (~357ms per hour), scaled cleanly by 4x / 12x
     const intervalMs = Math.max(30, Math.round(357 / speed));
     const timer = setInterval(() => {
       setHour((prev) => {
@@ -141,13 +170,13 @@ export const MarketSimulator: React.FC = () => {
 
   // SVG chart scaling (640 x 210)
   const W = 640;
-  const H = 200;
+  const H = 210;
   const padX = 36;
   const padY = 18;
   const plotW = W - padX * 2;
   const plotH = H - padY * 2;
   const maxCash = Math.max(8, ...timeline.map((t) => t.cashNear));
-  const maxPrice = Math.max(0.15, ...timeline.map((t) => t.buyPrice));
+  const maxPrice = Math.max(0.12, ...timeline.map((t) => t.buyPrice));
 
   const cashPath = timeline
     .map((t, i) => {
@@ -171,21 +200,16 @@ export const MarketSimulator: React.FC = () => {
 
   return (
     <section
-      id="simulasi"
+      id="time-warp"
       className="citadel-stage p-5 sm:p-6 space-y-5"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="px-2.5 py-0.5 rounded bg-solar/15 border border-brass/50 text-solar font-mono text-xs font-bold tracking-widest uppercase">
-              SIMULASI
-            </span>
-            <h2 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
-              1-Week Fast-Forward Market Workbench
-            </h2>
-          </div>
-          <p className="text-xs font-mono text-ash mt-1.5">
-            Accelerates 168 hours of raids, merchant cash reserve drains, and adaptive boss resistance into under a minute using deterministic contract math.
+          <h2 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
+            1-Week Market Time-Warp
+          </h2>
+          <p className="text-xs font-mono text-ash mt-1.5 max-w-2xl leading-relaxed">
+            Deterministic offline projection of 168 hours using on-chain <code className="text-frost">merchant.rs</code> math (0.05 NEAR base, 100 target stock, &plusmn;10% spread, 1.00 NEAR halt floor) and adaptive resistance renormalization.
           </p>
         </div>
 
@@ -197,7 +221,7 @@ export const MarketSimulator: React.FC = () => {
               if (hour >= 168) setHour(0);
               setPlaying((p) => !p);
             }}
-            className="rpg-sheen min-h-[44px] px-4 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 hover:from-amber-300 hover:to-amber-500 border border-amber-300/60 text-oled font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 transition-all"
+            className="rpg-sheen min-h-[44px] px-4 py-2 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 hover:from-amber-300 hover:to-amber-500 border border-amber-300/60 text-oled font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
           >
             {playing ? <Pause className="w-4 h-4" aria-hidden="true" /> : <Play className="w-4 h-4" aria-hidden="true" />}
             <span>{playing ? "Pause" : hour >= 168 ? "Replay Week" : "Fast-Forward"}</span>
@@ -209,33 +233,37 @@ export const MarketSimulator: React.FC = () => {
               setPlaying(false);
               setHour(0);
             }}
-            className="min-h-[44px] px-3 py-2 rounded-lg border border-brass/25 bg-panel-dark hover:bg-panel-elevated text-ash hover:text-parchment font-mono text-xs inline-flex items-center gap-1.5 transition-colors"
+            className="min-h-[44px] px-3.5 py-2 rounded-lg border border-brass/25 bg-panel-dark hover:bg-panel-elevated text-ash hover:text-parchment font-mono text-xs inline-flex items-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
           >
             <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Reset</span>
           </button>
 
-          <div className="flex items-center rounded-lg bg-panel-dark p-1 border border-brass/20">
+          <div
+            className="flex items-center gap-2 rounded-lg bg-panel-dark p-1 border border-brass/20"
+            role="group"
+            aria-label="Time-warp playback speed"
+          >
             {([1, 4, 12] as const).map((sp) => (
               <button
                 type="button"
                 key={sp}
                 onClick={() => setSpeed(sp)}
                 aria-pressed={speed === sp}
-                className={`min-h-[36px] px-2.5 rounded text-xs font-mono font-bold inline-flex items-center gap-1 transition-colors ${
+                className={`min-h-[44px] min-w-[44px] px-3 rounded text-xs font-mono font-bold inline-flex items-center justify-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled ${
                   speed === sp ? "bg-frost text-oled" : "text-ash hover:text-parchment"
                 }`}
               >
-                <FastForward className="w-3 h-3" aria-hidden="true" />
-                {sp}x
+                <FastForward className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>{sp}x</span>
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Scenario Selector */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+      {/* Scenario Presets */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5" role="group" aria-label="Market simulation presets">
         {(Object.keys(SCENARIOS) as ScenarioId[]).map((id) => {
           const item = SCENARIOS[id];
           const active = scenario === id;
@@ -249,7 +277,7 @@ export const MarketSimulator: React.FC = () => {
                 setHour(0);
               }}
               aria-pressed={active}
-              className={`min-h-[68px] p-3 rounded-lg border text-left transition-colors ${
+              className={`min-h-[68px] p-3.5 rounded-lg border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled ${
                 active
                   ? "bg-panel-dark border-frost/60"
                   : "bg-panel-dark/60 border-brass/20 hover:border-brass/45"
@@ -258,24 +286,27 @@ export const MarketSimulator: React.FC = () => {
               <span className={`text-xs font-mono font-bold block ${active ? "text-frost" : "text-parchment"}`}>
                 {item.label}
               </span>
-              <span className="text-[11px] text-ash mt-1 block leading-snug">{item.summary}</span>
+              <span className="text-xs text-ash mt-1 block leading-snug">{item.summary}</span>
             </button>
           );
         })}
       </div>
 
       {/* SVG Timeline Chart */}
-      <div className="rounded-lg bg-panel-dark p-3 sm:p-4 space-y-3">
+      <div className="rounded-lg bg-panel-dark p-3.5 sm:p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
           <div className="flex flex-wrap items-center gap-4">
             <span className="inline-flex items-center gap-1.5 text-solar font-semibold">
-              <span className="w-3 h-0.5 bg-solar inline-block" aria-hidden="true" /> Merchant Cash (NEAR)
+              <span className="w-3 h-0.5 bg-solar inline-block" aria-hidden="true" />
+              <span>Merchant Cash (NEAR)</span>
             </span>
             <span className="inline-flex items-center gap-1.5 text-frost font-semibold">
-              <span className="w-3 h-0.5 bg-frost inline-block" aria-hidden="true" /> Buy Quote Price (NEAR)
+              <span className="w-3 h-0.5 bg-frost inline-block" aria-hidden="true" />
+              <span>Buy Ask Quote (NEAR)</span>
             </span>
-            <span className="inline-flex items-center gap-1.5 text-hp font-semibold">
-              <span className="w-3 h-0.5 bg-hp inline-block" aria-hidden="true" /> 1.0 NEAR Halt Floor
+            <span className="inline-flex items-center gap-1.5 text-hp-text font-semibold">
+              <span className="w-3 h-0.5 bg-hp inline-block" aria-hidden="true" />
+              <span>1.00 NEAR Halt Floor</span>
             </span>
           </div>
           <span className="font-mono-numbers text-parchment font-bold">
@@ -289,7 +320,7 @@ export const MarketSimulator: React.FC = () => {
           role="img"
           aria-label={`Simulated 168-hour economy curve for ${SCENARIOS[scenario].label}`}
         >
-          {/* Danger zone below 1.0 NEAR */}
+          {/* Danger zone below 1.00 NEAR */}
           <rect
             x={padX}
             y={closeLineY}
@@ -314,7 +345,7 @@ export const MarketSimulator: React.FC = () => {
             return (
               <g key={dHour}>
                 <line x1={x} y1={padY} x2={x} y2={padY + plotH} stroke="rgba(229,169,59,0.12)" />
-                <text x={x} y={H - 2} fill="#CEC4B3" fontSize="10" textAnchor="middle">
+                <text x={x} y={H - 2} fill="#CEC4B3" fontSize="12" textAnchor="middle">
                   D{dHour / 24}
                 </text>
               </g>
@@ -337,10 +368,10 @@ export const MarketSimulator: React.FC = () => {
           />
         </svg>
 
-        {/* Hour Slider */}
-        <div className="flex items-center gap-3">
+        {/* Hour Slider (>= 44px touch area) */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
           <label htmlFor="sim-hour-slider" className="text-xs font-mono text-ash shrink-0">
-            Scrub Week
+            Scrub Timeline (Hour {current.hour})
           </label>
           <input
             id="sim-hour-slider"
@@ -352,53 +383,54 @@ export const MarketSimulator: React.FC = () => {
               setPlaying(false);
               setHour(Number(e.target.value));
             }}
-            className="w-full accent-solar cursor-pointer"
+            className="w-full min-h-[44px] py-2 accent-solar cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
           />
         </div>
       </div>
 
       {/* Live Tick Readout */}
-      <dl className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1 text-xs font-mono">
+      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1 text-xs font-mono">
         <div className="p-3 rounded-lg bg-panel-dark">
-          <dt className="text-[11px] text-slate-400">Bazaar Status</dt>
-          <dd className={`text-sm font-bold mt-1 font-mono-numbers ${current.isClosed ? "text-hp" : "text-jackpot"}`}>
+          <dt className="text-xs text-pewter">Bazaar Status</dt>
+          <dd className={`text-sm font-bold mt-1 font-mono-numbers ${current.isClosed ? "text-hp-text" : "text-jackpot"}`}>
             {current.isClosed ? "CLOSED (<1.0 NEAR)" : "OPEN"} · {current.cashNear.toFixed(2)} NEAR
           </dd>
         </div>
 
         <div className="p-3 rounded-lg bg-panel-dark">
-          <dt className="text-[11px] text-slate-400">Curve Quote (Ask / Bid)</dt>
-          <dd className="text-sm font-bold mt-1 text-white font-mono-numbers">
+          <dt className="text-xs text-pewter">Curve Quote (Ask / Bid)</dt>
+          <dd className="text-sm font-bold mt-1 text-parchment font-mono-numbers">
             <span className="text-frost">{current.buyPrice.toFixed(4)}</span> /{" "}
             <span className="text-solar">{current.sellPrice.toFixed(4)}</span> N
           </dd>
         </div>
 
         <div className="p-3 rounded-lg bg-panel-dark">
-          <dt className="text-[11px] text-slate-400">Supply [S / F / V]</dt>
-          <dd className="text-sm font-bold mt-1 text-slate-100 font-mono-numbers">
-            {current.supply.join(" / ")}
+          <dt className="text-xs text-pewter">Stock &amp; 5h Demand</dt>
+          <dd className="text-sm font-bold mt-1 text-parchment font-mono-numbers">
+            {current.stock}/{MERCHANT_TARGET_STOCK} · {current.demandAvg} avg
           </dd>
         </div>
 
         <div className="p-3 rounded-lg bg-panel-dark">
-          <dt className="text-[11px] text-slate-400 flex items-center gap-1">
+          <dt className="text-xs text-pewter flex items-center gap-1">
             <TrendingUp className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
-            <span>Boss Adaptation (bps)</span>
+            <span>Boss Resistance (bps)</span>
           </dt>
-          <dd className={`text-sm font-bold mt-1 font-mono-numbers ${maxRes >= TRIBUTE_THRESHOLD_BPS ? "text-hp" : "text-emerald-300"}`}>
+          <dd className={`text-sm font-bold mt-1 font-mono-numbers ${maxRes >= TRIBUTE_THRESHOLD_BPS ? "text-hp-text" : "text-jackpot"}`}>
             {current.resistance.join(" / ")}
           </dd>
         </div>
       </dl>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-300 pt-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-ash pt-1">
         <span>
-          <strong className="text-white">Sim Quote Logic:</strong> {current.reason}
+          <strong className="text-parchment">Simulated Quote Logic:</strong> {current.reason}
         </span>
         {maxRes >= TRIBUTE_THRESHOLD_BPS && (
-          <span className="inline-flex items-center gap-1.5 text-hp font-semibold">
-            <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> Tribute Seizure Active (&ge;{TRIBUTE_THRESHOLD_BPS} bps)
+          <span className="inline-flex items-center gap-1.5 text-hp-text font-semibold">
+            <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Tribute Seizure Active (&ge;{TRIBUTE_THRESHOLD_BPS} bps)</span>
           </span>
         )}
       </div>

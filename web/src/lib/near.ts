@@ -1,9 +1,11 @@
 /**
- * SpireFi — Signless Session Manager & NEAR Client.
+ * SpireFi — Ephemeral Testnet Session Subaccount & NEAR Client.
  *
- * Manages the player's ephemeral Function Call Access Key stored in
- * localStorage (`spire_session_v3`). Contract read/write traffic goes through
- * the typed adapter in lib/contract.ts.
+ * Manages an Ephemeral Testnet Session Subaccount (`FullAccess` browser
+ * ed25519 keypair stored in localStorage `spire_session_v3`, funded ~0.60 NEAR
+ * via `/api/accounts` for zero-popup signless transactions on testnet — NOT a
+ * restricted Function Call Access Key with a 1.0 NEAR allowance). Contract
+ * read/write traffic goes through the typed adapter in lib/contract.ts.
  */
 
 import { KeyPair } from "near-api-js";
@@ -23,7 +25,10 @@ export interface SessionData {
   publicKey: string;
   secretKey: string;
   createdAt: number;
+  /** Initial subaccount gas/play budget in NEAR (~0.60 NEAR funded via /api/accounts). */
   allowanceNear: number;
+  /** Testnet guest sessions use a browser-held FullAccess keypair on a dedicated subaccount. */
+  keyMode?: "ephemeral-full-access";
   /**
    * Account lifecycle at the relayer: "pending" = draft saved locally while
    * the relayer has not yet provisioned `<name>.spire.testnet`.
@@ -59,9 +64,10 @@ export class SessionManager {
   }
 
   /**
-   * Creates a fresh Function Call Key pair in the browser and stores it as
-   * the active signless session. `provision` starts as "pending"; the login
-   * page flips it to "confirmed" once the relayer acknowledges the account.
+   * Creates a fresh Ephemeral Testnet Session Subaccount keypair (`FullAccess`,
+   * funded ~0.60 NEAR via `/api/accounts`) in the browser for zero-popup
+   * testnet play. `provision` starts as "pending"; the start page flips it to
+   * "confirmed" once the relayer acknowledges the account.
    */
   public createSession(accountId: string): SessionData {
     const keyPair = KeyPair.fromRandom("ed25519");
@@ -71,7 +77,8 @@ export class SessionManager {
       publicKey: keyPair.getPublicKey().toString(),
       secretKey: keyPair.toString(),
       createdAt: Date.now(),
-      allowanceNear: 1.0,
+      allowanceNear: 0.6,
+      keyMode: "ephemeral-full-access",
       provision: "pending",
     };
     if (typeof window !== "undefined") {
@@ -113,7 +120,8 @@ export class SessionManager {
       publicKey: keyPair.getPublicKey().toString(),
       secretKey: trimmedKey,
       createdAt: Date.now(),
-      allowanceNear: 1.0,
+      allowanceNear: 0.6,
+      keyMode: "ephemeral-full-access",
       provision: "confirmed",
     };
     if (typeof window !== "undefined") {

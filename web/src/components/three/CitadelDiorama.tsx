@@ -8,6 +8,6 @@ export const CitadelDiorama = dynamic<SpireCitadel3DProps>(
   () => import("./SpireCitadel3D").then((mod) => mod.SpireCitadel3D),
   {
     ssr: false,
-    loading: () => <CitadelFallbackSvg className="h-full min-h-[380px]" />,
+    loading: () => <CitadelFallbackSvg className="w-full h-full min-h-[340px]" />,
   }
 );

@@ -1,52 +1,84 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownCircle,
-  ArrowUpCircle,
+  ArrowDownToLine,
+  ArrowUpFromLine,
   Award,
+  CheckCircle2,
   Coins,
   ExternalLink,
-  Flame,
+  Gift,
   History,
+  Info,
+  Loader2,
   RefreshCw,
-  ScrollText,
-  Shield,
+  Search,
+  ShieldCheck,
+  Sparkles,
   Trophy,
+  Wallet,
 } from "lucide-react";
-import { EmptyState } from "@/components/shared/EmptyState";
 import {
-  type ChangeResult,
-  type NftToken,
+  back_boss_vault,
+  claim_backer_dividend,
+  claim_jackpot,
+  claim_payout,
+  deposit,
+  fund_jackpot,
+  get_backer,
   get_balance,
   get_claimable,
   get_claimable_loot,
-  get_backer,
-  nft_total_supply,
+  get_tower,
+  nearToYocto,
   nft_token,
-  deposit,
+  nft_total_supply,
   withdraw,
-  claim_payout,
-  claim_jackpot,
-  claim_backer_dividend,
-  back_boss_vault,
-  fund_jackpot,
+  yoctoToNear,
+  type ChangeResult,
+  type FloorResponse,
+  type NftToken,
 } from "@/lib/contract";
+import {
+  BACKER_SHARE_UNIT_NEAR,
+  ELEMENT_NAMES,
+  SPLIT_BACKER_BPS,
+  SPLIT_BUYBACK_BPS,
+  SPLIT_JACKPOT_BPS,
+  SPLIT_MERCHANT_BPS,
+} from "@/lib/spire/constants";
 import { useContractView, useSessionAccount } from "@/lib/spire/hooks";
 import {
   formatNearAmount,
   getExplorerTxUrl,
   normalizeSvgDataUri,
+  parseYoctoSafe,
 } from "@/lib/utils/cn";
+import { EmptyState } from "@/components/shared/EmptyState";
 import {
-  BACKER_SHARE_UNIT_NEAR,
-  ELEMENT_NAMES,
-  nearToYocto,
-  yoctoToNear,
-} from "@/lib/spire/constants";
+  SpireTabs,
+  SpireTabsContent,
+  SpireTabsList,
+  SpireTabsTrigger,
+  SpireTooltip,
+} from "@/components/ui/SpireUi";
 
-const STORAGE_HISTORY_KEY = "spirefi_vault_history_v1";
-const DEPOSIT_PRESETS: number[] = [1, 2, 5];
+const STORAGE_HISTORY_KEY = "spirefi.vault.history.v1";
+const SHARE_UNIT_YOCTO = 10_000_000_000_000_000n; // 1e-8 NEAR per backer share (Jalur A)
+const SMALL_WEIGHT_THRESHOLD_YOCTO = 10_000_000_000_000_000_000_000n; // 0.01 NEAR
+const MAX_SCAN_ROUNDS_PER_FLOOR = 20;
+
+const CONTROL_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled";
+
+const FLOOR_LABELS: Record<number, string> = {
+  1: "Floor 1: Ember Bastion",
+  2: "Floor 2: Frost Ward",
+  3: "Floor 3: Void Sanctum",
+};
+
+type VaultTab = "payouts" | "pouch" | "backer" | "trophies";
 
 interface HistoryEntry {
   id: string;
@@ -62,36 +94,95 @@ interface TxFeedback {
   txHash?: string;
 }
 
+interface DiscoveredClaim {
+  floor: number;
+  round: number;
+  payoutYocto: string;
+  loot: [number, number, number];
+}
+
+function formatBackerShareNear(
+  sharesRaw: string | number | bigint | null | undefined
+): string {
+  const shares = parseYoctoSafe(sharesRaw);
+  if (shares === 0n) return formatNearAmount(0n, 4);
+  const weightYocto = shares * SHARE_UNIT_YOCTO;
+  const decimals = weightYocto < SMALL_WEIGHT_THRESHOLD_YOCTO ? 8 : 4;
+  return formatNearAmount(weightYocto, decimals);
+}
+
+function parseNonNegativeInt(raw: string, fallback = 0): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
+function clampFloor(raw: number): number {
+  if (!Number.isFinite(raw)) return 1;
+  return Math.min(3, Math.max(1, Math.trunc(raw)));
+}
+
+function hasLoot(loot: [number, number, number] | null | undefined): boolean {
+  if (!loot) return false;
+  return loot[0] + loot[1] + loot[2] > 0;
+}
+
 export default function VaultPage() {
   const session = useSessionAccount();
   const accountId = session?.accountId ?? "";
+
+  const [activeTab, setActiveTab] = useState<VaultTab>("payouts");
 
   const balance = useContractView(
     async () => (accountId ? await get_balance(accountId) : null),
     [accountId]
   );
+  const tower = useContractView(get_tower, []);
 
-  const [depositNear, setDepositNear] = useState<number>(1);
+  // Unified floor selector for Floor Backer (stake + share view + dividend claim)
+  const [selectedBackerFloor, setSelectedBackerFloor] = useState<number>(1);
+  const [backAmount, setBackAmount] = useState<number>(0.25);
+
+  // Pouch deposit / withdraw / jackpot sponsor state
+  const [depositNear, setDepositNear] = useState<number>(0.25);
   const [withdrawAll, setWithdrawAll] = useState(false);
   const [withdrawNear, setWithdrawNear] = useState<number>(0);
+  const [fundFloor, setFundFloor] = useState<number>(1);
+  const [fundAmount, setFundAmount] = useState<number>(0.25);
+
+  // Payouts & Loot state (supports Round 0!)
   const [claimFloor, setClaimFloor] = useState<number>(1);
-  const [claimRound, setClaimRound] = useState<number>(1);
+  const [claimRound, setClaimRound] = useState<number>(0);
+  const claimRoundTouchedRef = useRef(false);
   const [claimableYocto, setClaimableYocto] = useState<string | null>(null);
   const [claimableError, setClaimableError] = useState<string | null>(null);
-  const [claimLoot, setClaimLoot] = useState<[number, number, number] | null>(null);
-  const [backFloor, setBackFloor] = useState<number>(1);
-  const [backAmount, setBackAmount] = useState<number>(1);
-  const [dividendFloor, setDividendFloor] = useState<number>(1);
-  const [fundFloor, setFundFloor] = useState<number>(1);
-  const [fundAmount, setFundAmount] = useState<number>(0.5);
-  const [nftRound, setNftRound] = useState<number>(1);
+  const [claimLoot, setClaimLoot] = useState<[number, number, number] | null>(
+    null
+  );
+
+  // Auto-Discovery Claim Scanner state
+  const [discoveredClaims, setDiscoveredClaims] = useState<DiscoveredClaim[]>(
+    []
+  );
+  const [scanSummary, setScanSummary] = useState<string>(
+    "Waiting for tower telemetry..."
+  );
+  const [scanningClaims, setScanningClaims] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const scanGenRef = useRef(0);
+
+  // Trophy NFT viewer state (supports Round 0!)
+  const [nftRound, setNftRound] = useState<number>(0);
+  const nftRoundTouchedRef = useRef(false);
+
   const [busy, setBusy] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<TxFeedback | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   const backer = useContractView(
-    async () => (accountId ? await get_backer(dividendFloor, accountId) : null),
-    [accountId, dividendFloor]
+    async () =>
+      accountId ? await get_backer(selectedBackerFloor, accountId) : null,
+    [accountId, selectedBackerFloor]
   );
 
   const nftSupply = useContractView(nft_total_supply, []);
@@ -101,6 +192,32 @@ export default function VaultPage() {
     [trophyTokenId]
   );
 
+  const floorsByNumber = useMemo(() => {
+    const map = new Map<number, FloorResponse>();
+    for (const fl of tower.data?.floors ?? []) {
+      map.set(fl.floor, fl);
+    }
+    return map;
+  }, [tower.data]);
+
+  const selectedClaimFloorData = floorsByNumber.get(claimFloor);
+  const selectedBackerFloorData = floorsByNumber.get(selectedBackerFloor);
+  const floor3Data = floorsByNumber.get(3);
+
+  // Auto-default claimRound and nftRound to latest completed round (including Round 0!)
+  useEffect(() => {
+    if (!tower.data) return;
+    if (!claimRoundTouchedRef.current) {
+      const fl = floorsByNumber.get(claimFloor);
+      setClaimRound(Math.max(0, (fl?.round ?? 1) - 1));
+    }
+    if (!nftRoundTouchedRef.current) {
+      const f3 = floorsByNumber.get(3);
+      setNftRound(Math.max(0, (f3?.round ?? 1) - 1));
+    }
+  }, [tower.data, floorsByNumber, claimFloor]);
+
+  // Load persisted local history
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_HISTORY_KEY);
@@ -109,6 +226,97 @@ export default function VaultPage() {
       // ignore corrupted or unavailable local storage
     }
   }, []);
+
+  const runClaimScan = useCallback(async () => {
+    if (!accountId || !tower.data) return;
+    const gen = ++scanGenRef.current;
+    setScanningClaims(true);
+    setScanError(null);
+
+    try {
+      const targets: Array<{ floor: number; round: number }> = [];
+      const scannedNotes: string[] = [];
+
+      for (const fl of tower.data.floors) {
+        const latestCompleted = fl.round - 1;
+        if (latestCompleted >= 0) {
+          const startRound = Math.max(
+            0,
+            latestCompleted - (MAX_SCAN_ROUNDS_PER_FLOOR - 1)
+          );
+          for (let r = startRound; r <= latestCompleted; r += 1) {
+            targets.push({ floor: fl.floor, round: r });
+          }
+          scannedNotes.push(
+            `F${fl.floor} R${startRound}${latestCompleted > startRound ? `-${latestCompleted}` : ""}`
+          );
+        } else if (fl.hp === 0) {
+          targets.push({ floor: fl.floor, round: 0 });
+          scannedNotes.push(`F${fl.floor} R0`);
+        } else {
+          scannedNotes.push(`F${fl.floor} R0 open`);
+        }
+      }
+
+      if (targets.length === 0) {
+        if (scanGenRef.current === gen) {
+          setDiscoveredClaims([]);
+          setScanSummary(
+            `No completed rounds yet (${scannedNotes.join(", ")}).`
+          );
+        }
+        return;
+      }
+
+      const results = await Promise.allSettled(
+        targets.map(async ({ floor, round }) => {
+          const [payoutYocto, loot] = await Promise.all([
+            get_claimable(accountId, floor, round),
+            get_claimable_loot(accountId, floor, round),
+          ]);
+          return { floor, round, payoutYocto, loot };
+        })
+      );
+
+      if (scanGenRef.current !== gen) return;
+
+      const found: DiscoveredClaim[] = [];
+      let failedChecks = 0;
+
+      for (const res of results) {
+        if (res.status === "fulfilled") {
+          const item = res.value;
+          if (parseYoctoSafe(item.payoutYocto) > 0n || hasLoot(item.loot)) {
+            found.push(item);
+          }
+        } else {
+          failedChecks += 1;
+        }
+      }
+
+      setDiscoveredClaims(found);
+      if (failedChecks > 0 && found.length === 0) {
+        setScanError(
+          `Scanned ${targets.length} round(s), but ${failedChecks} RPC check(s) failed. Retry scan.`
+        );
+      }
+      setScanSummary(`Scanned ${scannedNotes.join(" | ")}`);
+    } catch (err) {
+      if (scanGenRef.current === gen) {
+        setScanError(
+          err instanceof Error ? err.message : "Failed to scan completed rounds."
+        );
+      }
+    } finally {
+      if (scanGenRef.current === gen) {
+        setScanningClaims(false);
+      }
+    }
+  }, [accountId, tower.data]);
+
+  useEffect(() => {
+    void runClaimScan();
+  }, [runClaimScan]);
 
   const pushHistory = (
     kind: HistoryEntry["kind"],
@@ -135,11 +343,29 @@ export default function VaultPage() {
     });
   };
 
+  const handleClearHistory = () => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(STORAGE_HISTORY_KEY);
+    } catch {
+      // ignore storage unavailability
+    }
+  };
+
+  const refreshAllVaultData = useCallback(() => {
+    balance.reload();
+    tower.reload();
+    backer.reload();
+    nftSupply.reload();
+    trophyToken.reload();
+    void runClaimScan();
+  }, [balance, tower, backer, nftSupply, trophyToken, runClaimScan]);
+
   const run = async (
     kind: HistoryEntry["kind"],
     action: () => Promise<ChangeResult>,
     detail: string,
-    reload?: () => void
+    afterSuccess?: () => void
   ) => {
     setBusy(kind);
     setTxStatus(null);
@@ -147,17 +373,15 @@ export default function VaultPage() {
       const res = await action();
       pushHistory(kind, detail, res.txHash);
       setTxStatus({
-        text: `Transaction sent: ${detail}`,
+        text: `Confirmed: ${detail}`,
         txHash: res.txHash,
       });
-      balance.reload();
-      reload?.();
+      refreshAllVaultData();
+      afterSuccess?.();
     } catch (err) {
       setTxStatus({
         text:
-          err instanceof Error
-            ? err.message
-            : "Transaction failed: check your session key or network.",
+          err instanceof Error ? err.message : "Transaction failed on-chain.",
         isError: true,
       });
     } finally {
@@ -165,20 +389,23 @@ export default function VaultPage() {
     }
   };
 
-  const checkClaimable = async () => {
+  const handleCheckClaimable = async () => {
+    if (!accountId) return;
+    setBusy("check");
     setClaimableError(null);
     try {
-      if (!accountId) return;
-      const yocto = await get_claimable(accountId, claimFloor, claimRound);
-      const loot = await get_claimable_loot(accountId, claimFloor, claimRound).catch(
-        () => null
-      );
-      setClaimableYocto(yocto);
+      const [amount, loot] = await Promise.all([
+        get_claimable(accountId, claimFloor, claimRound),
+        get_claimable_loot(accountId, claimFloor, claimRound),
+      ]);
+      setClaimableYocto(amount);
       setClaimLoot(loot);
-    } catch {
-      setClaimableYocto(null);
-      setClaimLoot(null);
-      setClaimableError("Unable to calculate claimable bounty. Contract unreachable.");
+    } catch (err) {
+      setClaimableError(
+        err instanceof Error ? err.message : "Failed to query claimable state."
+      );
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -187,7 +414,7 @@ export default function VaultPage() {
       <div className="max-w-5xl mx-auto py-8">
         <EmptyState
           title="No active session"
-          hint="Enter your account name and authorize a session key on the Title Screen to access the signless vault."
+          hint="Enter your account name and authorize a session key on the Title Screen to access your Citadel Pouch, bounties, and trophies."
           actionHref="/game/start"
           actionLabel="Go to Title Screen"
         />
@@ -197,47 +424,67 @@ export default function VaultPage() {
 
   const balanceYocto = balance.data ?? "0";
   const withdrawMax = yoctoToNear(balanceYocto);
-  const shareCount = backer.data ? Number(backer.data.shares) : 0;
-  const stakedWeightNear = Number.isFinite(shareCount)
-    ? shareCount * BACKER_SHARE_UNIT_NEAR
-    : 0;
+  const totalDiscoveredNearYocto = discoveredClaims.reduce(
+    (sum, item) => sum + parseYoctoSafe(item.payoutYocto),
+    0n
+  );
+  const totalDiscoveredEssence = discoveredClaims.reduce(
+    (sum, item) => sum + item.loot[0] + item.loot[1] + item.loot[2],
+    0
+  );
+
+  const backerSharesFormatted = formatBackerShareNear(backer.data?.shares);
+  const yourSharesBig = parseYoctoSafe(backer.data?.shares);
+  const floorTotalSharesBig = parseYoctoSafe(
+    selectedBackerFloorData?.backer_total_shares
+  );
+  const sharePercentText =
+    floorTotalSharesBig > 0n
+      ? (Number((yourSharesBig * 10_000n) / floorTotalSharesBig) / 100).toFixed(2)
+      : "0.00";
+  const floor3CompletedRounds = Math.max(0, (floor3Data?.round ?? 1) - 1);
+  const recentFloor3Rounds = Array.from(
+    { length: Math.min(6, floor3CompletedRounds + 1) },
+    (_, idx) => idx
+  );
+
   const txExplorerUrl = getExplorerTxUrl(txStatus?.txHash);
   const trophy = trophyToken.data;
   const trophySvgUri = normalizeSvgDataUri(trophy?.metadata?.media);
+  const shareUnitText = BACKER_SHARE_UNIT_NEAR.toExponential(0);
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-4 pb-5 border-b border-brass/15">
-        <div>
+      <header className="flex flex-wrap items-end justify-between gap-4 pb-5 border-b border-brass/15">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-parchment tracking-wide">
             Vault &amp; Treasury
           </h1>
           <p className="text-sm text-ash mt-1.5 max-w-2xl leading-relaxed">
-            Internal ledger for signless raids, jackpot bounties, backer dividends, and Conqueror trophies.
+            Manage signless raid balances, auto-discovered payouts, Floor Backer dividends, and Floor 3 Conqueror NFTs.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => {
-            balance.reload();
-            backer.reload();
-            nftSupply.reload();
-            trophyToken.reload();
-          }}
-          className="min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-card hover:bg-white/10 border border-white/15 text-parchment text-xs font-mono font-semibold flex items-center gap-2 transition-colors"
+          onClick={refreshAllVaultData}
+          disabled={scanningClaims || busy !== null}
+          className={`min-h-[44px] px-4 py-2 rounded-lg bg-panel-card hover:bg-white/10 border border-white/15 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors disabled:opacity-50 ${CONTROL_RING}`}
         >
-          <RefreshCw className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+          <RefreshCw
+            className={`w-4 h-4 text-frost ${scanningClaims ? "animate-spin" : ""}`}
+            aria-hidden="true"
+          />
           Refresh Vault
         </button>
-      </div>
+      </header>
 
       {txStatus && (
         <div
           aria-live="polite"
           className={`px-4 py-3 rounded-xl border text-xs font-mono flex flex-wrap items-center justify-between gap-2 ${
             txStatus.isError
-              ? "bg-solar/10 border-solar/40 text-solar"
-              : "bg-emerald-500/10 border-emerald-400/35 text-emerald-300"
+              ? "bg-hp-red/10 border-hp-red/40 text-hp-text"
+              : "bg-jackpot/10 border-jackpot/35 text-jackpot"
           }`}
         >
           <span>{txStatus.text}</span>
@@ -246,7 +493,7 @@ export default function VaultPage() {
               href={txExplorerUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 underline font-bold text-white hover:text-jackpot"
+              className={`min-h-[44px] inline-flex items-center gap-1.5 px-2 underline font-bold text-parchment hover:text-jackpot ${CONTROL_RING}`}
             >
               View on NearBlocks
               <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
@@ -257,598 +504,1023 @@ export default function VaultPage() {
 
       {balance.error && !balance.data ? (
         <EmptyState
-          title="Balance unavailable"
-          hint="Failed to read get_balance from the contract."
-          onReload={balance.reload}
+          title="Vault ledger unavailable"
+          hint="Failed to read get_balance from the SpireFi contract. Check testnet RPC connectivity and retry."
+          onReload={refreshAllVaultData}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-          {/* Left rail: Ledger, Claims, Conqueror Trophy NFT Viewer */}
-          <div className="md:col-span-5 flex flex-col gap-4">
-            <section className="citadel-stage border-t-jackpot/40 p-5">
-              <div className="flex items-center gap-2 mb-2">
-                <Coins className="w-4 h-4 text-jackpot" aria-hidden="true" />
-                <span className="text-xs uppercase font-bold tracking-widest font-mono text-slate-300">
-                  Ledger Balance
-                </span>
-              </div>
-              <div className="text-3xl font-black font-mono-numbers text-white">
-                {formatNearAmount(balanceYocto, 4)}
-              </div>
-              <div className="text-xs font-mono text-slate-300 mt-1.5">
-                Account <span className="text-white font-semibold">{accountId}</span>
-              </div>
-            </section>
+        <>
+          {/* Live Treasury Overview Strip */}
+          <section
+            aria-label="Treasury overview"
+            className="citadel-stage border-t-jackpot/40 p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+          >
+            <button
+              type="button"
+              onClick={() => setActiveTab("payouts")}
+              className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
+            >
+              <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
+                <Gift className="w-3.5 h-3.5 text-jackpot shrink-0" aria-hidden="true" />
+                Unclaimed Bounties
+              </span>
+              <span className="text-xl font-bold font-mono-numbers text-parchment">
+                {scanningClaims
+                  ? "Scanning..."
+                  : formatNearAmount(totalDiscoveredNearYocto, 4)}
+              </span>
+              <span className="text-xs font-mono text-pewter">
+                {discoveredClaims.length} round(s), {totalDiscoveredEssence} essence
+              </span>
+            </button>
 
-            {/* Claim payout + loot */}
-            <section className="obsidian-surface p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <ScrollText className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-                <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                  Claim Round Rewards
-                </h2>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5 text-xs font-mono">
-                <div>
-                  <label htmlFor="claim-floor" className="block text-[11px] text-slate-300 uppercase">
-                    Floor
-                  </label>
-                  <input
-                    id="claim-floor"
-                    type="number"
-                    min={1}
-                    max={3}
-                    value={claimFloor}
-                    onChange={(e) =>
-                      setClaimFloor(Math.min(3, Math.max(1, Number(e.target.value) || 1)))
-                    }
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white font-mono-numbers"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="claim-round" className="block text-[11px] text-slate-300 uppercase">
-                    Round
-                  </label>
-                  <input
-                    id="claim-round"
-                    type="number"
-                    min={1}
-                    value={claimRound}
-                    onChange={(e) => setClaimRound(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white font-mono-numbers"
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={checkClaimable}
-                className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-slate-100 text-xs font-mono font-bold transition-colors"
-              >
-                Check Unclaimed Raid Rewards
-              </button>
-              <div className="pt-2 border-t border-white/10 text-xs font-mono leading-relaxed">
-                {claimableYocto !== null ? (
-                  <>
-                    <span className="text-jackpot font-bold">
-                      Payout: {formatNearAmount(claimableYocto, 4)}
-                    </span>
-                    {claimLoot && (
-                      <span className="block text-slate-300 mt-0.5">
-                        Loot: {claimLoot.map((n, i) => `${n} ${ELEMENT_NAMES[i]}`).join(", ")}
-                      </span>
-                    )}
-                  </>
-                ) : claimableError ? (
-                  <span className="text-solar">{claimableError}</span>
-                ) : (
-                  <span className="text-slate-400">Not checked yet for Floor {claimFloor}, Round {claimRound}.</span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(
-                      "claim",
-                      () => claim_payout(claimFloor, claimRound),
-                      `Claim Floor ${claimFloor} Round ${claimRound} Payout`
-                    )
-                  }
-                  disabled={busy !== null}
-                  className="min-h-[44px] py-2 px-3 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "claim" ? "Submitting..." : "Claim Payout"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    run("loot", () => claim_jackpot(), "Claim All Recent Bounties")
-                  }
-                  disabled={busy !== null}
-                  className="min-h-[44px] py-2 px-3 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "loot" ? "Submitting..." : "Claim All"}
-                </button>
-              </div>
-            </section>
+            <button
+              type="button"
+              onClick={() => setActiveTab("pouch")}
+              className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
+            >
+              <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
+                <Coins className="w-3.5 h-3.5 text-solar shrink-0" aria-hidden="true" />
+                Citadel Pouch
+              </span>
+              <span className="text-xl font-bold font-mono-numbers text-parchment">
+                {balance.loading
+                  ? "..."
+                  : formatNearAmount(balanceYocto, 4)}
+              </span>
+              <span className="text-xs font-mono text-pewter truncate">
+                {accountId}
+              </span>
+            </button>
 
-            {/* On-Chain Conqueror Trophy NFT Viewer */}
-            <section className="obsidian-surface border-t-jackpot/35 p-5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Trophy className="w-4 h-4 text-jackpot" aria-hidden="true" />
-                  <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                    Conqueror Trophy NFTs
-                  </h2>
-                </div>
-                <span className="text-[11px] font-mono text-jackpot bg-jackpot/10 border border-jackpot/30 px-2 py-0.5 rounded">
-                  Minted: {nftSupply.data ?? "0"}
-                </span>
-              </div>
-              <p className="text-xs font-mono text-slate-300 leading-relaxed">
-                NEP-171 trophies with on-chain SVG art are minted to the killing striker when Floor 3 is cleared.
-              </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab("backer")}
+              className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
+            >
+              <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-frost shrink-0" aria-hidden="true" />
+                Floor {selectedBackerFloor} Stake
+              </span>
+              <span className="text-xl font-bold font-mono-numbers text-parchment">
+                {backerSharesFormatted}
+              </span>
+              <span className="text-xs font-mono text-pewter">
+                {sharePercentText}% of pool (Cycle {backer.data?.current_cycle ?? 0})
+              </span>
+            </button>
 
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <label htmlFor="nft-round-input" className="block text-[11px] font-mono text-slate-300 uppercase">
-                    Inspect Floor 3 Round
-                  </label>
-                  <input
-                    id="nft-round-input"
-                    type="number"
-                    min={1}
-                    value={nftRound}
-                    onChange={(e) => setNftRound(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white text-xs font-mono-numbers"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => trophyToken.reload()}
-                  className="min-h-[44px] px-3.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-slate-100 text-xs font-mono font-semibold"
-                >
-                  Load
-                </button>
-              </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab("trophies")}
+              className={`min-h-[44px] text-left rounded-lg bg-panel-dark/75 hover:bg-panel-elevated/80 p-3.5 transition-colors flex flex-col justify-between gap-1 ${CONTROL_RING}`}
+            >
+              <span className="text-xs font-mono text-ash inline-flex items-center gap-1.5">
+                <Trophy className="w-3.5 h-3.5 text-jackpot shrink-0" aria-hidden="true" />
+                Relic Trophies
+              </span>
+              <span className="text-xl font-bold font-mono-numbers text-parchment">
+                {nftSupply.data ?? "0"} Minted
+              </span>
+              <span className="text-xs font-mono text-pewter">
+                Viewing {trophyTokenId}
+              </span>
+            </button>
+          </section>
 
-              <div className="pt-3 border-t border-white/10 space-y-2.5">
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-slate-400">Token ID</span>
-                  <span className="text-slate-200 font-semibold">{trophyTokenId}</span>
-                </div>
+          <SpireTabs
+            value={activeTab}
+            onValueChange={(val) => setActiveTab(val as VaultTab)}
+            className="flex flex-col gap-5"
+          >
+            <SpireTabsList
+              aria-label="Vault sections"
+              className="w-full sm:w-auto gap-2"
+            >
+              <SpireTabsTrigger value="payouts" className={CONTROL_RING}>
+                Payouts &amp; Loot
+              </SpireTabsTrigger>
+              <SpireTabsTrigger value="pouch" className={CONTROL_RING}>
+                Citadel Pouch
+              </SpireTabsTrigger>
+              <SpireTabsTrigger value="backer" className={CONTROL_RING}>
+                Floor Backer
+              </SpireTabsTrigger>
+              <SpireTabsTrigger value="trophies" className={CONTROL_RING}>
+                Relic Trophies
+              </SpireTabsTrigger>
+            </SpireTabsList>
 
-                {trophyToken.loading ? (
-                  <p className="text-xs font-mono text-slate-300 py-4 text-center">
-                    Loading NEP-171 metadata...
-                  </p>
-                ) : trophy ? (
-                  <div className="space-y-2.5">
-                    {trophySvgUri ? (
-                      <div className="rpg-sheen group relative overflow-hidden rounded-xl border border-brass/60 bg-gradient-to-b from-[#1A1612] to-[#06060A] p-2 transition-transform duration-300 hover:scale-[1.02]">
-                        <img
-                          src={trophySvgUri}
-                          alt={trophy.metadata?.title ?? `Conqueror Trophy ${trophy.token_id}`}
-                          className="w-full h-auto max-h-56 object-contain mx-auto block transition-transform duration-300 group-hover:scale-105"
-                        />
-                      </div>
-                    ) : (
-                      <div className="py-4 text-center text-xs font-mono text-slate-400 bg-panel-dark rounded-lg">
-                        On-chain SVG artwork not attached to this token.
-                      </div>
-                    )}
-                    <div className="divide-y divide-white/10 text-xs font-mono">
-                      <div className="py-1.5 flex items-center justify-between gap-2">
-                        <span className="text-slate-400 flex items-center gap-1">
-                          <Award className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
-                          Title
-                        </span>
-                        <span className="text-white font-bold text-right">
-                          {trophy.metadata?.title ?? trophy.token_id}
-                        </span>
-                      </div>
-                      <div className="py-1.5 flex items-center justify-between gap-2">
-                        <span className="text-slate-400">Owner</span>
-                        <span className="text-frost font-semibold text-right truncate max-w-[65%]">
-                          {trophy.owner_id}
-                        </span>
-                      </div>
-                      {trophy.metadata?.description && (
-                        <p className="pt-2 text-[11px] text-slate-300 leading-relaxed">
-                          {trophy.metadata.description}
-                        </p>
-                      )}
+            {/* TAB 1: PAYOUTS & LOOT */}
+            <SpireTabsContent value="payouts" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* 1-Click Auto-Discovery Claim Scanner */}
+                <section className="lg:col-span-7 obsidian-surface border-t-jackpot/40 p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Gift className="w-5 h-5 text-jackpot shrink-0" aria-hidden="true" />
+                      <h2 className="font-serif text-lg font-bold text-parchment">
+                        Auto-Discovered Rewards
+                      </h2>
                     </div>
-                  </div>
-                ) : (
-                  <p className="text-xs font-mono text-slate-400 py-3">
-                    No Conqueror NFT minted yet for {trophyTokenId}. Defeat Floor 3 Boss Kaelen in that round to mint one.
-                  </p>
-                )}
-              </div>
-            </section>
-          </div>
-
-          {/* Right rail: Deposit, Withdraw, Backer Vault, Fund Jackpot, Activity */}
-          <div className="md:col-span-7 flex flex-col gap-4">
-            {/* Deposit & Withdraw split */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Deposit */}
-              <section className="obsidian-surface border-t-emerald-400/40 p-5 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <ArrowDownCircle className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-                    <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                      Deposit
-                    </h2>
-                  </div>
-                  <span className="text-[11px] font-mono text-slate-300">Payable NEAR</span>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {DEPOSIT_PRESETS.map((val) => (
                     <button
                       type="button"
-                      key={val}
-                      onClick={() => setDepositNear(val)}
-                      className={`min-h-[44px] py-2 rounded-lg border text-xs font-mono font-bold transition-colors ${
-                        depositNear === val
-                          ? "bg-emerald-400/20 border-emerald-400 text-emerald-300"
-                          : "bg-panel-dark border-white/10 text-slate-300 hover:text-white"
-                      }`}
+                      onClick={() => void runClaimScan()}
+                      disabled={scanningClaims || busy !== null}
+                      className={`min-h-[44px] px-3.5 py-2 rounded-lg bg-panel-dark hover:bg-white/10 text-parchment text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors disabled:opacity-50 ${CONTROL_RING}`}
                     >
-                      {val} N
+                      {scanningClaims ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-frost" aria-hidden="true" />
+                      ) : (
+                        <Search className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+                      )}
+                      Rescan Rounds 0..N
                     </button>
-                  ))}
-                </div>
-                <div>
-                  <label htmlFor="deposit-amount" className="block text-[11px] font-mono text-slate-300 uppercase mb-1">
-                    Amount (NEAR)
-                  </label>
-                  <input
-                    id="deposit-amount"
-                    type="number"
-                    min={0.1}
-                    step={0.1}
-                    value={depositNear}
-                    onChange={(e) => setDepositNear(Number(e.target.value))}
-                    className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-white text-sm font-mono-numbers"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(
-                      "deposit",
-                      () => deposit(nearToYocto(depositNear)),
-                      `Deposit ${depositNear} NEAR`
-                    )
-                  }
-                  disabled={busy !== null || depositNear <= 0 || Number.isNaN(depositNear)}
-                  className="w-full min-h-[44px] py-2.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-oled text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "deposit" ? "Submitting..." : `Deposit ${depositNear} NEAR`}
-                </button>
-              </section>
+                  </div>
 
-              {/* Withdraw */}
-              <section className="obsidian-surface border-t-solar/40 p-5 space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-ash leading-relaxed">
+                    Scans completed rounds (0 through current round minus 1) across Floors 1 to 3 for unclaimed NEAR jackpots and seized essence loot.
+                  </p>
+
+                  <div className="rounded-lg bg-panel-dark/75 p-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="text-xs font-mono text-pewter">
+                        Total Ready to Sweep ({scanSummary})
+                      </div>
+                      <div className="text-2xl font-bold font-mono-numbers text-jackpot">
+                        {formatNearAmount(totalDiscoveredNearYocto, 4)}
+                      </div>
+                      <div className="text-xs font-mono text-ash">
+                        Essence loot: {totalDiscoveredEssence} units across{" "}
+                        {discoveredClaims.length} completed round(s)
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        run(
+                          "loot",
+                          () => claim_jackpot(),
+                          "1-Click Claim All Recent Bounties & Loot"
+                        )
+                      }
+                      disabled={busy !== null || scanningClaims}
+                      className={`min-h-[44px] px-4 py-2.5 rounded-lg bg-jackpot text-oled font-mono font-bold text-xs uppercase tracking-wider hover:bg-jackpot/90 transition-colors inline-flex items-center gap-2 disabled:opacity-45 ${CONTROL_RING}`}
+                    >
+                      <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      {busy === "loot"
+                        ? "Claiming..."
+                        : discoveredClaims.length > 0
+                          ? `1-Click Claim (${discoveredClaims.length})`
+                          : "1-Click Claim Recent"}
+                    </button>
+                  </div>
+
+                  {scanError && (
+                    <div
+                      role="alert"
+                      className="rounded-lg bg-solar/10 px-3.5 py-2.5 text-xs font-mono text-solar"
+                    >
+                      {scanError}
+                    </div>
+                  )}
+
+                  {discoveredClaims.length > 0 ? (
+                    <ul className="divide-y divide-white/10 rounded-lg bg-panel-dark/60">
+                      {discoveredClaims.map((entry) => (
+                        <li
+                          key={`${entry.floor}-${entry.round}`}
+                          className="p-3.5 flex flex-wrap items-center justify-between gap-3"
+                        >
+                          <div className="space-y-0.5">
+                            <div className="text-sm font-semibold text-parchment font-mono">
+                              Floor {entry.floor}, Round {entry.round}
+                            </div>
+                            <div className="text-xs font-mono text-ash">
+                              Payout:{" "}
+                              <span className="text-jackpot font-semibold font-mono-numbers">
+                                {formatNearAmount(entry.payoutYocto, 4)}
+                              </span>{" "}
+                              | Loot: S {entry.loot[0]} / F {entry.loot[1]} / V{" "}
+                              {entry.loot[2]}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                claimRoundTouchedRef.current = true;
+                                setClaimFloor(entry.floor);
+                                setClaimRound(entry.round);
+                                setClaimableYocto(entry.payoutYocto);
+                                setClaimLoot(entry.loot);
+                              }}
+                              className={`min-h-[44px] px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-parchment text-xs font-mono font-semibold transition-colors ${CONTROL_RING}`}
+                            >
+                              Inspect
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                run(
+                                  "claim",
+                                  () => claim_payout(entry.floor, entry.round),
+                                  `Claim Floor ${entry.floor} Round ${entry.round} Payout`
+                                )
+                              }
+                              disabled={busy !== null}
+                              className={`min-h-[44px] px-3.5 py-2 rounded-lg bg-solar/20 hover:bg-solar/30 text-solar text-xs font-mono font-bold transition-colors disabled:opacity-45 ${CONTROL_RING}`}
+                            >
+                              Claim F{entry.floor} R{entry.round}
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="rounded-lg bg-panel-dark/50 px-4 py-4 text-xs font-mono text-ash flex items-center gap-2">
+                      <CheckCircle2
+                        className="w-4 h-4 text-jackpot shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span>
+                        {scanningClaims
+                          ? "Scanning your historical raid participation across Floors 1 to 3..."
+                          : "No pending payouts or loot found in completed rounds. Defeat a floor boss to unlock Round payouts."}
+                      </span>
+                    </div>
+                  )}
+                </section>
+
+                {/* Manual Floor & Round Inspector (supports Round 0!) */}
+                <section className="lg:col-span-5 obsidian-surface border-t-solar/35 p-5 space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="font-serif text-lg font-bold text-parchment">
+                      Manual Round Lookup
+                    </h2>
+                    <SpireTooltip
+                      triggerLabel="Explain round numbering and claim methods"
+                      content="Rounds start at 0 on each floor. When Floor 1 completes its first boss defeat, Round 0 payouts become claimable and the floor advances to Round 1."
+                    >
+                      <span className="inline-flex items-center gap-1 text-xs font-mono text-pewter px-2">
+                        <Info className="w-3.5 h-3.5" aria-hidden="true" />
+                        Starts at R0
+                      </span>
+                    </SpireTooltip>
+                  </div>
+
+                  <p className="text-xs text-ash leading-relaxed">
+                    Query any specific floor and round (starting at Round 0) to inspect your exact jackpot payout and seized essence loot before claiming.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="claim-floor"
+                        className="block text-xs font-mono text-ash mb-1.5"
+                      >
+                        Floor (1 to 3)
+                      </label>
+                      <input
+                        id="claim-floor"
+                        type="number"
+                        min={1}
+                        max={3}
+                        value={claimFloor}
+                        onChange={(e) => {
+                          claimRoundTouchedRef.current = false;
+                          setClaimFloor(
+                            clampFloor(Number.parseInt(e.target.value, 10) || 1)
+                          );
+                        }}
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="claim-round"
+                        className="block text-xs font-mono text-ash mb-1.5"
+                      >
+                        Round (min 0)
+                      </label>
+                      <input
+                        id="claim-round"
+                        type="number"
+                        min={0}
+                        value={claimRound}
+                        onChange={(e) => {
+                          claimRoundTouchedRef.current = true;
+                          setClaimRound(parseNonNegativeInt(e.target.value, 0));
+                        }}
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
+                      />
+                    </div>
+                  </div>
+
+                  {selectedClaimFloorData && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-pewter">
+                      <span>
+                        Live Floor {claimFloor} is on Round{" "}
+                        {selectedClaimFloorData.round}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          claimRoundTouchedRef.current = true;
+                          setClaimRound(0);
+                        }}
+                        className={`min-h-[44px] px-2.5 rounded-lg bg-panel-dark hover:bg-white/10 text-parchment font-mono text-xs ${CONTROL_RING}`}
+                      >
+                        Jump to R0
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleCheckClaimable()}
+                    disabled={busy !== null}
+                    className={`w-full min-h-[44px] px-3.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-parchment text-xs font-mono font-semibold inline-flex items-center justify-center gap-2 transition-colors disabled:opacity-45 ${CONTROL_RING}`}
+                  >
+                    <Search className="w-4 h-4 text-frost" aria-hidden="true" />
+                    {busy === "check" ? "Checking..." : "Check Round Payout & Loot"}
+                  </button>
+
+                  <div className="rounded-lg bg-panel-dark/75 p-3.5 text-xs font-mono space-y-1">
+                    {claimableYocto !== null ? (
+                      <>
+                        <div className="text-jackpot font-semibold font-mono-numbers">
+                          Claimable Payout:{" "}
+                          {formatNearAmount(claimableYocto, 4)}
+                        </div>
+                        {claimLoot && (
+                          <div className="text-ash">
+                            Essence Loot: Solar {claimLoot[0]}, Frost{" "}
+                            {claimLoot[1]}, Void {claimLoot[2]}
+                          </div>
+                        )}
+                      </>
+                    ) : claimableError ? (
+                      <span className="text-hp-text">{claimableError}</span>
+                    ) : (
+                      <span className="text-ash">
+                        Ready to check Floor {claimFloor}, Round {claimRound}.
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        run(
+                          "claim",
+                          () => claim_payout(claimFloor, claimRound),
+                          `Claim Floor ${claimFloor} Round ${claimRound} Payout`
+                        )
+                      }
+                      disabled={busy !== null}
+                      className={`min-h-[44px] py-2 px-3 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                    >
+                      {busy === "claim" ? "Submitting..." : "Claim Payout"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        run(
+                          "loot",
+                          () => claim_jackpot(),
+                          "Claim All Recent Bounties"
+                        )
+                      }
+                      disabled={busy !== null}
+                      className={`min-h-[44px] py-2 px-3 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                    >
+                      {busy === "loot" ? "Submitting..." : "Claim All"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              {/* Recent Treasury Activity Log */}
+              <section className="obsidian-surface p-5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <ArrowUpCircle className="w-4 h-4 text-solar" aria-hidden="true" />
-                    <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                      Withdraw
+                    <History className="w-4 h-4 text-pewter" aria-hidden="true" />
+                    <h2 className="font-serif text-base font-bold text-parchment">
+                      Local Session Treasury Log
                     </h2>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWithdrawAll(true);
-                      setWithdrawNear(withdrawMax);
-                    }}
-                    className="min-h-[44px] px-2 text-[11px] font-mono font-semibold text-solar hover:underline"
-                  >
-                    Max ({withdrawMax.toFixed(2)} N)
-                  </button>
+                  {history.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearHistory}
+                      className={`min-h-[44px] px-3 py-1.5 rounded-lg bg-panel-dark hover:bg-white/10 text-ash text-xs font-mono ${CONTROL_RING}`}
+                    >
+                      Clear Log
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <label htmlFor="withdraw-amount" className="block text-[11px] font-mono text-slate-300 uppercase mb-1">
-                    Amount (NEAR)
-                  </label>
-                  <input
-                    id="withdraw-amount"
-                    type="number"
-                    min={0}
-                    max={withdrawMax}
-                    step={0.1}
-                    value={withdrawNear}
-                    onChange={(e) => {
-                      setWithdrawAll(false);
-                      setWithdrawNear(Number(e.target.value));
-                    }}
-                    disabled={withdrawAll}
-                    className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-white text-sm font-mono-numbers disabled:opacity-50"
-                  />
-                </div>
-                <label
-                  htmlFor="withdraw-all"
-                  className="flex items-center gap-2 min-h-[44px] text-xs font-mono text-slate-300 cursor-pointer"
-                >
-                  <input
-                    id="withdraw-all"
-                    type="checkbox"
-                    checked={withdrawAll}
-                    onChange={(e) => {
-                      setWithdrawAll(e.target.checked);
-                      if (e.target.checked) setWithdrawNear(withdrawMax);
-                    }}
-                    className="w-4 h-4 accent-solar"
-                  />
-                  Withdraw entire ledger balance to wallet
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(
-                      "withdraw",
-                      () => withdraw(withdrawAll ? null : nearToYocto(withdrawNear)),
-                      withdrawAll ? "Withdraw Entire Balance" : `Withdraw ${withdrawNear} NEAR`
-                    )
-                  }
-                  disabled={
-                    busy !== null ||
-                    (!withdrawAll && (withdrawNear <= 0 || withdrawNear > withdrawMax || Number.isNaN(withdrawNear)))
-                  }
-                  className="w-full min-h-[44px] py-2.5 rounded-lg bg-solar hover:bg-solar-dark text-oled text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "withdraw" ? "Submitting..." : "Withdraw"}
-                </button>
-              </section>
-            </div>
 
-            {/* Backer: back_boss_vault + claim_backer_dividend */}
-            <section className="obsidian-surface border-t-frost/40 p-5 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-frost" aria-hidden="true" />
-                  <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-parchment">
-                    Backer Vault
-                  </h2>
-                </div>
-                <span className="text-[11px] font-mono text-frost">
-                  15% of raid tickets fund floor dividends
-                </span>
-              </div>
-
-              <div className="rounded-lg bg-hp/10 border-t border-hp/45 px-3.5 py-2.5 text-xs font-mono text-rose-100 leading-relaxed">
-                <strong>Cycle Principal Risk:</strong> Shares cost{" "}
-                <span className="text-parchment font-bold">{BACKER_SHARE_UNIT_NEAR.toFixed(2)} NEAR / share</span>{" "}
-                while Boss HP &ge; 80%. Dividends stream from 15% of tickets, and{" "}
-                <strong className="text-parchment">principal unlocks only upon Boss kill</strong>. If a timed floor expires unslain, cycle principal is absorbed and the round advances.
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5 text-xs font-mono">
-                <div>
-                  <label htmlFor="back-floor" className="block text-[11px] text-ash uppercase">
-                    Floor
-                  </label>
-                  <input
-                    id="back-floor"
-                    type="number"
-                    min={1}
-                    max={3}
-                    value={backFloor}
-                    onChange={(e) =>
-                      setBackFloor(Math.min(3, Math.max(1, Number(e.target.value) || 1)))
-                    }
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-brass/20 text-parchment font-mono-numbers"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="back-amount" className="block text-[11px] text-ash uppercase">
-                    Stake (NEAR)
-                  </label>
-                  <input
-                    id="back-amount"
-                    type="number"
-                    min={0.1}
-                    step={0.1}
-                    value={backAmount}
-                    onChange={(e) => setBackAmount(Number(e.target.value))}
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-brass/20 text-parchment font-mono-numbers"
-                  />
-                </div>
-              </div>
-
-              {/* Flat hairline ledger breakdown (no nested bordered box) */}
-              <div className="pt-2 border-t border-brass/15 divide-y divide-brass/10 text-xs font-mono text-ash">
-                <div className="py-1.5 flex items-center justify-between gap-2">
-                  <span className="text-pewter">
-                    Shares on Floor {dividendFloor} ({BACKER_SHARE_UNIT_NEAR} N/share)
-                  </span>
-                  <span className="font-mono-numbers text-parchment font-bold">
-                    {backer.data
-                      ? `${shareCount.toLocaleString("en-US")} shares (${stakedWeightNear.toFixed(2)} N weight)`
-                      : "Pending"}
-                  </span>
-                </div>
-                <div className="py-1.5 flex items-center justify-between gap-2">
-                  <span className="text-pewter">Current cycle</span>
-                  <span className="font-mono-numbers text-frost font-bold">
-                    {backer.data ? backer.data.current_cycle : "Pending"}
-                  </span>
-                </div>
-                <div className="py-1.5 flex items-center justify-between gap-2">
-                  <span className="text-pewter">Last claimed cycle</span>
-                  <span className="font-mono-numbers text-ash">
-                    {backer.data ? backer.data.last_claimed_cycle : "Pending"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {[1, 2, 3].map((f) => (
-                  <button
-                    type="button"
-                    key={f}
-                    onClick={() => setDividendFloor(f)}
-                    className={`min-h-[44px] py-2 rounded-lg border text-xs font-mono font-bold transition-colors ${
-                      dividendFloor === f
-                        ? "bg-frost/20 border-frost text-frost"
-                        : "bg-panel-dark border-white/10 text-slate-300 hover:text-white"
-                    }`}
-                  >
-                    Floor {f}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(
-                      "back",
-                      () => back_boss_vault(backFloor, nearToYocto(backAmount)),
-                      `Back ${backAmount} NEAR on Floor ${backFloor}`,
-                      backer.reload
-                    )
-                  }
-                  disabled={busy !== null || backAmount <= 0 || Number.isNaN(backAmount)}
-                  className="min-h-[44px] py-2.5 px-3 rounded-lg bg-frost hover:bg-frost-dark text-oled text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "back" ? "Submitting..." : `Back ${backAmount} NEAR`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(
-                      "dividend",
-                      () => claim_backer_dividend(dividendFloor, backer.data?.current_cycle ?? 0),
-                      `Claim Dividends Floor ${dividendFloor}`,
-                      backer.reload
-                    )
-                  }
-                  disabled={busy !== null || !backer.data || backer.data.shares === "0"}
-                  className="min-h-[44px] py-2.5 px-3 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "dividend" ? "Submitting..." : "Claim Dividend"}
-                </button>
-              </div>
-
-              <p className="text-[11px] font-mono text-slate-300 leading-relaxed pt-1 border-t border-white/10">
-                Non-refundable principal disclosure: NEAR committed via Back Boss Vault remains in the floor reserve to guarantee AI buybacks and earn perpetual 15% ticket dividends. Principal cannot be unstaked.
-              </p>
-            </section>
-
-            {/* Fund Jackpot */}
-            <section className="obsidian-surface border-t-jackpot/35 p-5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-jackpot" aria-hidden="true" />
-                  <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                    Fund Floor Jackpot
-                  </h2>
-                </div>
-                <span className="text-[11px] font-mono text-slate-300">Sponsor Bounty Pool</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-mono items-end">
-                <div>
-                  <label htmlFor="fund-floor" className="block text-[11px] text-slate-300 uppercase">
-                    Target Floor
-                  </label>
-                  <select
-                    id="fund-floor"
-                    value={fundFloor}
-                    onChange={(e) => setFundFloor(Number(e.target.value))}
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white"
-                  >
-                    <option value={1}>Floor 1</option>
-                    <option value={2}>Floor 2</option>
-                    <option value={3}>Floor 3</option>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="fund-amount" className="block text-[11px] text-slate-300 uppercase">
-                    Sponsor (NEAR)
-                  </label>
-                  <input
-                    id="fund-amount"
-                    type="number"
-                    min={0.1}
-                    step={0.1}
-                    value={fundAmount}
-                    onChange={(e) => setFundAmount(Number(e.target.value))}
-                    className="w-full min-h-[44px] mt-1 px-2.5 py-2 rounded-lg bg-panel-dark border border-white/15 text-white font-mono-numbers"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    run(
-                      "fund",
-                      () => fund_jackpot(fundFloor, nearToYocto(fundAmount)),
-                      `Fund Floor ${fundFloor} Jackpot (+${fundAmount} NEAR)`
-                    )
-                  }
-                  disabled={busy !== null || fundAmount <= 0 || Number.isNaN(fundAmount)}
-                  className="min-h-[44px] px-4 py-2 rounded-lg bg-jackpot/20 hover:bg-jackpot/30 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase tracking-wider transition-colors disabled:opacity-40"
-                >
-                  {busy === "fund" ? "Submitting..." : "Sponsor"}
-                </button>
-              </div>
-            </section>
-
-            {/* History */}
-            <section className="obsidian-surface p-5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <History className="w-4 h-4 text-frost" aria-hidden="true" />
-                  <h2 className="text-sm font-bold uppercase font-mono tracking-wide text-white">
-                    Vault Activity
-                  </h2>
-                </div>
-                <span className="text-[11px] font-mono text-slate-400">
-                  Local session log
-                </span>
-              </div>
-              <div className="max-h-56 overflow-y-auto divide-y divide-white/10">
                 {history.length === 0 ? (
-                  <div className="py-4 text-center text-xs font-mono text-slate-400">
-                    No transactions recorded in this browser session yet.
-                  </div>
+                  <p className="text-xs font-mono text-pewter">
+                    Transactions executed from this Vault tab are recorded locally with NearBlocks verification links.
+                  </p>
                 ) : (
-                  history.map((h) => {
-                    const url = getExplorerTxUrl(h.txHash);
-                    return (
-                      <div
-                        key={h.id}
-                        className="py-2 flex flex-wrap items-center justify-between gap-2 text-xs font-mono"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-slate-400">
-                            {new Date(h.at).toLocaleTimeString()}
-                          </span>
-                          <span className="text-slate-100 font-semibold">{h.detail}</span>
-                        </div>
-                        {url && (
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-[11px] text-frost hover:underline"
-                          >
-                            Explorer
-                            <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                          </a>
-                        )}
-                      </div>
-                    );
-                  })
+                  <ul className="divide-y divide-white/10">
+                    {history.map((item) => {
+                      const itemUrl = getExplorerTxUrl(item.txHash);
+                      return (
+                        <li
+                          key={item.id}
+                          className="py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs font-mono"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="uppercase px-2 py-0.5 rounded bg-panel-dark text-frost shrink-0">
+                              {item.kind}
+                            </span>
+                            <span className="text-parchment truncate">
+                              {item.detail}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-pewter">
+                              {new Date(item.at).toLocaleTimeString()}
+                            </span>
+                            {itemUrl && (
+                              <a
+                                href={itemUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`min-h-[44px] inline-flex items-center gap-1 text-jackpot hover:underline ${CONTROL_RING}`}
+                              >
+                                Explorer
+                                <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                              </a>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
+              </section>
+            </SpireTabsContent>
+
+            {/* TAB 2: CITADEL POUCH */}
+            <SpireTabsContent value="pouch" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Deposit & Withdraw */}
+                <section className="lg:col-span-7 obsidian-surface border-t-solar/40 p-5 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Wallet className="w-5 h-5 text-solar shrink-0" aria-hidden="true" />
+                      <h2 className="font-serif text-lg font-bold text-parchment">
+                        Citadel Pouch Ledger
+                      </h2>
+                    </div>
+                    <span className="text-sm font-mono-numbers font-bold text-jackpot">
+                      {formatNearAmount(balanceYocto, 4)} available
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-ash leading-relaxed">
+                    Your Citadel Pouch funds signless raid tickets and NPC Merchant orders without interrupting combat. Deposit from or withdraw back to your NEAR session account at any time.
+                  </p>
+
+                  {/* Deposit block */}
+                  <div className="rounded-lg bg-panel-dark/70 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="deposit-amount"
+                        className="text-xs font-mono font-semibold text-parchment inline-flex items-center gap-1.5"
+                      >
+                        <ArrowDownToLine
+                          className="w-3.5 h-3.5 text-jackpot"
+                          aria-hidden="true"
+                        />
+                        Deposit NEAR into Pouch
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {[0.1, 0.25, 0.5, 1].map((amt) => (
+                          <button
+                            key={amt}
+                            type="button"
+                            onClick={() => setDepositNear(amt)}
+                            className={`min-h-[44px] px-3 py-1 rounded-lg bg-panel-elevated hover:bg-white/10 text-parchment text-xs font-mono-numbers ${CONTROL_RING}`}
+                          >
+                            {amt} NEAR
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        id="deposit-amount"
+                        type="number"
+                        min={0.01}
+                        step={0.05}
+                        placeholder="0.25"
+                        value={depositNear}
+                        onChange={(e) =>
+                          setDepositNear(Math.max(0, Number(e.target.value)))
+                        }
+                        className={`flex-1 min-h-[44px] px-3 py-2 rounded-lg bg-oled border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          run(
+                            "deposit",
+                            () => deposit(nearToYocto(depositNear)),
+                            `Deposit ${depositNear} NEAR to Citadel Pouch`
+                          )
+                        }
+                        disabled={busy !== null || depositNear <= 0}
+                        className={`min-h-[44px] px-5 py-2 rounded-lg bg-solar text-oled font-mono font-bold text-xs uppercase tracking-wider hover:bg-solar/90 transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                      >
+                        {busy === "deposit" ? "Depositing..." : "Deposit NEAR"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Withdraw block */}
+                  <div className="rounded-lg bg-panel-dark/70 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label
+                        htmlFor="withdraw-amount"
+                        className="text-xs font-mono font-semibold text-parchment inline-flex items-center gap-1.5"
+                      >
+                        <ArrowUpFromLine
+                          className="w-3.5 h-3.5 text-frost"
+                          aria-hidden="true"
+                        />
+                        Withdraw to NEAR Account
+                      </label>
+                      <button
+                        id="withdraw-all"
+                        type="button"
+                        aria-pressed={withdrawAll}
+                        onClick={() => setWithdrawAll((prev) => !prev)}
+                        className={`min-h-[44px] px-3.5 py-2 rounded-lg border text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors ${
+                          withdrawAll
+                            ? "bg-frost/20 border-frost text-parchment"
+                            : "bg-panel-elevated border-white/15 text-ash hover:text-parchment"
+                        } ${CONTROL_RING}`}
+                      >
+                        <span>Withdraw Full Balance</span>
+                        <span className="font-mono-numbers text-frost">
+                          ({withdrawMax.toFixed(4)})
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        id="withdraw-amount"
+                        type="number"
+                        min={0}
+                        step={0.05}
+                        placeholder="0.10"
+                        disabled={withdrawAll}
+                        value={withdrawAll ? withdrawMax.toFixed(4) : withdrawNear}
+                        onChange={(e) =>
+                          setWithdrawNear(Math.max(0, Number(e.target.value)))
+                        }
+                        className={`flex-1 min-h-[44px] px-3 py-2 rounded-lg bg-oled border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers disabled:opacity-55 ${CONTROL_RING}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          run(
+                            "withdraw",
+                            () =>
+                              withdraw(
+                                withdrawAll ? null : nearToYocto(withdrawNear)
+                              ),
+                            withdrawAll
+                              ? "Withdraw entire Citadel Pouch balance"
+                              : `Withdraw ${withdrawNear} NEAR from Citadel Pouch`
+                          )
+                        }
+                        disabled={
+                          busy !== null ||
+                          (!withdrawAll && withdrawNear <= 0) ||
+                          parseYoctoSafe(balanceYocto) === 0n
+                        }
+                        className={`min-h-[44px] px-5 py-2 rounded-lg bg-frost/20 hover:bg-frost/30 border border-frost/40 text-parchment font-mono font-bold text-xs uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                      >
+                        {busy === "withdraw" ? "Withdrawing..." : "Withdraw"}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Sponsor Floor Jackpot */}
+                <section className="lg:col-span-5 obsidian-surface border-t-jackpot/35 p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Award className="w-5 h-5 text-jackpot shrink-0" aria-hidden="true" />
+                    <h2 className="font-serif text-lg font-bold text-parchment">
+                      Sponsor Floor Jackpot
+                    </h2>
+                  </div>
+
+                  <p className="text-xs text-ash leading-relaxed">
+                    Add non-dilutive NEAR directly to a floor jackpot to attract raiders. Unlike backing, sponsorship earns zero dividends or share minting.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="fund-floor"
+                        className="block text-xs font-mono text-ash mb-1.5"
+                      >
+                        Target Floor
+                      </label>
+                      <select
+                        id="fund-floor"
+                        value={fundFloor}
+                        onChange={(e) =>
+                          setFundFloor(clampFloor(Number(e.target.value)))
+                        }
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment text-sm font-mono ${CONTROL_RING}`}
+                      >
+                        {[1, 2, 3].map((f) => {
+                          const fl = floorsByNumber.get(f);
+                          return (
+                            <option key={f} value={f}>
+                              Floor {f} ({fl ? formatNearAmount(fl.jackpot, 2) : "..."})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="fund-amount"
+                        className="block text-xs font-mono text-ash mb-1.5"
+                      >
+                        Sponsor Amount (NEAR)
+                      </label>
+                      <input
+                        id="fund-amount"
+                        type="number"
+                        min={0.05}
+                        step={0.05}
+                        placeholder="0.25"
+                        value={fundAmount}
+                        onChange={(e) =>
+                          setFundAmount(Math.max(0, Number(e.target.value)))
+                        }
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      run(
+                        "fund",
+                        () => fund_jackpot(fundFloor, nearToYocto(fundAmount)),
+                        `Sponsor Floor ${fundFloor} Jackpot with ${fundAmount} NEAR`
+                      )
+                    }
+                    disabled={busy !== null || fundAmount <= 0}
+                    className={`w-full min-h-[44px] px-4 py-2.5 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot font-mono font-bold text-xs uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                  >
+                    {busy === "fund" ? "Sponsoring..." : "Sponsor Jackpot"}
+                  </button>
+                </section>
               </div>
-            </section>
-          </div>
-        </div>
+            </SpireTabsContent>
+
+            {/* TAB 3: FLOOR BACKER (UNIFIED selectedBackerFloor) */}
+            <SpireTabsContent value="backer" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <section className="lg:col-span-6 obsidian-surface border-t-frost/40 p-5 space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck
+                        className="w-5 h-5 text-frost shrink-0"
+                        aria-hidden="true"
+                      />
+                      <h2 className="font-serif text-lg font-bold text-parchment">
+                        Back Floor Boss Vault
+                      </h2>
+                    </div>
+                    <span className="text-xs font-mono text-frost">
+                      15% Ticket Fee Share
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-ash leading-relaxed">
+                    Capital attached via Floor Backing goes straight into the floor jackpot (no minimum HP gate and no mid-cycle principal withdrawal). Until the boss is defeated, you earn pro-rata dividends from {(SPLIT_BACKER_BPS / 100).toFixed(0)}% of every raid ticket sold on that floor. If a round expires, the jackpot and active backer cycle carry forward to the next round without a 70% payout.
+                  </p>
+
+                  <div>
+                    <label
+                      htmlFor="back-floor"
+                      className="block text-xs font-mono text-ash mb-1.5"
+                    >
+                      Unified Backer Floor
+                    </label>
+                    <select
+                      id="back-floor"
+                      value={selectedBackerFloor}
+                      onChange={(e) =>
+                        setSelectedBackerFloor(clampFloor(Number(e.target.value)))
+                      }
+                      className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment text-sm font-mono ${CONTROL_RING}`}
+                    >
+                      {[1, 2, 3].map((f) => {
+                        const fl = floorsByNumber.get(f);
+                        return (
+                          <option key={f} value={f}>
+                            {FLOOR_LABELS[f]} | R{fl?.round ?? 0} | Cycle{" "}
+                            {fl?.backer_cycle ?? 0} | Jackpot{" "}
+                            {fl ? formatNearAmount(fl.jackpot, 2) : "0.00 NEAR"}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="back-amount"
+                      className="block text-xs font-mono text-ash mb-1.5"
+                    >
+                      Stake Amount (NEAR) | 1 share = {shareUnitText} NEAR
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        id="back-amount"
+                        type="number"
+                        min={0.05}
+                        step={0.05}
+                        placeholder="0.25"
+                        value={backAmount}
+                        onChange={(e) =>
+                          setBackAmount(Math.max(0, Number(e.target.value)))
+                        }
+                        className={`flex-1 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          run(
+                            "back",
+                            () =>
+                              back_boss_vault(
+                                selectedBackerFloor,
+                                nearToYocto(backAmount)
+                              ),
+                            `Back Floor ${selectedBackerFloor} Vault with ${backAmount} NEAR`
+                          )
+                        }
+                        disabled={busy !== null || backAmount <= 0}
+                        className={`min-h-[44px] px-5 py-2 rounded-lg bg-frost text-oled font-mono font-bold text-xs uppercase tracking-wider hover:bg-frost/90 transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                      >
+                        {busy === "back"
+                          ? "Backing..."
+                          : `Back Floor ${selectedBackerFloor}`}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-panel-dark/65 p-3.5 text-xs font-mono text-pewter space-y-1">
+                    <div>
+                      Ticket Split: {(SPLIT_JACKPOT_BPS / 100).toFixed(0)}% Jackpot /{" "}
+                      {(SPLIT_BACKER_BPS / 100).toFixed(0)}% Backers /{" "}
+                      {(SPLIT_BUYBACK_BPS / 100).toFixed(0)}% Buyback /{" "}
+                      {(SPLIT_MERCHANT_BPS / 100).toFixed(0)}% Merchant
+                    </div>
+                  </div>
+                </section>
+
+                {/* Live Share Position & Dividend Claim on SAME selectedBackerFloor */}
+                <section className="lg:col-span-6 obsidian-surface border-t-jackpot/35 p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="font-serif text-lg font-bold text-parchment">
+                      Floor {selectedBackerFloor} Backer Ledger
+                    </h2>
+                    <span className="text-xs font-mono text-jackpot">
+                      Cycle {backer.data?.current_cycle ?? selectedBackerFloorData?.backer_cycle ?? 0}
+                    </span>
+                  </div>
+
+                  {backer.error && !backer.data ? (
+                    <div className="rounded-lg bg-hp-red/10 px-4 py-3 text-xs font-mono text-hp-text">
+                      Failed to load get_backer for Floor {selectedBackerFloor}.
+                    </div>
+                  ) : (
+                    <dl className="divide-y divide-white/10 rounded-lg bg-panel-dark/70 px-4 text-xs font-mono">
+                      <div className="py-3 flex items-center justify-between gap-2">
+                        <dt className="text-ash">Your Staked Weight</dt>
+                        <dd className="text-parchment font-bold font-mono-numbers">
+                          {backerSharesFormatted} ({sharePercentText}%)
+                        </dd>
+                      </div>
+                      <div className="py-3 flex items-center justify-between gap-2">
+                        <dt className="text-ash">Raw Backer Shares</dt>
+                        <dd className="text-parchment font-mono-numbers">
+                          {Number(backer.data?.shares ?? 0).toLocaleString()} shares
+                        </dd>
+                      </div>
+                      <div className="py-3 flex items-center justify-between gap-2">
+                        <dt className="text-ash">Floor Dividend Pool</dt>
+                        <dd className="text-jackpot font-semibold font-mono-numbers">
+                          {selectedBackerFloorData
+                            ? formatNearAmount(selectedBackerFloorData.dividend_pool, 4)
+                            : "0.0000 NEAR"}
+                        </dd>
+                      </div>
+                      <div className="py-3 flex items-center justify-between gap-2">
+                        <dt className="text-ash">Total Floor Shares</dt>
+                        <dd className="text-ash font-mono-numbers">
+                          {formatBackerShareNear(
+                            selectedBackerFloorData?.backer_total_shares
+                          )}
+                        </dd>
+                      </div>
+                      <div className="py-3 flex items-center justify-between gap-2">
+                        <dt className="text-ash">Join / Last Claimed Cycle</dt>
+                        <dd className="text-parchment font-mono-numbers">
+                          Cycle {backer.data?.join_cycle ?? 0} / Cycle{" "}
+                          {backer.data?.last_claimed_cycle ?? 0}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      run(
+                        "dividend",
+                        () =>
+                          claim_backer_dividend(
+                            selectedBackerFloor,
+                            backer.data?.current_cycle ?? 0
+                          ),
+                        `Claim Floor ${selectedBackerFloor} Cycle ${backer.data?.current_cycle ?? 0} Dividend`
+                      )
+                    }
+                    disabled={busy !== null || yourSharesBig === 0n}
+                    className={`w-full min-h-[44px] px-4 py-2.5 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot font-mono font-bold text-xs uppercase tracking-wider transition-colors disabled:opacity-40 ${CONTROL_RING}`}
+                  >
+                    {busy === "dividend"
+                      ? "Claiming Dividend..."
+                      : `Claim Floor ${selectedBackerFloor} Dividend`}
+                  </button>
+                </section>
+              </div>
+            </SpireTabsContent>
+
+            {/* TAB 4: RELIC TROPHIES (supports Round 0 / spirefi-trophy-r0-f3!) */}
+            <SpireTabsContent value="trophies" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <section className="lg:col-span-5 obsidian-surface border-t-jackpot/40 p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Trophy className="w-5 h-5 text-jackpot shrink-0" aria-hidden="true" />
+                      <h2 className="font-serif text-lg font-bold text-parchment">
+                        Conqueror Trophy Inspector
+                      </h2>
+                    </div>
+                    <span className="text-xs font-mono text-jackpot font-semibold">
+                      Minted: {nftSupply.data ?? "0"}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-ash leading-relaxed">
+                    NEP-171 trophies with on-chain SVG artwork are minted to the killing-blow striker whenever Floor 3 is cleared. Floor rounds begin at Round 0 (token ID spirefi-trophy-r0-f3).
+                  </p>
+
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <label
+                        htmlFor="nft-round-input"
+                        className="block text-xs font-mono text-ash mb-1.5"
+                      >
+                        Inspect Floor 3 Round (min 0)
+                      </label>
+                      <input
+                        id="nft-round-input"
+                        type="number"
+                        min={0}
+                        value={nftRound}
+                        onChange={(e) => {
+                          nftRoundTouchedRef.current = true;
+                          setNftRound(parseNonNegativeInt(e.target.value, 0));
+                        }}
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-parchment placeholder-ink text-sm font-mono-numbers ${CONTROL_RING}`}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => trophyToken.reload()}
+                      className={`min-h-[44px] px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-parchment text-xs font-mono font-semibold ${CONTROL_RING}`}
+                    >
+                      Load NFT
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {recentFloor3Rounds.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => {
+                          nftRoundTouchedRef.current = true;
+                          setNftRound(r);
+                        }}
+                        aria-pressed={nftRound === r}
+                        className={`min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors ${
+                          nftRound === r
+                            ? "bg-jackpot/20 text-jackpot border border-jackpot/50"
+                            : "bg-panel-dark hover:bg-white/10 text-ash"
+                        } ${CONTROL_RING}`}
+                      >
+                        r{r}-f3
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="lg:col-span-7 obsidian-surface p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/10">
+                    <span className="text-xs font-mono text-ash">Token ID</span>
+                    <span className="text-sm font-mono font-bold text-parchment">
+                      {trophyTokenId}
+                    </span>
+                  </div>
+
+                  {trophyToken.loading ? (
+                    <div className="py-10 text-center text-xs font-mono text-ash">
+                      Loading NEP-171 metadata for {trophyTokenId}...
+                    </div>
+                  ) : trophy ? (
+                    <div className="space-y-4">
+                      {trophySvgUri ? (
+                        <div className="overflow-hidden rounded-xl bg-gradient-to-b from-[#1A1612] to-[#06060A] p-4">
+                          <img
+                            src={trophySvgUri}
+                            alt={
+                              trophy.metadata?.title ??
+                              `Conqueror Trophy ${trophy.token_id}`
+                            }
+                            className="w-full h-auto max-h-64 object-contain mx-auto block"
+                          />
+                        </div>
+                      ) : (
+                        <div className="py-6 text-center text-xs font-mono text-ash bg-panel-dark rounded-lg">
+                          No on-chain SVG artwork attached to {trophy.token_id}.
+                        </div>
+                      )}
+
+                      <dl className="divide-y divide-white/10 text-xs font-mono">
+                        <div className="py-2.5 flex flex-wrap items-center justify-between gap-2">
+                          <dt className="text-ash">Title</dt>
+                          <dd className="text-parchment font-semibold">
+                            {trophy.metadata?.title ?? trophy.token_id}
+                          </dd>
+                        </div>
+                        <div className="py-2.5 flex flex-wrap items-center justify-between gap-2">
+                          <dt className="text-ash">Owner</dt>
+                          <dd className="text-jackpot font-semibold break-all">
+                            {trophy.owner_id}
+                          </dd>
+                        </div>
+                        {trophy.metadata?.description && (
+                          <div className="py-2.5 space-y-1">
+                            <dt className="text-ash">Inscription</dt>
+                            <dd className="text-parchment leading-relaxed">
+                              {trophy.metadata.description}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center space-y-2 bg-panel-dark/65 rounded-lg px-4">
+                      <p className="text-sm font-semibold text-parchment">
+                        {trophyTokenId} has not been minted yet
+                      </p>
+                      <p className="text-xs font-mono text-ash max-w-md mx-auto leading-relaxed">
+                        Defeat the Floor 3 boss in Round {nftRound} to mint {trophyTokenId} directly to the final striker, then claim {ELEMENT_NAMES.join(" / ")} essence rewards under Payouts &amp; Loot.
+                      </p>
+                    </div>
+                  )}
+                </section>
+              </div>
+            </SpireTabsContent>
+          </SpireTabs>
+        </>
       )}
     </div>
   );

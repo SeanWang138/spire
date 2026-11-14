@@ -1,9 +1,11 @@
 import { connect, keyStores, KeyPair } from "../relayer/node_modules/near-api-js/lib/index.js";
 
 const CONTRACT_ID = "spire.testnet";
-const PRIVATE_KEY = process.env.NEAR_TESTNET_PRIVATE_KEY?.trim() || "";
+const PRIVATE_KEY = process.env.NEAR_TESTNET_PRIVATE_KEY?.trim();
 if (!PRIVATE_KEY) {
-  throw new Error("Missing NEAR_TESTNET_PRIVATE_KEY environment variable.");
+  throw new Error(
+    "Missing NEAR_TESTNET_PRIVATE_KEY environment variable. Provide the testnet account private key before running scripts/test-all-live.mjs."
+  );
 }
 const RPC_URL = "https://rpc.testnet.fastnear.com";
 

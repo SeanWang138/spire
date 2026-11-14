@@ -4,6 +4,7 @@ import {
   SpireKeeper,
   normalizeTower,
   evaluateEnrageTick,
+  resolveKeeperAiMode,
   FLOOR3_ENRAGE_INTERVAL_NS,
 } from "../dist/keeper.js";
 import { buildCanonicalMessage, verifyProposalSignature, NearAiTeeClient } from "../dist/tee.js";
@@ -21,7 +22,8 @@ function meta(overrides: Partial<MetaResponse> = {}): MetaResponse {
   return {
     epoch: 5,
     resistance: [4500, 4500, 4500],
-    next_epoch_in_ns: (EPOCH_NS + 3_600n * 1_000_000_000n).toString(),
+    // Relative countdown in ns (1 hour left -> not due yet; "0" = due now).
+    next_epoch_in_ns: (3_600n * 1_000_000_000n).toString(),
     shifted_by: 0,
     supply: [80, 20, 10],
     weak_element: 2,
@@ -30,12 +32,21 @@ function meta(overrides: Partial<MetaResponse> = {}): MetaResponse {
 }
 
 function floors(overrides: Partial<FloorResponse> = {}): FloorResponse[] {
-  return [1, 2, 3].map((floor) => ({
+  return [0, 1, 2].map((floor) => ({
     floor,
-    boss_hp: 1000,
-    max_hp: 1000,
+    hp: floor === 0 ? 1000 : floor === 1 ? 1600 : 2500,
+    max_hp: floor === 0 ? 1000 : floor === 1 ? 1600 : 2500,
     round: 1,
-    deadline_ns: "0",
+    first_attack_ns: "0",
+    deadline_ns: floor === 0 ? "0" : floor === 1 ? "1800000000000" : "1200000000000",
+    time_left_ns: floor === 0 ? "0" : floor === 1 ? "1800000000000" : "1200000000000",
+    expired: false,
+    jackpot: "2.3683e+24",
+    buyback_reserve: "4e+22",
+    dividend_pool: "5.7e+22",
+    unlocked: floor === 0,
+    ward_element: floor === 1 ? 1 : null,
+    enrage: floor === 2,
     ...overrides,
   }));
 }
@@ -45,36 +56,44 @@ function state(overrides: Partial<KeeperMockState> = {}): KeeperMockState {
 }
 
 describe("Keeper Module - tower normalization", () => {
-  it("accepts array and object shapes and drops malformed entries", () => {
-    assert.deepStrictEqual(normalizeTower([{ floor: 1 }]), [{ floor: 1 }]);
+  it("accepts array and object shapes for 0-indexed floors 0..2 and drops malformed entries", () => {
+    assert.deepStrictEqual(normalizeTower([{ floor: 0 }]), [{ floor: 0 }]);
     assert.deepStrictEqual(normalizeTower({ floors: [{ floor: 2 }] }), [{ floor: 2 }]);
     assert.deepStrictEqual(normalizeTower(undefined), []);
-    assert.deepStrictEqual(normalizeTower([{ floor: 0 }, { boss_hp: 1 }, { floor: 3 }]), [{ floor: 3 }]);
+    assert.deepStrictEqual(
+      normalizeTower([{ floor: -1 }, { floor: 0 }, { boss_hp: 1 }, { floor: 3 }]),
+      [{ floor: 0 }]
+    );
   });
 });
 
 describe("Keeper Module - epoch rollover", () => {
-  it("calls update_meta when the block timestamp passed next_epoch_in_ns", async () => {
+  it("calls update_meta when next_epoch_in_ns is 0 (countdown elapsed)", async () => {
     const keeper = new SpireKeeper({ mockMode: true });
-    keeper.setMockTelemetry(state());
+    keeper.setMockTelemetry(state({ meta: meta({ next_epoch_in_ns: "0" }) }));
 
-    const result = await keeper.tickOnce(EPOCH_NS + 4_000n * 1_000_000_000n);
+    const result = await keeper.tickOnce(EPOCH_NS);
     assert.deepStrictEqual(result.errors, []);
     assert.ok(result.actions.some((a) => a.startsWith("update_meta")));
+
+    const keeperNumZero = new SpireKeeper({ mockMode: true });
+    keeperNumZero.setMockTelemetry(state({ meta: meta({ next_epoch_in_ns: 0 }) }));
+    const resNum = await keeperNumZero.tickOnce(EPOCH_NS);
+    assert.ok(resNum.actions.some((a) => a.startsWith("update_meta")));
   });
 
-  it("does not call update_meta before the epoch deadline", async () => {
+  it("does not call update_meta while next_epoch_in_ns > 0", async () => {
     const keeper = new SpireKeeper({ mockMode: true });
     keeper.setMockTelemetry(state());
 
     const result = await keeper.tickOnce(EPOCH_NS + 10n * 1_000_000_000n);
     assert.ok(!result.actions.some((a) => a.startsWith("update_meta")));
-    assert.ok(result.actions.some((a) => a.startsWith("apply_ai_proposal:1:5")));
+    assert.ok(result.actions.some((a) => a.startsWith("apply_ai_proposal:0:5")));
   });
 });
 
 describe("Keeper Module - AI proposals", () => {
-  it("submits one signed proposal per floor and epoch", async () => {
+  it("submits one signed proposal per floor (0..2) and epoch", async () => {
     const keeper = new SpireKeeper({ mockMode: true });
     keeper.setMockTelemetry(state());
 
@@ -83,7 +102,7 @@ describe("Keeper Module - AI proposals", () => {
     assert.strictEqual(result.proposals.length, 3);
 
     for (const [index, signed] of result.proposals.entries()) {
-      const floor = index + 1;
+      const floor = index;
       assert.strictEqual(signed.proposal.floor, floor);
       assert.strictEqual(signed.proposal.epoch, 5);
       assert.strictEqual(signed.message, buildCanonicalMessage(signed.proposal));
@@ -147,7 +166,7 @@ describe("Keeper Module - AI proposals", () => {
     keeper.setMockTelemetry(
       state({
         aiStates: {
-          1: { floor: 1, epoch: 5, buyback_multiplier_bps: [10000, 10000, 10000], nonce: 1 },
+          0: { floor: 0, epoch: 5, buyback_multiplier_bps: [10000, 10000, 10000], nonce: 1 },
         },
       })
     );
@@ -155,71 +174,145 @@ describe("Keeper Module - AI proposals", () => {
     const result = await keeper.tickOnce(EPOCH_NS);
     assert.deepStrictEqual(result.errors, []);
     assert.ok(
-      result.actions.some((a) => a.startsWith("ai_proposal_skipped:1:epoch_5_already_applied"))
+      result.actions.some((a) => a.startsWith("ai_proposal_skipped:0:epoch_5_already_applied"))
     );
-    // Floors 2 and 3 have no AI state yet (epoch 0) and still get proposals.
+    // Floors 1 and 2 have no AI state yet (epoch 0) and still get proposals.
     assert.deepStrictEqual(
       result.proposals.map((p) => p.proposal.floor).sort(),
-      [2, 3]
+      [1, 2]
     );
   });
 
-  it("skips proposals for defeated floors (boss tumbang)", async () => {
+  it("skips proposals for defeated floors (hp <= 0 or legacy boss_hp <= 0)", async () => {
     const keeper = new SpireKeeper({ mockMode: true });
     keeper.setMockTelemetry(
       state({
         floors: [
-          { floor: 1, boss_hp: 0, deadline_ns: "0" },
-          { floor: 2, boss_hp: 500, deadline_ns: "0" },
-          { floor: 3, boss_hp: 1600, deadline_ns: "0" },
+          { floor: 0, hp: 0, deadline_ns: "0", time_left_ns: "0" },
+          { floor: 1, hp: 500, deadline_ns: "1800000000000", time_left_ns: "1000" },
+          { floor: 2, boss_hp: 0, deadline_ns: "1200000000000", time_left_ns: "1000" },
         ],
       })
     );
 
     const result = await keeper.tickOnce(EPOCH_NS);
     assert.deepStrictEqual(result.errors, []);
-    assert.ok(result.actions.some((a) => a.startsWith("ai_proposal_skipped:1:floor_defeated")));
+    assert.ok(result.actions.some((a) => a.startsWith("ai_proposal_skipped:0:floor_defeated")));
+    assert.ok(result.actions.some((a) => a.startsWith("ai_proposal_skipped:2:floor_defeated")));
     assert.deepStrictEqual(
-      result.proposals.map((p) => p.proposal.floor).sort(),
-      [2, 3]
+      result.proposals.map((p) => p.proposal.floor),
+      [1]
     );
   });
 });
 
 describe("Keeper Module - floor expiry & enrage", () => {
-  it("calls resolve_expired only for expired, still-alive floors", async () => {
-    const deadline = EPOCH_NS + 100n * 1_000_000_000n;
+  it("never calls resolve_expired and records settlement-due when time_left_ns === 0 on deadline floors", async () => {
     const keeper = new SpireKeeper({ mockMode: true });
+    const calledMethods: string[] = [];
+    const origCallChangeMethod = keeper.callChangeMethod.bind(keeper);
+    keeper.callChangeMethod = async (methodName, args, gas, attachedDepositYocto) => {
+      calledMethods.push(methodName);
+      return origCallChangeMethod(methodName, args, gas, attachedDepositYocto);
+    };
+
     keeper.setMockTelemetry(
       state({
         floors: [
-          { floor: 1, boss_hp: 1000, deadline_ns: "0" },
-          { floor: 2, boss_hp: 500, deadline_ns: deadline.toString() },
-          { floor: 3, boss_hp: 0, deadline_ns: deadline.toString() },
+          { floor: 0, hp: 1000, deadline_ns: "0", time_left_ns: "0", expired: false },
+          { floor: 1, hp: 500, deadline_ns: "1800000000000", time_left_ns: "1000", expired: false },
+          { floor: 2, hp: 0, deadline_ns: "1200000000000", time_left_ns: "0", expired: true },
         ],
       })
     );
 
     const before = await keeper.tickOnce(EPOCH_NS);
-    assert.ok(!before.actions.some((a) => a.startsWith("resolve_expired")));
+    assert.ok(!before.actions.some((a) => a.startsWith("settlement-due")));
+    assert.ok(!calledMethods.includes("resolve_expired"));
 
-    const after = await keeper.tickOnce(deadline + 1n);
-    assert.ok(after.actions.some((a) => a.startsWith("resolve_expired:2:")));
-    assert.ok(!after.actions.some((a) => a.startsWith("resolve_expired:3")));
+    keeper.setMockTelemetry(
+      state({
+        floors: [
+          { floor: 0, hp: 1000, deadline_ns: "0", time_left_ns: "0", expired: false },
+          { floor: 1, hp: 500, deadline_ns: "1800000000000", time_left_ns: 0 },
+          { floor: 2, hp: 0, deadline_ns: "1200000000000", time_left_ns: "0", expired: true },
+        ],
+      })
+    );
+
+    const after = await keeper.tickOnce(EPOCH_NS);
+    assert.ok(!calledMethods.includes("resolve_expired"));
+    assert.ok(after.actions.some((a) => a.startsWith("settlement-due:1:")));
+    assert.ok(!after.actions.some((a) => a.startsWith("settlement-due:0:")));
+    assert.ok(!after.actions.some((a) => a.startsWith("settlement-due:2:")));
   });
 
-  it("surfaces Floor 3 enrage ticks once per interval", () => {
+  it("surfaces Floor 3 (0-indexed floor 2) enrage ticks once per interval", () => {
     const start = EPOCH_NS;
     const floor: FloorResponse = {
-      floor: 3,
-      boss_hp: 3000,
-      max_hp: 5000,
+      floor: 2,
+      hp: 2000,
+      max_hp: 2500,
+      enrage: true,
       floor_start_ns: start.toString(),
       enrage_ticks: 1,
-      deadline_ns: "0",
+      deadline_ns: "1200000000000",
     };
     assert.strictEqual(evaluateEnrageTick(floor, start + FLOOR3_ENRAGE_INTERVAL_NS), null);
     assert.strictEqual(evaluateEnrageTick(floor, start + 2n * FLOOR3_ENRAGE_INTERVAL_NS), 2n);
-    assert.strictEqual(evaluateEnrageTick({ ...floor, floor: 2 }, start + 3n * FLOOR3_ENRAGE_INTERVAL_NS), null);
+    assert.strictEqual(
+      evaluateEnrageTick({ ...floor, floor: 1, enrage: false }, start + 3n * FLOOR3_ENRAGE_INTERVAL_NS),
+      null
+    );
+    assert.strictEqual(
+      evaluateEnrageTick({ ...floor, floor: 0, enrage: undefined }, start + 3n * FLOOR3_ENRAGE_INTERVAL_NS),
+      null
+    );
+    // Legacy floor === 3 compat
+    assert.strictEqual(
+      evaluateEnrageTick({ ...floor, floor: 3, enrage: undefined }, start + 2n * FLOOR3_ENRAGE_INTERVAL_NS),
+      2n
+    );
+  });
+});
+
+describe("Keeper Module - epoch-only mode (testnet without NEAR AI key)", () => {
+  it("resolves explicit KEEPER_AI_MODE values and rejects invalid values", () => {
+    assert.strictEqual(resolveKeeperAiMode(undefined), "near-ai");
+    assert.strictEqual(resolveKeeperAiMode(""), "near-ai");
+    assert.strictEqual(resolveKeeperAiMode("epoch-only"), "epoch-only");
+    assert.strictEqual(resolveKeeperAiMode("NEAR-AI"), "near-ai");
+    assert.throws(() => resolveKeeperAiMode("bad-mode"), /KEEPER_AI_MODE/);
+  });
+
+  it("constructs in live epoch-only mode without NEAR_AI_API_KEY", () => {
+    const prevKey = process.env.NEAR_AI_API_KEY;
+    delete process.env.NEAR_AI_API_KEY;
+    try {
+      const keeper = new SpireKeeper({ mockMode: false, aiMode: "epoch-only" });
+      assert.strictEqual(keeper.isMockMode(), false);
+      assert.strictEqual(keeper.getAiMode(), "epoch-only");
+    } finally {
+      if (prevKey !== undefined) process.env.NEAR_AI_API_KEY = prevKey;
+    }
+  });
+
+  it("runs update_meta and skips apply_ai_proposal cleanly in epoch-only mode", async () => {
+    const keeper = new SpireKeeper({ mockMode: true, aiMode: "epoch-only" });
+    const calledMethods: string[] = [];
+    const origCallChangeMethod = keeper.callChangeMethod.bind(keeper);
+    keeper.callChangeMethod = async (methodName, args, gas, attachedDepositYocto) => {
+      calledMethods.push(methodName);
+      return origCallChangeMethod(methodName, args, gas, attachedDepositYocto);
+    };
+
+    keeper.setMockTelemetry(state({ meta: meta({ next_epoch_in_ns: "0" }) }));
+    const result = await keeper.tickOnce(EPOCH_NS);
+
+    assert.deepStrictEqual(result.errors, []);
+    assert.deepStrictEqual(result.proposals, []);
+    assert.deepStrictEqual(calledMethods, ["update_meta"]);
+    assert.ok(result.actions.some((a) => a.startsWith("update_meta:epoch=5:")));
+    assert.ok(result.actions.includes("ai_proposals_skipped:epoch_only_mode"));
   });
 });

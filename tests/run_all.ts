@@ -1,12 +1,24 @@
 /**
  * The Spire v3.1 / BossVault Protocol - Master E2E Test Suite Runner
- * Executes Tiers 1-4 end-to-end and outputs formatted verification matrix.
+ *
+ * Scope:
+ * - Tiers 1-4 verify the protocol reference models (`tests/protocol_models.ts`).
+ * - Cross-Layer Parity verifies live math & vector parity across `web/`,
+ *   `test-vectors/`, `relayer/merchant_vectors.json`, and `relayer/dist/`
+ *   (when built).
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runTier1 } from "./tier1_feature_tests.ts";
 import { runTier2 } from "./tier2_boundary_tests.ts";
 import { runTier3 } from "./tier3_pairwise_tests.ts";
 import { runTier4 } from "./tier4_workload_tests.ts";
+import { runCrossLayerParity } from "./cross_layer_math_parity.ts";
+
+const THIS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = path.resolve(THIS_DIR, "..");
 
 async function main() {
   const startTime = Date.now();
@@ -15,7 +27,7 @@ async function main() {
   console.log("   THE SPIRE v3.1 / BOSSVAULT PROTOCOL - E2E TEST VERIFICATION SUITE");
   console.log("================================================================================\x1b[0m");
 
-  const results: Array<{ tier: string; name: string; passed: boolean }> = [];
+  const results: Array<{ tier: string; name: string; passed: boolean; note?: string }> = [];
 
   console.log("\n\x1b[1m\x1b[34m>>> EXECUTING TIER 1: FEATURE COVERAGE & CATEGORY-PARTITION SUITE...\x1b[0m");
   const t1Passed = await runTier1();
@@ -32,6 +44,20 @@ async function main() {
   console.log("\n\x1b[1m\x1b[34m>>> EXECUTING TIER 4: REAL-WORLD WORKLOAD SIMULATION SUITE...\x1b[0m");
   const t4Passed = await runTier4();
   results.push({ tier: "Tier 4", name: "Real-World Tower Assault Simulation", passed: t4Passed });
+
+  const hasRelayerDist =
+    fs.existsSync(path.join(ROOT_DIR, "relayer", "dist", "pricing.js")) &&
+    fs.existsSync(path.join(ROOT_DIR, "relayer", "dist", "types.js"));
+
+  console.log("\n\x1b[1m\x1b[34m>>> EXECUTING CROSS-LAYER MATH & SCHEMA PARITY SUITE...\x1b[0m");
+  const parityPassed = await runCrossLayerParity({ requireRelayerDist: hasRelayerDist });
+  results.push({
+    tier: "Parity",
+    name: hasRelayerDist
+      ? "Cross-Layer Math & Schema Parity"
+      : "Parity (Web+Vectors; relayer unbuilt)",
+    passed: parityPassed,
+  });
 
   const totalTime = Date.now() - startTime;
   const allPassed = results.every((r) => r.passed);

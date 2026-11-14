@@ -2,10 +2,11 @@
  * SpireFi - Autonomous Keeper
  *
  * One tick:
- *  a. read get_meta() + get_tower() (all floors)
- *  b. if the block timestamp passed meta.next_epoch_in_ns -> update_meta()
+ *  a. read get_meta() + get_tower() (all 0-indexed floors 0..2)
+ *  b. if meta.next_epoch_in_ns === 0 -> update_meta()
  *  c. for every new (floor, epoch) -> build a signed AI proposal and apply_ai_proposal
- *  d. resolve_expired(floor) for expired floors, surface Floor 3 enrage ticks
+ *  d. record settlement-due when time_left_ns === 0 on deadline floors (expiry settles lazily
+ *     inside attack()) and surface Floor 3 (index 2) enrage ticks
  *
  * Contract calls use near-api-js with the keeper key from env
  * (KEEPER_ACCOUNT_ID / KEEPER_PRIVATE_KEY). mockMode keeps the loop hermetic
@@ -19,6 +20,7 @@ import {
   MetaResponse,
   SignedAiProposal,
   Triple,
+  parseYoctoSafe,
   toBigInt,
   MAX_FLOOR,
 } from "./types.js";
@@ -29,7 +31,21 @@ export const FLOOR3_ENRAGE_INTERVAL_NS = 300n * 1_000_000_000n; // 5 minutes
 
 export const GAS_APPLY_AI_PROPOSAL = 300n * 1_000_000_000_000n;
 export const GAS_UPDATE_META = 150n * 1_000_000_000_000n;
-export const GAS_RESOLVE_EXPIRED = 150n * 1_000_000_000_000n;
+
+export type KeeperAiMode = "near-ai" | "epoch-only";
+
+export function resolveKeeperAiMode(explicit?: string): KeeperAiMode {
+  const raw = (explicit ?? process.env.KEEPER_AI_MODE ?? "").trim().toLowerCase();
+  if (!raw || raw === "near-ai") {
+    return "near-ai";
+  }
+  if (raw === "epoch-only") {
+    return "epoch-only";
+  }
+  throw new Error(
+    `Invalid KEEPER_AI_MODE "${raw}". Expected "near-ai" or "epoch-only".`
+  );
+}
 
 export interface KeeperConfig {
   rpcUrl?: string;
@@ -38,8 +54,9 @@ export interface KeeperConfig {
   keeperPrivateKey?: string;
   pollIntervalMs?: number;
   mockMode?: boolean;
+  aiMode?: KeeperAiMode;
   networkId?: string;
-  teeClient?: NearAiTeeClient;
+  teeClient?: NearAiTeeClient | null;
 }
 
 export interface KeeperMockState {
@@ -67,11 +84,16 @@ export interface CallResult {
 }
 
 /**
- * Floor 3 enrage is applied lazily by the contract on the next attack; the keeper
- * only surfaces that a tick is due so ops can see a stalled boss.
+ * Floor 3 (0-indexed floor 2, enrage: true) enrage is applied lazily by the contract on the
+ * next attack; the keeper only surfaces that a tick is due so ops can see a stalled boss.
+ * Supports both live 0-indexed `floor === 2` (or `enrage: true`) and legacy `floor === 3`.
  */
 export function evaluateEnrageTick(floor: FloorResponse, nowNs: bigint): bigint | null {
-  if (floor.floor !== 3 || floor.floor_start_ns === undefined || floor.enrage_ticks === undefined) {
+  if (floor.enrage === false) {
+    return null;
+  }
+  const isEnrageFloor = floor.enrage === true || floor.floor === 2 || floor.floor === 3;
+  if (!isEnrageFloor || floor.floor_start_ns === undefined || floor.enrage_ticks === undefined) {
     return null;
   }
   const elapsed = nowNs - toBigInt(floor.floor_start_ns);
@@ -81,8 +103,8 @@ export function evaluateEnrageTick(floor: FloorResponse, nowNs: bigint): bigint 
 }
 
 /**
- * Accepts both `[...]` and `{ floors: [...] }` shapes from get_tower, and drops
- * entries without a usable floor number.
+ * Accepts both `[...]` and `{ floors: [...] }` shapes from get_tower, and keeps
+ * valid 0-indexed floors `0..MAX_FLOOR-1` (`0..2`).
  */
 export function normalizeTower(raw: unknown): FloorResponse[] {
   const list = Array.isArray(raw)
@@ -93,7 +115,7 @@ export function normalizeTower(raw: unknown): FloorResponse[] {
 
   return list
     .filter((entry): entry is FloorResponse => !!entry && typeof entry === "object")
-    .filter((entry) => Number.isInteger(entry.floor) && entry.floor >= 1);
+    .filter((entry) => Number.isInteger(entry.floor) && entry.floor >= 0 && entry.floor < MAX_FLOOR);
 }
 
 export class SpireKeeper {
@@ -104,9 +126,10 @@ export class SpireKeeper {
   private pollIntervalMs: number;
   private networkId: string;
   private mockMode: boolean;
+  private aiMode: KeeperAiMode;
   private isRunning = false;
   private timer: NodeJS.Timeout | null = null;
-  private teeClient: NearAiTeeClient;
+  private teeClient: NearAiTeeClient | null;
   private account: Account | null = null;
 
   private mockState: KeeperMockState | null = null;
@@ -123,8 +146,13 @@ export class SpireKeeper {
     this.networkId = config.networkId || "testnet";
     // Same explicit switch as the TEE client: never silently run in mock mode.
     this.mockMode = config.mockMode ?? process.env.MOCK_TEE === "true";
-    this.teeClient =
-      config.teeClient ?? new NearAiTeeClient({ mockMode: this.mockMode });
+    this.aiMode = config.aiMode ?? resolveKeeperAiMode();
+    if (this.aiMode === "epoch-only") {
+      this.teeClient = config.teeClient ?? null;
+    } else {
+      this.teeClient =
+        config.teeClient ?? new NearAiTeeClient({ mockMode: this.mockMode });
+    }
   }
 
   /** Hermetic state for tests / dry runs. */
@@ -137,6 +165,10 @@ export class SpireKeeper {
 
   public isMockMode(): boolean {
     return this.mockMode;
+  }
+
+  public getAiMode(): KeeperAiMode {
+    return this.aiMode;
   }
 
   // ---------------------------------------------------------------- contract IO
@@ -239,8 +271,8 @@ export class SpireKeeper {
     try {
       floors = normalizeTower(await this.callViewMethod<unknown>("get_tower"));
     } catch {
-      // Older deployments expose per-floor views only.
-      for (let floor = 1; floor <= MAX_FLOOR; floor++) {
+      // Older deployments expose per-floor views only (0-indexed 0..MAX_FLOOR-1).
+      for (let floor = 0; floor < MAX_FLOOR; floor++) {
         try {
           floors.push(await this.callViewMethod<FloorResponse>("get_floor", { floor }));
         } catch {
@@ -254,26 +286,28 @@ export class SpireKeeper {
 
   // ----------------------------------------------------------------------- ticks
 
-  private isEpochDue(meta: MetaResponse, blockTimeNs: bigint): boolean {
-    // next_epoch_in_ns is the absolute contract timestamp (ns) when update_meta becomes callable.
-    const next = toBigInt(meta.next_epoch_in_ns ?? 0);
-    return next > 0n && blockTimeNs >= next;
+  private isEpochDue(meta: MetaResponse): boolean {
+    // get_meta().next_epoch_in_ns is a relative countdown in ns: 0 means epoch rollover is ready now.
+    if (meta.next_epoch_in_ns === undefined || meta.next_epoch_in_ns === null) {
+      return false;
+    }
+    return parseYoctoSafe(meta.next_epoch_in_ns) === 0n;
   }
 
-  private async readAiState(floor: number, meta: MetaResponse): Promise<AiStateResponse> {
+  private async readAiState(floor: number, _meta: MetaResponse): Promise<AiStateResponse> {
+    const fallback: AiStateResponse = {
+      floor,
+      epoch: 0,
+      buyback_multiplier_bps: [10000, 10000, 10000],
+      nonce: 0,
+    };
     if (this.mockState) {
       // Mock default models a floor with NO proposal applied yet this epoch
       // (epoch 0 < any real epoch), so keepers can still propose.
-      return (
-        this.mockState.aiStates?.[floor] ?? {
-          floor,
-          epoch: 0,
-          buyback_multiplier_bps: [10000, 10000, 10000],
-          nonce: 0,
-        }
-      );
+      return this.mockState.aiStates?.[floor] ?? fallback;
     }
-    return this.callViewMethod<AiStateResponse>("get_ai_state", { floor });
+    const state = await this.callViewMethod<AiStateResponse | null>("get_ai_state", { floor });
+    return state ?? fallback;
   }
 
   private async submitProposalForFloor(
@@ -284,7 +318,7 @@ export class SpireKeeper {
     errors: string[]
   ): Promise<void> {
     const key = `${floor}:${meta.epoch}`;
-    if (this.submittedEpochs.has(key)) return;
+    if (this.submittedEpochs.has(key) || !this.teeClient) return;
 
     let aiState: AiStateResponse;
     try {
@@ -377,7 +411,7 @@ export class SpireKeeper {
     }
 
     // (b) epoch rollover
-    if (this.isEpochDue(meta, blockTimeNs)) {
+    if (this.isEpochDue(meta)) {
       const result = await this.callChangeMethod("update_meta", {}, GAS_UPDATE_META);
       if (result.success) {
         actions.push(`update_meta:epoch=${meta.epoch}:${result.txHash ?? "ok"}`);
@@ -386,21 +420,21 @@ export class SpireKeeper {
       }
     }
 
-    // (d) expired floors + enrage visibility
+    // (d) settlement-due visibility (expiry runs lazily inside attack() on-chain) + enrage visibility
     for (const floor of floors) {
-      const deadline = toBigInt(floor.deadline_ns ?? 0);
-      const alive = (floor.boss_hp ?? 1) > 0;
-      if (deadline > 0n && blockTimeNs >= deadline && alive) {
-        const result = await this.callChangeMethod(
-          "resolve_expired",
-          { floor: floor.floor },
-          GAS_RESOLVE_EXPIRED
-        );
-        if (result.success) {
-          actions.push(`resolve_expired:${floor.floor}:${result.txHash ?? "ok"}`);
-        } else {
-          errors.push(`resolve_expired(${floor.floor}) failed: ${result.error}`);
-        }
+      const hp = floor.hp ?? floor.boss_hp ?? 1;
+      const alive = hp > 0;
+      const deadline = parseYoctoSafe(floor.deadline_ns ?? 0);
+      const hasTimeLeft = floor.time_left_ns !== undefined && floor.time_left_ns !== null;
+      const timeLeft = hasTimeLeft ? parseYoctoSafe(floor.time_left_ns!) : null;
+      const settlementDue =
+        alive &&
+        (floor.expired === true ||
+          (floor.expired !== false &&
+            timeLeft === 0n &&
+            (deadline > 0n || floor.deadline_ns === undefined)));
+      if (settlementDue) {
+        actions.push(`settlement-due:${floor.floor}:lazy_on_next_attack`);
       }
 
       const enrageTicks = evaluateEnrageTick(floor, blockTimeNs);
@@ -409,19 +443,23 @@ export class SpireKeeper {
       }
     }
 
-    // (c) one proposal per (floor, epoch); never for defeated floors (tower
-    // complete on that floor - e.g. floor 3 tumbang - means no economy to steer).
-    const bossHpByFloor = new Map(floors.map((f) => [f.floor, f.boss_hp]));
-    for (let floor = 1; floor <= MAX_FLOOR; floor++) {
-      try {
-        const bossHp = bossHpByFloor.get(floor);
-        if (bossHp !== undefined && bossHp <= 0) {
-          actions.push(`ai_proposal_skipped:${floor}:floor_defeated`);
-          continue;
+    // (c) one proposal per (floor, epoch) for 0-indexed floors 0..MAX_FLOOR-1
+    // when AI mode is enabled; skip defeated floors (hp <= 0).
+    if (this.aiMode === "epoch-only" || !this.teeClient) {
+      actions.push("ai_proposals_skipped:epoch_only_mode");
+    } else {
+      const hpByFloor = new Map(floors.map((f) => [f.floor, f.hp ?? f.boss_hp]));
+      for (let floor = 0; floor < MAX_FLOOR; floor++) {
+        try {
+          const hp = hpByFloor.get(floor);
+          if (hp !== undefined && hp <= 0) {
+            actions.push(`ai_proposal_skipped:${floor}:floor_defeated`);
+            continue;
+          }
+          await this.submitProposalForFloor(floor, meta, actions, proposals, errors);
+        } catch (err: any) {
+          errors.push(`floor ${floor} proposal error: ${err?.message || String(err)}`);
         }
-        await this.submitProposalForFloor(floor, meta, actions, proposals, errors);
-      } catch (err: any) {
-        errors.push(`floor ${floor} proposal error: ${err?.message || String(err)}`);
       }
     }
 

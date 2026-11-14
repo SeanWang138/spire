@@ -1,8 +1,14 @@
 # The Spire v3.1 / BossVault Protocol - Test Infrastructure Specification
 **Document Version:** 3.1.0-TEST  
 **Author:** Test Writer / QA  
-**Target:** End-to-End (E2E) Verification Harness & Tiers 1-4 Test Suites  
-**Status:** Approved & Implemented  
+**Target:** End-to-End (E2E) Verification Harness & Tiers 1-4 Reference Simulation Suites  
+**Status:** Historical Reference Harness + Active Cross-Layer Parity Guide  
+
+> **[STATUS / AUTHORITATIVE REFERENCE]** Tiers 1-4 (`tests/tier1_feature_tests.ts` through `tests/tier4_workload_tests.ts`) run hermetically against the offline **v3 TypeScript reference simulation** ([`tests/protocol_models.ts`](tests/protocol_models.ts)), NOT directly against the deployed `spire.testnet` Rust contract. For **authoritative live `spire.testnet` constants, ABI signatures, and cross-layer parity**, see [`contract/src/types.rs`](contract/src/types.rs), [`contract/src/merchant.rs`](contract/src/merchant.rs), [`contract/src/lib.rs`](contract/src/lib.rs), [`test-vectors/merchant_vectors.json`](test-vectors/merchant_vectors.json), and [`tests/cross_layer_math_parity.ts`](tests/cross_layer_math_parity.ts):
+> - **Floor HP & Tickets:** Live contract `[1,000, 1,600, 2,500] HP` & tickets `[0.10, 0.15, 0.25] NEAR`; Floor 2 applies `+1,500 bps` Frost Ward resistance; Floor 3 regenerates `+10% max HP = 250 HP` per 5m (early `protocol_models.ts` used `[1,000, 2,500, 5,000] HP`, flat `0.10 NEAR` ticket, `-50%/+25%` Frost Ward, and `+500 HP` enrage).
+> - **Crafting & Starter:** Live contract `craft_weapon` consumes `2 ore:iron + 3 essence:*` (`vs 2 ore + 1 essence` in `protocol_models.ts`); `claim_starter` grants `[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4` Iron Ore + `3` Solar/Frost/Void essence each.
+> - **NPC Merchant Curve:** Live contract `MERCHANT_BASE_PRICE = 0.05 NEAR`, `target = 100`, `k1 = 0.50`, `k2 = 0.30`, clamped `0.50x..2.00x` (`0.025..0.10 NEAR` mid), `±10%` spread, materials only (early `protocol_models.ts` used `P0 = 0.1 NEAR` with `1 + max(0, target - stock)/target`).
+> - **Onboarding & AI Gate:** Live testnet frontend uses an **Ephemeral Testnet Guest Session** (`FullAccess` browser subaccount funded `0.60 NEAR` via `/api/accounts`, superseding early FCAK plans). Live `apply_ai_proposal(floor, proposal, chat_id, signature)` verifies Relayer Ed25519 signatures for buyback multipliers (`[10000, 40000] bps`) and altar recipe; elemental resistance shifts automatically on `lazy_epoch()`, not by AI proposal. Live NEP-171 trophy IDs are `spirefi-trophy-r{round}-f{floor}`, and NEP-297 `"standard"` is `"spire"`.
 
 ---
 

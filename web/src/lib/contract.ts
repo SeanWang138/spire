@@ -3,8 +3,9 @@
  *
  * View calls use a raw JSON-RPC query against the public testnet endpoints so
  * they work even without a local wallet session. Change (write) methods are
- * signed with the player's Function Call Access Key held in localStorage
- * (see lib/near.ts SessionManager) — fully signless, no wallet modal.
+ * signed with the player's Ephemeral Testnet Session Subaccount keypair
+ * (`FullAccess`, funded ~0.60 NEAR via /api/accounts, held in localStorage —
+ * see lib/near.ts SessionManager) for zero-popup signless play on testnet.
  *
  * u128 fields arrive as strings from the contract's JSON serializer and stay
  * strings on this side to avoid float drift.
@@ -12,12 +13,13 @@
 
 import { KeyPair, Near, transactions, keyStores } from "near-api-js";
 import type { Account } from "near-api-js";
-import { SessionManager, NETWORK_ID, RPC_ENDPOINTS } from "@/lib/near";
+import { SessionManager, NETWORK_ID, RPC_ENDPOINTS } from "./near";
 import {
+  FLOOR_COUNT,
   MATERIAL_TOKENS,
   WEAPON_TOKENS,
   nearToYocto,
-} from "@/lib/spire/constants";
+} from "./spire/constants";
 
 export const CONTRACT_ID =
   process.env.NEXT_PUBLIC_CONTRACT_ID || "spire.testnet";
@@ -132,6 +134,7 @@ export interface AiStateResponse {
 }
 
 export interface AiProposalPayload {
+  /** 0-indexed on-chain floor (0..2), matching the canonical signed message. */
   floor: number;
   epoch: number;
   buyback_multiplier_bps: [number, number, number];
@@ -171,200 +174,19 @@ function base64Args(args: Record<string, unknown>): string {
   return btoa(bin);
 }
 
-function getMockViewFallback(method: string, args: Record<string, unknown> = {}): unknown {
-  switch (method) {
-    case "get_tower":
-      return {
-        floors: [
-          {
-            floor: 0,
-            hp: 1000,
-            max_hp: 1000,
-            round: 1,
-            first_attack_ns: 0,
-            deadline_ns: 0,
-            time_left_ns: 0,
-            expired: false,
-            jackpot: "45000000000000000000000000",
-            buyback_reserve: "15000000000000000000000000",
-            dividend_pool: "5000000000000000000000000",
-            backer_total_shares: "100",
-            backer_cycle: 1,
-            total_damage: "140",
-            loot: [0, 0, 0],
-            volume_buyback_epoch: 0,
-            unlocked: true,
-            ward_element: null,
-            enrage: false,
-          },
-          {
-            floor: 1,
-            hp: 2500,
-            max_hp: 2500,
-            round: 1,
-            first_attack_ns: 0,
-            deadline_ns: 1800000000000,
-            time_left_ns: 1800000000000,
-            expired: false,
-            jackpot: "75000000000000000000000000",
-            buyback_reserve: "25000000000000000000000000",
-            dividend_pool: "8000000000000000000000000",
-            backer_total_shares: "250",
-            backer_cycle: 1,
-            total_damage: "0",
-            loot: [0, 0, 0],
-            volume_buyback_epoch: 0,
-            unlocked: true,
-            ward_element: 1,
-            enrage: false,
-          },
-          {
-            floor: 2,
-            hp: 5000,
-            max_hp: 5000,
-            round: 1,
-            first_attack_ns: 0,
-            deadline_ns: 1200000000000,
-            time_left_ns: 1200000000000,
-            expired: false,
-            jackpot: "120000000000000000000000000",
-            buyback_reserve: "40000000000000000000000000",
-            dividend_pool: "12000000000000000000000000",
-            backer_total_shares: "500",
-            backer_cycle: 1,
-            total_damage: "0",
-            loot: [0, 0, 0],
-            volume_buyback_epoch: 0,
-            unlocked: true,
-            ward_element: null,
-            enrage: true,
-          },
-        ],
-      };
-    case "get_floor": {
-      const fl = (args.floor as number) ?? 0;
-      const maxHp = fl === 1 ? 2500 : fl === 2 ? 5000 : 1000;
-      return {
-        floor: fl,
-        hp: maxHp,
-        max_hp: maxHp,
-        round: 1,
-        first_attack_ns: 0,
-        deadline_ns: fl === 1 ? 1800000000000 : fl === 2 ? 1200000000000 : 0,
-        time_left_ns: fl === 1 ? 1800000000000 : fl === 2 ? 1200000000000 : 0,
-        expired: false,
-        jackpot: "45000000000000000000000000",
-        buyback_reserve: "15000000000000000000000000",
-        dividend_pool: "5000000000000000000000000",
-        backer_total_shares: "100",
-        backer_cycle: 1,
-        total_damage: "140",
-        loot: [0, 0, 0],
-        volume_buyback_epoch: 0,
-        unlocked: true,
-        ward_element: fl === 1 ? 1 : null,
-        enrage: fl === 2,
-      };
-    }
-    case "get_meta":
-      return {
-        epoch: 1,
-        resistance: [8500, 3114, 1886],
-        next_epoch_in_ns: 3600000000000,
-        shifted_by: 0,
-        supply: [80, 20, 10],
-        weak_element: 2,
-      };
-    case "get_inventory":
-      return {
-        weapons: [7, 3, 4],
-        starter_locked: [4, 1, 0],
-        materials: {
-          "ore:iron": 12,
-          "essence:solar": 6,
-          "essence:frost": 14,
-          "essence:void": 8,
-        },
-      };
-    case "get_merchant":
-      return {
-        cash: "18500000000000000000000000",
-        stock: {
-          "ore:iron": 45,
-          "essence:solar": 20,
-          "essence:frost": 65,
-          "essence:void": 38,
-          "weapon:solar": 12,
-          "weapon:frost": 8,
-          "weapon:void": 15,
-        },
-        is_open: true,
-      };
-    case "get_balance":
-      return "2500000000000000000000000";
-    case "get_damage":
-      return 140;
-    case "get_claimable":
-      return "0";
-    case "get_claimable_loot":
-      return [0, 0, 0];
-    case "get_quote":
-      return {
-        item_id: (args.item as string) || "ore:iron",
-        side: (args.side as "buy" | "sell") || "buy",
-        qty: (args.qty as number) || 1,
-        unit_price: "100000000000000000000000",
-        total_price: "100000000000000000000000",
-        is_open: true,
-        reason: "Bonding curve formula (k = 0.05)",
-      };
-    case "get_buyback_quote":
-      return {
-        floor: (args.floor as number) || 0,
-        element: (args.element as number) || 0,
-        unit_price: "120000000000000000000000",
-        multiplier_bps: 12000,
-      };
-    case "get_backer":
-      return {
-        floor: (args.floor as number) || 0,
-        account_id: (args.account_id as string) || "",
-        shares: "0",
-        current_cycle: 1,
-        join_cycle: 1,
-        last_claimed_cycle: 1,
-      };
-    case "get_ai_state":
-      return {
-        floor: 0,
-        epoch: 1,
-        nonce: 1,
-        buyback_multiplier_bps: [12000, 10000, 15000],
-        altar_recipe_id: "solar_transmute",
-        taunt: "MALAKOR: 'Your feeble mortal armaments merely fuel my adaptive aegis.'",
-        chat_id: "chat_0x892a",
-        signature_hex: "0x89f2c71eb5b655a5059868b7d0cea55509db90f25e451565",
-      };
-    case "nft_total_supply":
-      return "1";
-    case "nft_token":
-      if (args.token_id === "spirefi-trophy-r1-f3") {
-        return {
-          token_id: "spirefi-trophy-r1-f3",
-          owner_id: "vanguard.spire.testnet",
-          metadata: {
-            title: "SpireFi Trophy - Floor 3 Round 1",
-            description:
-              "Conquest trophy awarded to vanguard.spire.testnet for conquering Floor 3 of SpireFi in Round 1.",
-            media:
-              "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 500 500\"><rect width=\"500\" height=\"500\" rx=\"20\" fill=\"#090d16\"/><rect x=\"20\" y=\"20\" width=\"460\" height=\"460\" rx=\"12\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2\"/><polygon points=\"250,65 290,145 210,145\" fill=\"#f59e0b\"/><text x=\"250\" y=\"195\" font-family=\"sans-serif\" font-size=\"22\" font-weight=\"bold\" fill=\"#f59e0b\" text-anchor=\"middle\">SPIREFI CONQUEROR</text><text x=\"250\" y=\"222\" font-family=\"sans-serif\" font-size=\"14\" fill=\"#94a3b8\" text-anchor=\"middle\">FLOOR 3 CLEARED · ROUND 1</text><text x=\"250\" y=\"290\" font-family=\"monospace\" font-size=\"15\" fill=\"#f8fafc\" text-anchor=\"middle\">vanguard.spire.testnet</text><text x=\"250\" y=\"350\" font-family=\"monospace\" font-size=\"16\" fill=\"#38bdf8\" text-anchor=\"middle\">12.00 NEAR JACKPOT</text></svg>",
-            issued_at: 1731500000000000000,
-          },
-        };
-      }
-      return null;
-    default:
-      return null;
+export class RpcUnavailableError extends Error {
+  public readonly method: string;
+
+  constructor(method: string, cause?: unknown) {
+    const detail =
+      cause instanceof Error
+        ? cause.message
+        : cause
+          ? String(cause)
+          : "all RPC endpoints failed";
+    super(`VIEW_UNAVAILABLE: ${method} (${detail})`);
+    this.name = "RpcUnavailableError";
+    this.method = method;
   }
 }
 
@@ -385,6 +207,7 @@ async function rpcViewRaw(
     },
   };
 
+  let lastError: unknown;
   for (const url of RPC_ENDPOINTS) {
     try {
       const res = await fetch(url, {
@@ -392,19 +215,34 @@ async function rpcViewRaw(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status} from ${url}`);
+        continue;
+      }
       const data = await res.json();
+      if (data?.error) {
+        lastError = new Error(
+          typeof data.error?.message === "string"
+            ? data.error.message
+            : JSON.stringify(data.error)
+        );
+        continue;
+      }
+      if (data?.result?.error) {
+        lastError = new Error(String(data.result.error));
+        continue;
+      }
       if (data.result?.result) {
         const rawBytes = new Uint8Array(data.result.result);
         return JSON.parse(new TextDecoder().decode(rawBytes));
       }
-    } catch {
-      // Continue to next RPC endpoint
+      lastError = new Error(`Malformed RPC response for ${method} from ${url}`);
+    } catch (err) {
+      lastError = err;
     }
   }
 
-  // Graceful fallback: when contract is not yet deployed or RPC is unreachable,
-  // return authoritative domain fallback so UI loads seamlessly.
-  return getMockViewFallback(method, args);
+  throw new RpcUnavailableError(method, lastError);
 }
 
 async function rpcView<T>(
@@ -526,11 +364,23 @@ export async function get_merchant(): Promise<MerchantResponse> {
   };
 }
 
+function assertMerchantMaterialItem(item: string): void {
+  if (
+    item.startsWith("weapon:") ||
+    !(MATERIAL_TOKENS as readonly string[]).includes(item)
+  ) {
+    throw new Error(
+      `E_INVALID_ARGS: NPC Merchant trades materials only (${MATERIAL_TOKENS.join(", ")}); "${item}" is rejected client-side (sell weapons at Boss Buyback).`
+    );
+  }
+}
+
 export async function get_quote(
   item: ItemId,
   side: "buy" | "sell",
   qty: number
 ): Promise<MerchantQuote> {
+  assertMerchantMaterialItem(item);
   return rpcView<MerchantQuote>("get_quote", { item, side, qty });
 }
 
@@ -585,10 +435,10 @@ export async function nft_token(tokenId: string): Promise<NftToken | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Change calls (signed with the Function Call Access Key — signless)
+// Change calls (signed with Ephemeral Testnet Session Subaccount keypair)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_GAS = 30_000_000_000_000n; // 30 TGas (optimal for 0.1 NEAR subaccount)
+const DEFAULT_GAS = 30_000_000_000_000n; // 30 TGas (optimal for 0.60 NEAR subaccount)
 
 async function signedCall(
   sessionAccountId: string,
@@ -710,9 +560,13 @@ export async function claim_jackpot(): Promise<ChangeResult> {
   return changeCall("claim_jackpot", {}, { gas: 50_000_000_000_000n });
 }
 
-/** Anyone can resolve a floor whose deadline passed (boss regains the pot). */
-export async function resolve_expired(floor: number): Promise<ChangeResult> {
-  return changeCall("resolve_expired", { floor: toOnchainFloor(floor) }, { gas: 40_000_000_000_000n });
+/**
+ * @deprecated `resolve_expired` does not exist on the live contract — lazy settlement runs on next `attack()`.
+ */
+export async function resolve_expired(_floor: number): Promise<ChangeResult> {
+  throw new Error(
+    "resolve_expired does not exist on live contract — lazy settlement runs on next attack()"
+  );
 }
 
 /** Keeper/TEE admin entry point (kept for ABI completeness). */
@@ -726,6 +580,7 @@ export async function sell_to_merchant(
   item: ItemId,
   qty: number
 ): Promise<ChangeResult> {
+  assertMerchantMaterialItem(item);
   return changeCall("sell_to_merchant", { item, qty });
 }
 
@@ -733,6 +588,7 @@ export async function buy_from_merchant(
   item: ItemId,
   qty: number
 ): Promise<ChangeResult> {
+  assertMerchantMaterialItem(item);
   return changeCall("buy_from_merchant", { item, qty });
 }
 
@@ -809,15 +665,29 @@ export async function back_boss_vault(
 
 // --- Boss Brain proposal (signed by the TEE, relayed) ---
 
+/**
+ * Submits a TEE-signed AI proposal for UI `floor` (1..3 -> 0-indexed `0..2`,
+ * consistent with `get_ai_state`). `proposal.floor` must already match the
+ * 0-indexed on-chain floor from the signed canonical message.
+ */
 export async function apply_ai_proposal(
   floor: number,
   proposal: AiProposalPayload,
-  chat_id: string,
-  signature: string
+  chat_id: string | null,
+  signature: number[]
 ): Promise<ChangeResult> {
+  const onchainFloor = toOnchainFloor(floor);
+  if (!Number.isInteger(onchainFloor) || onchainFloor < 0 || onchainFloor >= FLOOR_COUNT) {
+    throw new Error(`E_INVALID_ARGS: invalid UI floor ${floor}`);
+  }
+  if (proposal.floor !== onchainFloor) {
+    throw new Error(
+      `E_INVALID_PROPOSAL: proposal.floor (${proposal.floor}) must match 0-indexed contract floor (${onchainFloor}) for UI floor ${floor}`
+    );
+  }
   return changeCall(
     "apply_ai_proposal",
-    { floor, proposal, chat_id, signature },
+    { floor: onchainFloor, proposal, chat_id, signature },
     { gas: 200_000_000_000_000n }
   );
 }
@@ -912,4 +782,4 @@ export async function provision_account(
 // Shared formatting helpers (kept close to the adapter for convenience)
 // ---------------------------------------------------------------------------
 
-export { nearToYocto, yoctoToNear } from "@/lib/spire/constants";
+export { nearToYocto, yoctoToNear } from "./spire/constants";

@@ -3,6 +3,40 @@ import { connect, keyStores, KeyPair, utils } from "near-api-js";
 
 export const dynamic = "force-dynamic";
 
+const DEFAULT_SUBACCOUNT_FUNDING_YOCTO = "600000000000000000000000"; // 0.60 NEAR
+const NEAR_YOCTO_DECIMALS = 24;
+
+function nearDecimalToYocto(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    return null;
+  }
+  const [whole, frac = ""] = trimmed.split(".");
+  const paddedFrac = frac
+    .padEnd(NEAR_YOCTO_DECIMALS, "0")
+    .slice(0, NEAR_YOCTO_DECIMALS);
+  const yocto = `${whole}${paddedFrac}`.replace(/^0+(?=\d)/, "") || "0";
+  return BigInt(yocto) > 0n ? yocto : null;
+}
+
+function resolveFundingYocto(): string {
+  const envYocto = process.env.SUBACCOUNT_FUNDING_YOCTO?.trim();
+  if (envYocto && /^\d+$/.test(envYocto)) {
+    const normalized = BigInt(envYocto);
+    if (normalized > 0n) {
+      return normalized.toString();
+    }
+  }
+  const envNear = process.env.AUTO_ACCOUNT_FUNDING_NEAR?.trim();
+  if (envNear) {
+    const converted = nearDecimalToYocto(envNear);
+    if (converted) {
+      return converted;
+    }
+  }
+  return DEFAULT_SUBACCOUNT_FUNDING_YOCTO;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -12,18 +46,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing account_id" }, { status: 400 });
     }
 
-    const parentAccountId =
+    const parentAccountId = (
       process.env.NEAR_PARENT_ACCOUNT_ID ||
       process.env.NEXT_PUBLIC_CONTRACT_ID ||
-      "spire.testnet";
-    const parentPrivateKey =
+      "spire.testnet"
+    ).trim();
+    const parentPrivateKey = (
       process.env.NEAR_PARENT_PRIVATE_KEY ||
       process.env.KEEPER_PRIVATE_KEY ||
-      "";
-    const rpcUrl =
-      process.env.NEAR_RPC_URL || "https://rpc.testnet.fastnear.com";
-    const fundingYocto =
-      process.env.SUBACCOUNT_FUNDING_YOCTO || "100000000000000000000000"; // 0.1 NEAR
+      ""
+    ).trim();
+    const rpcUrl = (
+      process.env.NEAR_RPC_URL || "https://rpc.testnet.fastnear.com"
+    ).trim();
+    const fundingYocto = resolveFundingYocto();
 
     // If private key is configured (e.g. in Vercel Environment Variables), execute real on-chain creation
     if (parentPrivateKey) {
@@ -49,6 +85,8 @@ export async function POST(req: NextRequest) {
           account_id,
           public_key: targetPublicKey.toString(),
           onchain: true,
+          funding_yocto: fundingYocto,
+          keyMode: "ephemeral-full-access",
         });
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -67,15 +105,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Preview / Sandbox fallback when NEAR_PARENT_PRIVATE_KEY is not yet populated
-    return NextResponse.json({
-      success: true,
-      status: "provisioned",
-      account_id,
-      public_key: public_key || "ed25519:mock_preview_key",
-      onchain: false,
-      message: "Preview mode provisioned. Configure NEAR_PARENT_PRIVATE_KEY in environment for live on-chain sub-account creation.",
-    });
+    return NextResponse.json(
+      {
+        error: "TESTNET_FAUCET_NOT_CONFIGURED",
+        message:
+          "Configure NEAR_PARENT_PRIVATE_KEY in environment to provision live testnet accounts.",
+      },
+      { status: 503 }
+    );
   } catch (error: unknown) {
     console.error("[API Accounts] Request parsing error:", error);
     return NextResponse.json(

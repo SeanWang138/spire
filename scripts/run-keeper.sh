@@ -4,9 +4,6 @@
 # ==============================================================================
 set -euo pipefail
 
-# Ensure Node v26 toolchain is in PATH
-export PATH="/home/seanalexios/.nvm/versions/node/v26.13.0/bin:$PATH"
-
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELAYER_DIR="$REPO_ROOT/relayer"
 
@@ -21,11 +18,12 @@ fi
 
 # Configurable environment defaults
 export NEAR_NETWORK="${NEAR_NETWORK:-testnet}"
-export NEAR_RPC_URL="${NEAR_RPC_URL:-https://test.rpc.fastnear.com}"
+export NEAR_RPC_URL="${NEAR_RPC_URL:-https://rpc.testnet.fastnear.com}"
 export CONTRACT_ID="${CONTRACT_ID:-spire.testnet}"
 export KEEPER_ACCOUNT_ID="${KEEPER_ACCOUNT_ID:-keeper.spire.testnet}"
 export KEEPER_PRIVATE_KEY="${KEEPER_PRIVATE_KEY:-}"
-export MOCK_TEE="${MOCK_TEE:-true}"
+export MOCK_TEE="${MOCK_TEE:-false}"
+export KEEPER_AI_MODE="${KEEPER_AI_MODE:-epoch-only}"
 export POLL_INTERVAL_MS="${POLL_INTERVAL_MS:-5000}"
 export STREAMER_PORT="${STREAMER_PORT:-8080}"
 

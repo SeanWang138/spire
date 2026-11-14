@@ -173,9 +173,9 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       return;
     }
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
     const initW = Math.max(container.clientWidth, 280);
     const initH = Math.max(container.clientHeight, 320);
+    const dpr = Math.min(window.devicePixelRatio || 1, initW < 640 ? 1.5 : 1.75);
     renderer.setPixelRatio(dpr);
     renderer.setSize(initW, initH);
     renderer.setClearColor(0x050509, 1);
@@ -185,11 +185,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.touchAction = "pan-y";
-    renderer.domElement.setAttribute("role", "img");
-    renderer.domElement.setAttribute(
-      "aria-label",
-      "Interactive 3D Gothic Spire Citadel anchored over obsidian cliffs with HDR optical bloom. Drag horizontally to orbit or click a floor tier."
-    );
+    renderer.domElement.setAttribute("aria-hidden", "true");
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -2122,6 +2118,9 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     };
 
     const handlePointerEnter = () => setIsTowerHovered(true);
+    const handlePointerCancel = () => {
+      isDragging = false;
+    };
     const handlePointerLeave = () => {
       isDragging = false;
       setIsTowerHovered(false);
@@ -2132,6 +2131,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     renderer.domElement.addEventListener("pointermove", handlePointerMove);
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
     renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -2206,10 +2206,14 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
 
       if (motionScale > 0) {
         time += dt * motionScale;
-        if (!isDragging) {
-          thetaRef.current +=
-            (0.0045 + hoverScalar * 0.0042) * motionScale * dtFactor + velThetaRef.current;
-          velThetaRef.current *= Math.pow(0.92, dtFactor);
+      }
+      if (!isDragging) {
+        const autoDrift =
+          motionScale > 0 ? (0.0045 + hoverScalar * 0.0042) * motionScale * dtFactor : 0;
+        thetaRef.current += autoDrift + velThetaRef.current;
+        velThetaRef.current *= Math.pow(0.92, dtFactor);
+        if (Math.abs(velThetaRef.current) < 0.00025) {
+          velThetaRef.current = 0;
         }
       }
 
@@ -2654,6 +2658,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       const shouldRender =
         motionScale > 0 ||
         isDragging ||
+        Math.abs(velThetaRef.current) > 0 ||
         hoverStillEasing ||
         camStillEasing ||
         cascadeSettling ||
@@ -2679,6 +2684,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
       renderer.domElement.removeEventListener("pointermove", handlePointerMove);
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
       renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
 
       scene.environment = null;
@@ -2706,6 +2712,24 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
     needsSingleRenderRef.current = true;
   }, []);
 
+  const handleCanvasKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        nudgeOrbit(-0.45);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        nudgeOrbit(0.45);
+      } else if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        resetOrbit();
+      } else if (e.key === "1" || e.key === "2" || e.key === "3") {
+        onSelectFloor?.(Number(e.key));
+      }
+    },
+    [nudgeOrbit, resetOrbit, onSelectFloor]
+  );
+
   if (webglFailed) {
     return (
       <CitadelFallbackSvg
@@ -2719,45 +2743,53 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
 
   return (
     <div className={`relative flex flex-col ${className}`}>
-      <div
-        ref={containerRef}
-        className="relative w-full h-full min-h-[340px] flex-1"
-      >
+      <div className="relative w-full h-full min-h-[340px] flex-1 flex">
+        <div
+          ref={containerRef}
+          tabIndex={0}
+          role="region"
+          aria-label="Interactive 3D Gothic Spire Citadel. Drag or use Left and Right arrow keys to orbit, press R to reset, or keys 1 to 3 to inspect a floor."
+          onKeyDown={handleCanvasKeyDown}
+          className="w-full h-full min-h-[340px] flex-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+        />
         {showControls && (
-          <div className="pointer-events-auto absolute top-3 right-3 flex items-center gap-1.5 z-10">
+          <div className="pointer-events-auto absolute top-3 right-3 flex items-center gap-2 z-10">
             <button
               type="button"
               onClick={() => setPaused(!paused)}
               aria-pressed={paused}
               aria-label={paused ? "Resume 3D citadel motion" : "Pause 3D citadel motion"}
               title={paused ? "Resume motion" : "Pause motion"}
-              className="min-w-[40px] min-h-[40px] px-2.5 rounded-lg bg-[#090910]/80 border border-brass/25 text-ash hover:text-parchment hover:border-solar/60 flex items-center justify-center transition-colors"
+              className="min-w-[44px] min-h-[44px] px-2.5 rounded-lg bg-[#090910]/85 border border-brass/25 text-ash hover:text-parchment hover:border-solar/60 flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
             >
-              {paused ? <Play className="w-4 h-4 text-solar" /> : <Pause className="w-4 h-4 text-frost" />}
+              {paused ? <Play className="w-4 h-4 text-solar" aria-hidden="true" /> : <Pause className="w-4 h-4 text-frost" aria-hidden="true" />}
             </button>
             <button
               type="button"
               onClick={() => nudgeOrbit(-0.45)}
               aria-label="Rotate citadel left"
-              className="min-w-[40px] min-h-[40px] rounded-lg bg-[#090910]/80 border border-brass/25 text-ash hover:text-parchment hover:border-solar/50 hidden sm:flex items-center justify-center transition-colors"
+              title="Rotate left"
+              className="min-w-[44px] min-h-[44px] rounded-lg bg-[#090910]/85 border border-brass/25 text-ash hover:text-parchment hover:border-solar/50 flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             </button>
             <button
               type="button"
               onClick={() => nudgeOrbit(0.45)}
               aria-label="Rotate citadel right"
-              className="min-w-[40px] min-h-[40px] rounded-lg bg-[#090910]/80 border border-brass/25 text-ash hover:text-parchment hover:border-solar/50 hidden sm:flex items-center justify-center transition-colors"
+              title="Rotate right"
+              className="min-w-[44px] min-h-[44px] rounded-lg bg-[#090910]/85 border border-brass/25 text-ash hover:text-parchment hover:border-solar/50 flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
             <button
               type="button"
               onClick={resetOrbit}
               aria-label="Reset camera orbit"
-              className="min-w-[40px] min-h-[40px] rounded-lg bg-[#090910]/80 border border-brass/25 text-ash hover:text-parchment hover:border-solar/50 flex items-center justify-center transition-colors"
+              title="Reset camera orbit"
+              className="min-w-[44px] min-h-[44px] rounded-lg bg-[#090910]/85 border border-brass/25 text-ash hover:text-parchment hover:border-solar/50 flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </div>
         )}
@@ -2775,11 +2807,11 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
             const isSelected = selectedFloor === floorNum;
             const icon =
               floorNum === 1 ? (
-                <Flame className="w-3.5 h-3.5 text-solar" />
+                <Flame className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
               ) : floorNum === 2 ? (
-                <Snowflake className="w-3.5 h-3.5 text-frost" />
+                <Snowflake className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
               ) : (
-                <Sparkles className="w-3.5 h-3.5 text-void" />
+                <Sparkles className="w-3.5 h-3.5 text-void" aria-hidden="true" />
               );
 
             return (
@@ -2790,7 +2822,7 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
                 onMouseEnter={() => setHoveredFloor(floorNum)}
                 onMouseLeave={() => setHoveredFloor(null)}
                 aria-pressed={isSelected}
-                className={`min-h-[44px] px-2.5 py-2 rounded-lg border text-left transition-all flex items-center justify-between gap-1.5 ${
+                className={`min-h-[44px] px-1.5 sm:px-2.5 py-2 rounded-lg border text-left transition-all flex items-center justify-between gap-1 sm:gap-2 ${
                   isSelected
                     ? floorNum === 3
                       ? "bg-void/15 border-void text-parchment"
@@ -2800,14 +2832,17 @@ export const SpireCitadel3D: React.FC<SpireCitadel3DProps> = ({
                     : "bg-panel-dark/90 border-brass/20 text-ash hover:border-brass/45 hover:text-parchment"
                 }`}
               >
-                <div className="flex items-center gap-1.5 min-w-0">
+                <div className="flex items-center gap-1 sm:gap-2 min-w-0">
                   {icon}
-                  <span className="font-mono text-xs font-semibold truncate">
+                  <span className="font-mono text-xs font-semibold whitespace-nowrap">
                     Floor {floorNum}
                   </span>
                 </div>
                 {!unlocked ? (
-                  <Lock className="w-3 h-3 text-pewter shrink-0" aria-label="Locked" />
+                  <>
+                    <Lock className="w-3 h-3 text-pewter shrink-0" aria-hidden="true" />
+                    <span className="sr-only">Locked</span>
+                  </>
                 ) : fState ? (
                   <span className="font-mono-numbers text-xs text-ash hidden xl:inline">
                     {fState.hp}

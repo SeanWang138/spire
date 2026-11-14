@@ -27,12 +27,12 @@ async function main() {
   const masterNear = await connect({ networkId: "testnet", nodeUrl: RPC_URL, keyStore: masterKeyStore });
   const masterAccount = await masterNear.account(CONTRACT_ID);
 
-  console.log(`[3] Provisioning ${accountId} on-chain with 0.1 NEAR funding...`);
+  console.log(`[3] Provisioning ${accountId} on-chain with 0.60 NEAR funding...`);
   const targetPublicKey = utils.PublicKey.from(browserPublicKey);
   const createTx = await masterAccount.createAccount(
     accountId,
     targetPublicKey,
-    100000000000000000000000n // 0.1 NEAR
+    600000000000000000000000n // 0.60 NEAR
   );
   console.log(`[4] Account created! Tx: ${createTx.transaction_outcome?.id}`);
 

@@ -2,8 +2,14 @@
 
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Skull, ShieldAlert, Zap, Flame, Snowflake, Sparkles } from "lucide-react";
+import { Skull, ShieldAlert, Zap, Flame, Snowflake, Sparkles, Timer, Trophy, Lock } from "lucide-react";
 import { useMotionControl } from "@/lib/spire/motion";
+
+export const BOSS_PROFILES: Record<number, { title: string; subtitle: string; floorRoman: string }> = {
+  1: { title: "Malakor, Solar Sentinel", subtitle: "Floor 1 Foundation Warden", floorRoman: "Floor I" },
+  2: { title: "Valkyr, Glacial Warden", subtitle: "Floor 2 Frost-Warded Bastion", floorRoman: "Floor II" },
+  3: { title: "Kaelen, Void Sovereign", subtitle: "Floor 3 Enraging Apex", floorRoman: "Floor III" },
+};
 
 interface BossArenaProps {
   floor: number;
@@ -14,46 +20,49 @@ interface BossArenaProps {
   locked?: boolean;
   lastDamage?: number | null;
   strikeSeq?: number;
+  round?: number;
+  headingLevel?: "h1" | "h2";
 }
-
-const BOSS_PROFILES: Record<number, { title: string; subtitle: string }> = {
-  1: { title: "Malakor, Solar Sentinel", subtitle: "Floor 1 Foundation Warden" },
-  2: { title: "Valkyr, Glacial Warden", subtitle: "Floor 2 Frost-Warded Bastion" },
-  3: { title: "Kaelen, Void Sovereign", subtitle: "Floor 3 Enraging Apex" },
-};
 
 function BossSigilSvg({ floor, strokeColor }: { floor: number; strokeColor: string }) {
   if (floor === 2) {
     return (
-      <svg className="w-24 h-24 text-slate-200" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-        <polygon points="50,10 78,34 72,76 50,92 28,76 22,34" fill="#10182C" stroke={strokeColor} strokeWidth="2.5" />
-        <polygon points="50,18 66,36 50,52 34,36" fill="#0A1020" stroke="#38BDF8" strokeWidth="1.5" />
-        <line x1="22" y1="34" x2="10" y2="20" stroke="#38BDF8" strokeWidth="2" />
-        <line x1="78" y1="34" x2="90" y2="20" stroke="#38BDF8" strokeWidth="2" />
-        <polygon points="37,54 47,54 44,61 39,61" fill={strokeColor} />
-        <polygon points="53,54 63,54 61,61 56,61" fill={strokeColor} />
-        <polygon points="50,66 56,76 50,84 44,76" fill="#38BDF8" />
+      <svg className="w-28 h-28" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+        <polygon points="60,8 96,34 88,88 60,112 32,88 24,34" fill="#0B1120" stroke={strokeColor} strokeWidth="2.2" />
+        <polygon points="60,18 82,38 60,60 38,38" fill="#090D18" stroke="#38BDF8" strokeWidth="1.6" />
+        <line x1="24" y1="34" x2="10" y2="18" stroke="#38BDF8" strokeWidth="2.2" />
+        <line x1="96" y1="34" x2="110" y2="18" stroke="#38BDF8" strokeWidth="2.2" />
+        <line x1="24" y1="74" x2="12" y2="88" stroke={strokeColor} strokeWidth="1.5" opacity="0.7" />
+        <line x1="96" y1="74" x2="108" y2="88" stroke={strokeColor} strokeWidth="1.5" opacity="0.7" />
+        <polygon points="42,60 56,60 52,69 45,69" fill={strokeColor} />
+        <polygon points="64,60 78,60 75,69 68,69" fill={strokeColor} />
+        <polygon points="60,76 68,90 60,102 52,90" fill="#38BDF8" />
+        <circle cx="60" cy="38" r="4" fill="#F3EAD8" />
       </svg>
     );
   }
   if (floor === 3) {
     return (
-      <svg className="w-24 h-24 text-slate-200" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-        <polygon points="50,14 82,36 74,78 50,92 26,78 18,36" fill="#10182C" stroke={strokeColor} strokeWidth="2.5" />
-        <polygon points="28,30 10,8 36,18" fill="#0A1020" stroke="#EF4444" strokeWidth="2" />
-        <polygon points="72,30 90,8 64,18" fill="#0A1020" stroke="#EF4444" strokeWidth="2" />
-        <polygon points="34,44 66,44 58,53 42,53" fill="#EF4444" />
-        <polygon points="50,58 58,72 50,84 42,72" fill={strokeColor} />
+      <svg className="w-28 h-28" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+        <polygon points="60,12 98,38 90,90 60,112 30,90 22,38" fill="#0E0B1A" stroke={strokeColor} strokeWidth="2.2" />
+        <polygon points="32,32 10,6 42,18" fill="#090A10" stroke="#EF4444" strokeWidth="2" />
+        <polygon points="88,32 110,6 78,18" fill="#090A10" stroke="#EF4444" strokeWidth="2" />
+        <polygon points="48,18 60,4 72,18 60,28" fill="#181A28" stroke="#F2A63B" strokeWidth="1.4" />
+        <polygon points="39,50 81,50 71,61 49,61" fill="#EF4444" />
+        <polygon points="60,68 70,85 60,102 50,85" fill={strokeColor} />
+        <circle cx="60" cy="55" r="3.5" fill="#F3EAD8" />
       </svg>
     );
   }
   return (
-    <svg className="w-24 h-24 text-slate-200" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-      <polygon points="50,16 74,30 78,64 50,88 22,64 26,30" fill="#10182C" stroke={strokeColor} strokeWidth="2.5" />
-      <polygon points="32,26 18,12 38,20" fill="#0A1020" stroke="#64748B" strokeWidth="1.5" />
-      <polygon points="68,26 82,12 62,20" fill="#0A1020" stroke="#64748B" strokeWidth="1.5" />
-      <rect x="35" y="45" width="30" height="8" rx="1" fill={strokeColor} />
-      <circle cx="50" cy="70" r="4.5" fill="#EF4444" />
+    <svg className="w-28 h-28" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+      <polygon points="60,14 92,32 96,76 60,108 24,76 28,32" fill="#111018" stroke={strokeColor} strokeWidth="2.2" />
+      <polygon points="36,28 18,10 44,20" fill="#090A10" stroke="#E5A93B" strokeWidth="1.6" />
+      <polygon points="84,28 102,10 76,20" fill="#090A10" stroke="#E5A93B" strokeWidth="1.6" />
+      <polygon points="60,22 72,36 60,48 48,36" fill="none" stroke="#F2A63B" strokeWidth="1.4" />
+      <rect x="40" y="54" width="40" height="9" rx="1.5" fill={strokeColor} />
+      <circle cx="60" cy="82" r="5.5" fill="#EF4444" />
+      <circle cx="60" cy="82" r="2.2" fill="#F3EAD8" />
     </svg>
   );
 }
@@ -67,6 +76,8 @@ export const BossArena: React.FC<BossArenaProps> = ({
   locked = false,
   lastDamage = null,
   strikeSeq = 0,
+  round,
+  headingLevel = "h1",
 }) => {
   const { paused, reducedMotion } = useMotionControl();
   const freeze = paused || reducedMotion;
@@ -75,165 +86,233 @@ export const BossArena: React.FC<BossArenaProps> = ({
     {
       name: "Solar Resonant",
       aura: "from-solar/20 via-solar/5 to-transparent",
-      borderColor: "border-solar/45",
-      textColor: "text-amber-200",
-      strokeHex: "#F59E0B",
+      borderColor: "border-solar/50",
+      textColor: "text-solar",
+      strokeHex: "#F2A63B",
       icon: Flame,
     },
     {
       name: "Frost Crystalline",
       aura: "from-frost/20 via-frost/5 to-transparent",
-      borderColor: "border-frost/45",
-      textColor: "text-sky-200",
+      borderColor: "border-frost/50",
+      textColor: "text-frost",
       strokeHex: "#38BDF8",
       icon: Snowflake,
     },
     {
       name: "Void Entropic",
       aura: "from-void/20 via-void/5 to-transparent",
-      borderColor: "border-void/45",
-      textColor: "text-purple-200",
+      borderColor: "border-void/50",
+      textColor: "text-void-text",
       strokeHex: "#A855F7",
       icon: Sparkles,
     },
   ][dominantElement] || {
     name: "Adaptive",
-    aura: "from-slate-500/15 to-transparent",
-    borderColor: "border-white/20",
-    textColor: "text-slate-300",
-    strokeHex: "#94A3B8",
+    aura: "from-brass/15 to-transparent",
+    borderColor: "border-brass/35",
+    textColor: "text-parchment",
+    strokeHex: "#E5A93B",
     icon: Zap,
   };
 
   const DominantIcon = elementStyles.icon;
   const profile = BOSS_PROFILES[floor] ?? BOSS_PROFILES[1];
+  const HeadingTag = headingLevel;
+  const headingText =
+    headingLevel === "h1"
+      ? profile.title
+      : typeof round === "number"
+      ? `Sanctum Chamber · Round ${round}`
+      : "Sanctum Chamber";
 
   return (
-    <div className="relative p-5 overflow-hidden">
+    <div className="relative overflow-hidden">
       <div className={`absolute inset-0 bg-gradient-to-b ${elementStyles.aura} pointer-events-none`} />
 
-      {/* Boss Header Plate */}
-      <div className="relative z-10 flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-[#090A10] border border-brass/25 flex items-center justify-center shrink-0">
-            <Skull className="w-4 h-4 text-hp" aria-hidden="true" />
+      {/* Boss Header Plate (No kicker/eyebrow above heading per DESIGN.md:95) */}
+      <div className="relative z-10 px-5 pt-5 pb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-lg bg-[#090A10] border border-brass/30 flex items-center justify-center shrink-0 mt-0.5">
+            <Skull className="w-5 h-5 text-hp-text" aria-hidden="true" />
           </div>
-          <div>
-            <span className="text-xs font-mono uppercase tracking-wider text-ash block">
+          <div className="min-w-0">
+            <HeadingTag className="font-serif text-xl sm:text-2xl font-bold text-parchment tracking-wide leading-tight">
+              {headingText}
+            </HeadingTag>
+            <p className="font-lore italic text-base text-ash mt-0.5">
               {profile.subtitle}
-            </span>
-            <h1 className="font-serif text-xl sm:text-2xl font-bold text-parchment tracking-wide">
-              {profile.title}
-            </h1>
+              {typeof round === "number" && headingLevel === "h1" ? ` · Round ${round}` : ""}
+            </p>
           </div>
         </div>
 
         <div
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#090A10] border ${elementStyles.borderColor} text-xs font-mono ${elementStyles.textColor}`}
+          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#090A10] border ${elementStyles.borderColor} text-xs font-mono ${elementStyles.textColor}`}
         >
-          <DominantIcon className="w-3.5 h-3.5" aria-hidden="true" />
+          <DominantIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           <span className="font-bold">{elementStyles.name}</span>
         </div>
       </div>
 
-      {/* Boss Monolith Medallion Stage with Rotating Arcane Seal & Floating Damage Burst */}
-      <div className="relative z-10 my-2 flex flex-col items-center justify-center py-5">
-        <div className="relative flex items-center justify-center">
-          {/* Outer Rotating Arcane Sigil Halo */}
-          <motion.svg
-            viewBox="0 0 180 180"
-            aria-hidden="true"
-            animate={freeze ? undefined : { rotate: 360 }}
-            transition={freeze ? undefined : { duration: 28, repeat: Infinity, ease: "linear" }}
-            className="pointer-events-none absolute w-44 h-44 sm:w-48 sm:h-48 opacity-75"
-          >
-            <circle
-              cx="90"
-              cy="90"
-              r="84"
-              fill="none"
-              stroke={elementStyles.strokeHex}
-              strokeOpacity="0.35"
-              strokeWidth="1.2"
-              strokeDasharray="10 6"
-            />
-            <polygon
-              points="90,8 161,130 19,130"
-              fill="none"
-              stroke={elementStyles.strokeHex}
-              strokeOpacity="0.22"
-              strokeWidth="1"
-            />
-            <polygon
-              points="90,172 19,50 161,50"
-              fill="none"
-              stroke={elementStyles.strokeHex}
-              strokeOpacity="0.22"
-              strokeWidth="1"
-            />
-          </motion.svg>
+      {/* Composed 3-Plaque Gothic Encounter Stage */}
+      <div className="relative z-10 grid grid-cols-1 md:grid-cols-12 divide-y md:divide-y-0 md:divide-x divide-brass/20 border-t border-brass/20 bg-[#090A10]/70">
+        {/* Left Plaque: Phase & Ward */}
+        <div className="md:col-span-4 p-4 flex flex-col justify-between gap-3 font-mono text-xs">
+          <div className="space-y-1">
+            <span className="text-pewter uppercase tracking-wider font-semibold block">
+              Encounter Phase
+            </span>
+            <div className="text-parchment font-bold font-mono-numbers">
+              {profile.floorRoman} · Round {typeof round === "number" ? round : 0}
+            </div>
+          </div>
 
-          <motion.div
-            whileHover={freeze ? undefined : { scale: 1.05 }}
-            className={`relative z-10 w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-[#060914] border-2 ${elementStyles.borderColor} flex items-center justify-center shadow-[0_0_28px_rgba(0,0,0,0.8)] transition-all duration-300`}
-          >
-            <BossSigilSvg floor={floor} strokeColor={elementStyles.strokeHex} />
-          </motion.div>
-
-          {/* Floating Critical Damage Popup on Attack Dispatch */}
-          <AnimatePresence>
-            {strikeSeq > 0 && lastDamage !== null && (
-              <motion.div
-                key={strikeSeq}
-                initial={freeze ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.7 }}
-                animate={{ opacity: 1, y: -34, scale: 1.12 }}
-                exit={{ opacity: 0, y: -56 }}
-                transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-                className="pointer-events-none absolute -top-2 z-20 px-3 py-1 rounded-full bg-solar text-slate-950 font-mono-numbers text-sm font-extrabold border border-amber-200 shadow-lg"
-              >
-                -{lastDamage.toLocaleString("en-US")} DMG
-              </motion.div>
+          <div className="space-y-1">
+            <span className="text-pewter uppercase tracking-wider font-semibold block">
+              Active Ward
+            </span>
+            {floor === 2 || wardElement !== null ? (
+              <div className="text-frost font-semibold">
+                Frost Ward: +1,500 bps vs Frost
+              </div>
+            ) : (
+              <div className="text-ash">Meta-Driven Resistance Only</div>
             )}
-          </AnimatePresence>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-pewter uppercase tracking-wider font-semibold block">
+              Tribute Rule
+            </span>
+            <div className="text-ash">Seizes 1 unlocked weapon at &ge;7,000 bps</div>
+          </div>
         </div>
 
-        {locked && (
-          <p className="mt-5 text-xs font-mono text-amber-200 bg-solar/15 border border-solar/40 rounded-lg px-3.5 py-1.5">
-            Floor {floor} opens after Floor {floor - 1} falls
-          </p>
-        )}
-      </div>
+        {/* Centerpiece: Boss Crown / Sigil & Astrolabe Ring */}
+        <div className="md:col-span-4 py-5 px-4 flex flex-col items-center justify-center relative">
+          <div className="relative flex items-center justify-center">
+            <motion.svg
+              viewBox="0 0 200 200"
+              aria-hidden="true"
+              animate={freeze ? undefined : { rotate: 360 }}
+              transition={freeze ? undefined : { duration: 32, repeat: Infinity, ease: "linear" }}
+              className="pointer-events-none absolute w-44 h-44 opacity-80"
+            >
+              <circle
+                cx="100"
+                cy="100"
+                r="92"
+                fill="none"
+                stroke={elementStyles.strokeHex}
+                strokeOpacity="0.32"
+                strokeWidth="1.2"
+                strokeDasharray="10 6"
+              />
+              <circle
+                cx="100"
+                cy="100"
+                r="76"
+                fill="none"
+                stroke="#E5A93B"
+                strokeOpacity="0.22"
+                strokeWidth="1"
+              />
+              <polygon
+                points="100,12 176,144 24,144"
+                fill="none"
+                stroke={elementStyles.strokeHex}
+                strokeOpacity="0.24"
+                strokeWidth="1"
+              />
+              <polygon
+                points="100,188 24,56 176,56"
+                fill="none"
+                stroke={elementStyles.strokeHex}
+                strokeOpacity="0.24"
+                strokeWidth="1"
+              />
+            </motion.svg>
 
-      {/* Active Floor Modifiers */}
-      <div className="relative z-10 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-        <div className="flex items-center gap-1.5 text-slate-300">
-          <ShieldAlert className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
-          <span>Encounter Modifiers</span>
+            <motion.div
+              whileHover={freeze ? undefined : { scale: 1.04 }}
+              className={`relative z-10 w-32 h-32 rounded-full bg-[#06060A] border-2 ${elementStyles.borderColor} flex items-center justify-center transition-transform duration-300`}
+            >
+              <BossSigilSvg floor={floor} strokeColor={elementStyles.strokeHex} />
+            </motion.div>
+
+            {/* Floating Critical Damage Burst */}
+            <AnimatePresence>
+              {strikeSeq > 0 && lastDamage !== null && (
+                <motion.div
+                  key={strikeSeq}
+                  initial={freeze ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.75 }}
+                  animate={{ opacity: 1, y: -34, scale: 1.08 }}
+                  exit={{ opacity: 0, y: -56 }}
+                  transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
+                  className="pointer-events-none absolute -top-2 z-20 px-3 py-1 rounded-full bg-solar text-oled font-mono-numbers text-sm font-extrabold border border-amber-200"
+                >
+                  -{lastDamage.toLocaleString("en-US")} DMG
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {locked && (
+            <p className="mt-4 inline-flex items-center gap-2 text-xs font-mono text-solar bg-solar/15 rounded-lg px-3 py-1.5 text-center">
+              <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>Opens after Floor {floor - 1} falls</span>
+            </p>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {floor === 1 && (
-            <span className="px-2.5 py-0.5 rounded bg-emerald-500/15 text-emerald-200 border border-emerald-500/35">
-              Foundation: No Deadline
+
+        {/* Right Plaque: Enrage, Timeout & Settlement */}
+        <div className="md:col-span-4 p-4 flex flex-col justify-between gap-3 font-mono text-xs">
+          <div className="space-y-1">
+            <span className="text-pewter uppercase tracking-wider font-semibold block">
+              Enrage Aura
             </span>
-          )}
-          {(floor === 2 || wardElement !== null) && (
-            <span className="px-2.5 py-0.5 rounded bg-frost/15 text-sky-200 border border-frost/35">
-              Frost Ward: +1500 bps vs Frost · 30m Deadline
+            {floor === 3 || enrage ? (
+              <div className="text-hp-text font-semibold inline-flex items-center gap-1.5">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>+10% HP regen / 5m</span>
+              </div>
+            ) : (
+              <div className="text-ash">Steady Boss HP (No Enrage)</div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-pewter uppercase tracking-wider font-semibold block">
+              Round Clock
             </span>
-          )}
-          {(floor === 3 || enrage) && (
-            <span className="px-2.5 py-0.5 rounded bg-hp/15 text-rose-200 border border-hp/35 font-semibold">
-              Enrage: +10% HP regen / 5m · 20m Deadline
+            {expired ? (
+              <div className="text-hp-text font-semibold inline-flex items-center gap-1.5">
+                <Timer className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>Round Expired · Settles Lazily on Next Strike</span>
+              </div>
+            ) : floor === 1 ? (
+              <div className="text-jackpot font-semibold">Foundation · No Timeout</div>
+            ) : floor === 2 ? (
+              <div className="text-frost font-semibold">30m Deadline (Carries on Timeout)</div>
+            ) : (
+              <div className="text-hp-text font-semibold">20m Deadline (Carries on Timeout)</div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-pewter uppercase tracking-wider font-semibold block">
+              Defeat Settlement
             </span>
-          )}
-          {expired && (
-            <span className="px-2.5 py-0.5 rounded bg-white/10 text-slate-200 border border-white/20">
-              Round Expired
-            </span>
-          )}
-          <span className="px-2.5 py-0.5 rounded bg-white/5 text-slate-300 border border-white/10">
-            Tribute Seizure &ge; 7000 bps
-          </span>
+            {floor === 3 ? (
+              <div className="text-void-text font-semibold inline-flex items-center gap-1.5">
+                <Trophy className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>Mints NEP-171 SVG Trophy</span>
+              </div>
+            ) : (
+              <div className="text-ash">10% Drip Upward · 90/10 Split</div>
+            )}
+          </div>
         </div>
       </div>
     </div>

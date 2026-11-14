@@ -68,14 +68,91 @@ const FLOOR_DOSSIERS: Record<
     hp: FLOOR_MAX_HP[2],
     ticket: FLOOR_TICKET_COST_NEAR[2],
     rule: "Enrage (+10% max HP every 5 min) · 20 min timer · Mints NEP-171 Conqueror Trophy",
-    accentText: "text-purple-300",
+    accentText: "text-void-text",
     accentBorder: "border-void/55",
     activePill: "border-void/70 bg-void/20 text-parchment",
   },
 };
 
-export const LandingHero: React.FC = () => {
-  const { paused, togglePaused, reducedMotion } = useMotionControl();
+export const LandingHeader: React.FC = () => {
+  const { paused, togglePaused } = useMotionControl();
+
+  return (
+    <header className="sticky top-0 z-40 border-b border-brass/20 bg-[#06060A]/85 backdrop-blur-md">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+        <Link
+          href="/"
+          aria-label="SpireFi home"
+          className="flex items-center gap-2.5 min-h-[44px] text-parchment font-serif font-bold tracking-[0.2em] text-base sm:text-lg"
+        >
+          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-solar/15 border border-solar/45">
+            <Swords className="w-4 h-4 text-solar" aria-hidden="true" />
+          </span>
+          <span>
+            SPIRE<span className="text-solar">FI</span>
+          </span>
+        </Link>
+
+        <nav
+          aria-label="Protocol sections"
+          className="hidden md:flex items-center gap-7 text-xs font-semibold tracking-wide text-ash"
+        >
+          <a href="#loop" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+            Game Loop
+          </a>
+          <a href="#tower" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+            Three-Floor Spire
+          </a>
+          <a href="#economy" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+            Ticket Conduit
+          </a>
+          <a href="#boss-brain" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
+            Boss Brain &amp; TEE
+          </a>
+          <Link
+            href="/game/ai#time-warp"
+            className="text-frost hover:text-parchment transition-colors min-h-[44px] flex items-center"
+          >
+            1-Week Market Sim
+          </Link>
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={togglePaused}
+            aria-pressed={paused}
+            aria-label={paused ? "Resume 3D motion" : "Pause 3D motion"}
+            className="min-h-[44px] px-3 rounded-lg border border-brass/25 bg-panel-dark/90 text-xs font-medium text-ash hover:text-parchment hover:border-brass/60 flex items-center gap-2 transition-colors"
+          >
+            {paused ? (
+              <Play className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
+            ) : (
+              <Pause className="w-3.5 h-3.5 text-frost" aria-hidden="true" />
+            )}
+            <span className="hidden sm:inline">{paused ? "Resume FX" : "Pause FX"}</span>
+          </button>
+
+          <Link
+            href="/game/start"
+            className="rpg-sheen inline-flex items-center gap-2 min-h-[44px] px-4 sm:px-5 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 text-oled font-bold text-xs uppercase tracking-wider border border-amber-300/60 hover:from-amber-300 hover:to-amber-500 transition-all"
+          >
+            <span className="hidden sm:inline">Play Now (1 Click)</span>
+            <span className="sm:hidden">Play Now</span>
+            <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+          </Link>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+interface LandingHeroProps {
+  showHeader?: boolean;
+}
+
+export const LandingHero: React.FC<LandingHeroProps> = ({ showHeader = true }) => {
+  const { reducedMotion } = useMotionControl();
   const [selectedFloor, setSelectedFloor] = useState<number>(1);
   const [hoveredFloor, setHoveredFloor] = useState<number | null>(null);
 
@@ -84,67 +161,7 @@ export const LandingHero: React.FC = () => {
 
   return (
     <section className="relative w-full flex flex-col">
-      {/* Sticky Obsidian & Brass Navigation Bar */}
-      <header className="sticky top-0 z-40 border-b border-brass/20 bg-[#06060A]/85 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2.5 min-h-[44px] text-parchment font-serif font-bold tracking-[0.2em] text-base sm:text-lg"
-          >
-            <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-solar/15 border border-solar/45">
-              <Swords className="w-4 h-4 text-solar" aria-hidden="true" />
-            </span>
-            <span>
-              SPIRE<span className="text-solar">FI</span>
-            </span>
-          </Link>
-
-          <nav
-            aria-label="Protocol sections"
-            className="hidden md:flex items-center gap-7 text-xs font-semibold tracking-wide text-ash"
-          >
-            <a href="#loop" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
-              Game Loop
-            </a>
-            <a href="#tower" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
-              Three-Floor Spire
-            </a>
-            <a href="#economy" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
-              Ticket Conduit
-            </a>
-            <a href="#boss-brain" className="hover:text-parchment transition-colors min-h-[44px] flex items-center">
-              Boss Brain &amp; TEE
-            </a>
-            <Link
-              href="/game/merchant#simulasi"
-              className="text-frost hover:text-parchment transition-colors min-h-[44px] flex items-center"
-            >
-              1-Week Simulasi
-            </Link>
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={togglePaused}
-              aria-pressed={paused}
-              aria-label={paused ? "Resume 3D motion" : "Pause 3D motion"}
-              className="min-h-[44px] px-3 rounded-lg border border-brass/25 bg-panel-dark/90 text-xs font-medium text-ash hover:text-parchment hover:border-brass/60 flex items-center gap-1.5 transition-colors"
-            >
-              {paused ? <Play className="w-3.5 h-3.5 text-solar" /> : <Pause className="w-3.5 h-3.5 text-frost" />}
-              <span className="hidden sm:inline">{paused ? "Resume FX" : "Pause FX"}</span>
-            </button>
-
-            <Link
-              href="/game/start"
-              className="rpg-sheen inline-flex items-center gap-2 min-h-[44px] px-4 sm:px-5 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 text-oled font-bold text-xs uppercase tracking-wider border border-amber-300/60 hover:from-amber-300 hover:to-amber-500 transition-all"
-            >
-              <span>Open Game</span>
-              <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-            </Link>
-          </div>
-        </div>
-      </header>
+      {showHeader && <LandingHeader />}
 
       {/* Full-Bleed Living 3D Panorama Stage */}
       <div className="relative w-full lg:min-h-[760px] lg:h-[calc(100vh-4rem)] lg:max-h-[920px] flex flex-col lg:block overflow-hidden bg-oled">
@@ -187,7 +204,7 @@ export const LandingHero: React.FC = () => {
             className="w-full lg:max-w-[540px] flex flex-col items-start gap-5 pointer-events-auto"
           >
             <div className="w-full">
-              <h1 className="font-serif text-5xl sm:text-6xl xl:text-[4.5rem] font-extrabold tracking-[0.04em] leading-[1.0] text-parchment">
+              <h1 className="font-serif text-5xl sm:text-6xl xl:text-7xl font-extrabold tracking-[0.04em] leading-[1.0] text-parchment">
                 SPIRE<span className="text-solar">FI</span>
               </h1>
               <div className="engraved-rule w-48 my-3.5" aria-hidden="true" />
@@ -197,7 +214,7 @@ export const LandingHero: React.FC = () => {
             </div>
 
             <p className="text-sm sm:text-base text-ash max-w-lg leading-relaxed">
-              Gather ore, forge elemental steel, outmaneuver an adaptive boss that counters dominant weapons every epoch, and fight without wallet popups inside a three-tier raid economy.
+              Gather ore, forge elemental steel, outmaneuver an adaptive boss that counters dominant weapons every epoch, and raid popup-free via a 1-click 0.60 NEAR ephemeral testnet guest subaccount.
             </p>
 
             {/* Primary & Secondary Actions */}
@@ -206,16 +223,16 @@ export const LandingHero: React.FC = () => {
                 href="/game/start"
                 className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-7 py-3 rounded-lg bg-gradient-to-b from-amber-400 to-amber-600 border border-amber-300/60 text-oled font-bold text-sm uppercase tracking-wider hover:from-amber-300 hover:to-amber-500 transition-all"
               >
-                <span>Enter the Spire</span>
+                <span>Play Now (1 Click)</span>
                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </Link>
 
               <Link
-                href="/game/merchant#simulasi"
+                href="/game/ai#time-warp"
                 className="rpg-sheen inline-flex items-center justify-center gap-2 min-h-[48px] px-5 py-3 rounded-lg bg-panel-dark/90 border border-frost/45 text-frost hover:bg-frost/15 hover:border-frost/75 font-mono text-xs font-bold uppercase tracking-wider transition-all"
               >
                 <TrendingUp className="w-4 h-4" aria-hidden="true" />
-                <span>Watch 1-Week Simulasi</span>
+                <span>Run 1-Week Market Sim</span>
               </Link>
             </div>
 
@@ -238,10 +255,10 @@ export const LandingHero: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2 font-mono-numbers text-xs">
-                  <span className="px-2.5 py-0.5 rounded bg-white/5 border border-brass/20 text-parchment">
+                  <span className="px-2.5 py-0.5 rounded bg-panel-elevated/90 text-parchment">
                     {activeDossier.hp.toLocaleString("en-US")} HP
                   </span>
-                  <span className="px-2.5 py-0.5 rounded bg-solar/15 border border-solar/40 text-parchment font-semibold">
+                  <span className="px-2.5 py-0.5 rounded bg-solar/20 text-parchment font-semibold">
                     {activeDossier.ticket.toFixed(2)} N
                   </span>
                 </div>

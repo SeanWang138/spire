@@ -85,6 +85,11 @@ export const AtmosphericBackdrop: React.FC<AtmosphericBackdropProps> = ({
     tx: 0.5,
     ty: 0.4,
   });
+  const requestWakeRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    requestWakeRef.current();
+  }, [paused, reducedMotion, element, intensity, hoverBoost]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -92,7 +97,7 @@ export const AtmosphericBackdrop: React.FC<AtmosphericBackdropProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     let width = 0;
     let height = 0;
     let rafId = 0;
@@ -109,41 +114,25 @@ export const AtmosphericBackdrop: React.FC<AtmosphericBackdropProps> = ({
       hueIndex: Math.random() > 0.3 ? 0 : 1,
     }));
 
-    const resize = () => {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      canvas.width = Math.max(1, Math.floor(width * dpr));
-      canvas.height = Math.max(1, Math.floor(height * dpr));
-    };
-
-    const onPointerMove = (e: PointerEvent) => {
-      pointerRef.current.tx = e.clientX / Math.max(1, window.innerWidth);
-      pointerRef.current.ty = e.clientY / Math.max(1, window.innerHeight);
-    };
-
-    resize();
-    window.addEventListener("resize", resize);
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
-
     let time = 0;
     let smoothBoost = 0;
 
-    const renderFrame = () => {
-      rafId = requestAnimationFrame(renderFrame);
-
+    const drawScene = () => {
       const freeze = pausedRef.current || reducedMotionRef.current;
       const isVista = intensityRef.current === "vista";
       const pal = ELEMENT_PALETTES[elementRef.current];
 
       smoothBoost += (hoverBoostRef.current - smoothBoost) * 0.06;
-      pointerRef.current.x += (pointerRef.current.tx - pointerRef.current.x) * 0.05;
-      pointerRef.current.y += (pointerRef.current.ty - pointerRef.current.y) * 0.05;
+      if (!reducedMotionRef.current) {
+        pointerRef.current.x += (pointerRef.current.tx - pointerRef.current.x) * 0.05;
+        pointerRef.current.y += (pointerRef.current.ty - pointerRef.current.y) * 0.05;
+      }
 
       if (!freeze) {
         time += 0.016 * (1 + smoothBoost * 0.65);
       }
 
-      const pxOffset = (pointerRef.current.x - 0.5) * 14;
+      const pxOffset = reducedMotionRef.current ? 0 : (pointerRef.current.x - 0.5) * 14;
       const scrollY = isVista ? Math.min(window.scrollY || 0, 800) : 0;
       if (horizonFarRef.current) {
         horizonFarRef.current.style.transform = `translate3d(${(-pxOffset * 0.4).toFixed(1)}px, ${(scrollY * 0.04).toFixed(1)}px, 0)`;
@@ -215,7 +204,8 @@ export const AtmosphericBackdrop: React.FC<AtmosphericBackdropProps> = ({
           if (m.x > 1.05) m.x = -0.05;
         }
 
-        const mx = (m.x + (pointerRef.current.x - 0.5) * -0.015 * m.depth) * cw;
+        const parallaxX = reducedMotionRef.current ? 0 : (pointerRef.current.x - 0.5) * -0.015 * m.depth;
+        const mx = (m.x + parallaxX) * cw;
         const my = m.y * ch;
         const twinkle = 0.68 + 0.32 * Math.sin(time * 1.6 + m.phase);
         const rgb = m.hueIndex === 0 ? pal.motePrimary : pal.moteSecondary;
@@ -228,12 +218,66 @@ export const AtmosphericBackdrop: React.FC<AtmosphericBackdropProps> = ({
       }
     };
 
-    rafId = requestAnimationFrame(renderFrame);
+    const scheduleFrame = () => {
+      if (rafId !== 0) return;
+      rafId = requestAnimationFrame(renderFrame);
+    };
+
+    const renderFrame = () => {
+      rafId = 0;
+      if (document.hidden) return;
+      drawScene();
+      const freeze = pausedRef.current || reducedMotionRef.current;
+      const boostSettling = Math.abs(hoverBoostRef.current - smoothBoost) > 0.004;
+      if (!freeze || boostSettling) {
+        scheduleFrame();
+      }
+    };
+
+    const wake = () => {
+      if (document.hidden) return;
+      drawScene();
+      if (!(pausedRef.current || reducedMotionRef.current)) {
+        scheduleFrame();
+      }
+    };
+    requestWakeRef.current = wake;
+
+    const resize = () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = Math.max(1, Math.floor(width * dpr));
+      canvas.height = Math.max(1, Math.floor(height * dpr));
+      wake();
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      pointerRef.current.tx = e.clientX / Math.max(1, window.innerWidth);
+      pointerRef.current.ty = e.clientY / Math.max(1, window.innerHeight);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        if (rafId !== 0) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      } else {
+        wake();
+      }
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      cancelAnimationFrame(rafId);
+      if (rafId !== 0) cancelAnimationFrame(rafId);
+      requestWakeRef.current = () => {};
       window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

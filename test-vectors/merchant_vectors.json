@@ -1,89 +1,156 @@
 {
-  "description": "Deterministic test vectors for NPC Merchant bonding curve, spread, and treasury safeguards in The Spire v3.1",
-  "config": {
-    "target_stock": 100,
-    "base_price_yocto": "100000000000000000000000",
-    "spread_bps": 1000,
-    "min_treasury_reserve_yocto": "1000000000000000000000000"
-  },
-  "vectors": [
+  "description": "Mirror vectors for the v3.1 merchant & boss-buyback pricing (relayer/src/pricing.ts). Merchant: mid = base * (1 + 0.5*stock_pressure + 0.3*demand_pressure), clamped to [0.5x, 2x], 10% two-way spread, base 0.05 NEAR. Buyback: unit = 0.1 NEAR * multiplier_bps / 10000, multiplier clamped to [10000, 40000].",
+  "merchant_base_price_yocto": "50000000000000000000000",
+  "merchant_target_stock": 100,
+  "merchant_spread_bps": 1000,
+  "merchant_min_reserve_yocto": "1000000000000000000000000",
+  "buyback_base_yocto": "100000000000000000000000",
+  "merchant": [
     {
-      "name": "equilibrium_stock_sufficient_treasury",
-      "description": "Stock is at target equilibrium (100 units) with healthy treasury",
+      "name": "equilibrium",
       "stock": 100,
       "target_stock": 100,
-      "base_price_yocto": "100000000000000000000000",
-      "buyback_multiplier_bps": 10000,
-      "treasury_reserve_yocto": "5000000000000000000000000",
-      "expected_mid_price_yocto": "100000000000000000000000",
-      "expected_buy_price_yocto": "100000000000000000000000",
-      "expected_sell_price_yocto": "90000000000000000000000",
-      "expected_is_closed": false
+      "demand": 0,
+      "reserve_yocto": "5000000000000000000000000",
+      "expected": {
+        "midPriceYocto": "50000000000000000000000",
+        "buyPriceYocto": "55000000000000000000000",
+        "sellPriceYocto": "45000000000000000000000",
+        "isClosed": false,
+        "reason": "ok"
+      }
     },
     {
-      "name": "zero_stock_maximum_scarcity",
-      "description": "Stock is completely depleted (0 units), price doubles to 2 * P0",
+      "name": "scarce_stock_raises_price",
       "stock": 0,
       "target_stock": 100,
-      "base_price_yocto": "100000000000000000000000",
-      "buyback_multiplier_bps": 10000,
-      "treasury_reserve_yocto": "5000000000000000000000000",
-      "expected_mid_price_yocto": "200000000000000000000000",
-      "expected_buy_price_yocto": "200000000000000000000000",
-      "expected_sell_price_yocto": "180000000000000000000000",
-      "expected_is_closed": false
+      "demand": 0,
+      "reserve_yocto": "5000000000000000000000000",
+      "expected": {
+        "midPriceYocto": "75000000000000000000000",
+        "buyPriceYocto": "82500000000000000000000",
+        "sellPriceYocto": "67500000000000000000000",
+        "isClosed": false,
+        "reason": "ok"
+      }
     },
     {
-      "name": "half_stock_high_demand",
-      "description": "Stock is half target (50 units), price scales to 1.5 * P0",
-      "stock": 50,
+      "name": "abundant_stock_clamped_at_half",
+      "stock": 300,
       "target_stock": 100,
-      "base_price_yocto": "100000000000000000000000",
-      "buyback_multiplier_bps": 10000,
-      "treasury_reserve_yocto": "2000000000000000000000000",
-      "expected_mid_price_yocto": "150000000000000000000000",
-      "expected_buy_price_yocto": "150000000000000000000000",
-      "expected_sell_price_yocto": "135000000000000000000000",
-      "expected_is_closed": false
+      "demand": 0,
+      "reserve_yocto": "5000000000000000000000000",
+      "expected": {
+        "midPriceYocto": "25000000000000000000000",
+        "buyPriceYocto": "27500000000000000000000",
+        "sellPriceYocto": "22500000000000000000000",
+        "isClosed": false,
+        "reason": "ok"
+      }
     },
     {
-      "name": "oversupply_above_target",
-      "description": "Stock exceeds target (150 units), price stays at baseline P0",
-      "stock": 150,
-      "target_stock": 100,
-      "base_price_yocto": "100000000000000000000000",
-      "buyback_multiplier_bps": 10000,
-      "treasury_reserve_yocto": "10000000000000000000000000",
-      "expected_mid_price_yocto": "100000000000000000000000",
-      "expected_buy_price_yocto": "100000000000000000000000",
-      "expected_sell_price_yocto": "90000000000000000000000",
-      "expected_is_closed": false
-    },
-    {
-      "name": "ai_buyback_boost_multiplier_15000",
-      "description": "AI proposal boosted buyback multiplier to 15000 bps (1.5x sell price)",
+      "name": "demand_pressure_raises_price",
       "stock": 100,
       "target_stock": 100,
-      "base_price_yocto": "100000000000000000000000",
-      "buyback_multiplier_bps": 15000,
-      "treasury_reserve_yocto": "5000000000000000000000000",
-      "expected_mid_price_yocto": "100000000000000000000000",
-      "expected_buy_price_yocto": "100000000000000000000000",
-      "expected_sell_price_yocto": "135000000000000000000000",
-      "expected_is_closed": false
+      "demand": 100,
+      "reserve_yocto": "5000000000000000000000000",
+      "expected": {
+        "midPriceYocto": "65000000000000000000000",
+        "buyPriceYocto": "71500000000000000000000",
+        "sellPriceYocto": "58500000000000000000000",
+        "isClosed": false,
+        "reason": "ok"
+      }
     },
     {
-      "name": "treasury_depleted_below_1_near",
-      "description": "Treasury reserve drops below 1 NEAR, merchant closes sell channel",
+      "name": "demand_capped_at_full_pressure",
+      "stock": 0,
+      "target_stock": 100,
+      "demand": 200,
+      "reserve_yocto": "5000000000000000000000000",
+      "expected": {
+        "midPriceYocto": "90000000000000000000000",
+        "buyPriceYocto": "99000000000000000000000",
+        "sellPriceYocto": "81000000000000000000000",
+        "isClosed": false,
+        "reason": "ok"
+      }
+    },
+    {
+      "name": "closed_below_min_reserve",
       "stock": 100,
       "target_stock": 100,
-      "base_price_yocto": "100000000000000000000000",
-      "buyback_multiplier_bps": 10000,
-      "treasury_reserve_yocto": "999999999999999999999999",
-      "expected_mid_price_yocto": "100000000000000000000000",
-      "expected_buy_price_yocto": "100000000000000000000000",
-      "expected_sell_price_yocto": "90000000000000000000000",
-      "expected_is_closed": true
+      "demand": 0,
+      "reserve_yocto": "999999999999999999999999",
+      "expected": {
+        "midPriceYocto": "50000000000000000000000",
+        "buyPriceYocto": "55000000000000000000000",
+        "sellPriceYocto": "45000000000000000000000",
+        "isClosed": true,
+        "reason": "treasury_below_min_reserve"
+      }
+    }
+  ],
+  "buyback": [
+    {
+      "name": "neutral_multiplier",
+      "floor": 1,
+      "element": 0,
+      "multiplier_bps": 10000,
+      "qty": 1,
+      "vault_balance_yocto": "1000000000000000000000000",
+      "expected": {
+        "unitPriceYocto": "100000000000000000000000",
+        "totalPriceYocto": "100000000000000000000000",
+        "multiplier_bps": 10000,
+        "isOpen": true,
+        "reason": "ok"
+      }
+    },
+    {
+      "name": "max_multiplier_x3_qty",
+      "floor": 2,
+      "element": 2,
+      "multiplier_bps": 40000,
+      "qty": 3,
+      "vault_balance_yocto": "2000000000000000000000000",
+      "expected": {
+        "unitPriceYocto": "400000000000000000000000",
+        "totalPriceYocto": "1200000000000000000000000",
+        "multiplier_bps": 40000,
+        "isOpen": true,
+        "reason": "ok"
+      }
+    },
+    {
+      "name": "multiplier_clamped_to_min",
+      "floor": 3,
+      "element": 1,
+      "multiplier_bps": 9999,
+      "qty": 1,
+      "vault_balance_yocto": "1000000000000000000000000",
+      "expected": {
+        "unitPriceYocto": "100000000000000000000000",
+        "totalPriceYocto": "100000000000000000000000",
+        "multiplier_bps": 10000,
+        "isOpen": true,
+        "reason": "ok"
+      }
+    },
+    {
+      "name": "vault_below_quote_closes",
+      "floor": 1,
+      "element": 1,
+      "multiplier_bps": 15000,
+      "qty": 2,
+      "vault_balance_yocto": "200000000000000000000000",
+      "expected": {
+        "unitPriceYocto": "150000000000000000000000",
+        "totalPriceYocto": "300000000000000000000000",
+        "multiplier_bps": 15000,
+        "isOpen": false,
+        "reason": "vault_below_quote"
+      }
     }
   ]
 }

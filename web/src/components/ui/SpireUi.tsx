@@ -58,26 +58,66 @@ export function SpireButton({
   );
 }
 
+function isInteractiveTriggerChild(node: React.ReactNode): boolean {
+  if (!React.isValidElement(node)) return false;
+  if (typeof node.type === "string") {
+    if (
+      node.type === "button" ||
+      node.type === "a" ||
+      node.type === "input" ||
+      node.type === "select" ||
+      node.type === "textarea" ||
+      node.type === "summary"
+    ) {
+      return true;
+    }
+  }
+  if (node.type === SpireButton) return true;
+  const props = node.props as Record<string, unknown> | undefined;
+  if (!props) return false;
+  if (typeof props.href === "string" || props.role === "button" || props.role === "link") {
+    return true;
+  }
+  if (typeof props.tabIndex === "number" && props.tabIndex >= 0) {
+    return true;
+  }
+  return false;
+}
+
 export function SpireTooltip({
   content,
   children,
   side = "top",
+  triggerLabel,
 }: {
   content: React.ReactNode;
   children: React.ReactNode;
   side?: "top" | "bottom" | "left" | "right";
+  triggerLabel?: string;
 }) {
+  const isInteractive = isInteractiveTriggerChild(children);
+
   return (
     <TooltipPrimitive.Root>
-      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
+      {isInteractive ? (
+        <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
+      ) : (
+        <TooltipPrimitive.Trigger
+          type="button"
+          aria-label={triggerLabel}
+          className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-1.5 -my-1.5 rounded-md bg-transparent text-left cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+        >
+          {children}
+        </TooltipPrimitive.Trigger>
+      )}
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
           side={side}
           sideOffset={6}
-          className="z-50 max-w-xs rounded-lg border border-brass/30 bg-[#0B0B11]/95 px-3.5 py-2.5 text-xs text-parchment shadow-xl backdrop-blur-md"
+          className="z-50 max-w-xs rounded-lg border border-brass/30 bg-panel-dark/95 px-3.5 py-2.5 text-xs text-parchment shadow-xl backdrop-blur-md"
         >
           {content}
-          <TooltipPrimitive.Arrow className="fill-[#0B0B11]" />
+          <TooltipPrimitive.Arrow className="fill-panel-dark" />
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
@@ -146,7 +186,7 @@ export function SpireSlider({
       step={step}
       aria-label={ariaLabel}
       className={cn(
-        "relative flex items-center select-none touch-none w-full min-h-[36px] cursor-pointer",
+        "relative flex items-center select-none touch-none w-full min-h-[44px] cursor-pointer",
         className
       )}
     >
@@ -157,9 +197,14 @@ export function SpireSlider({
         />
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb
-        className="block w-5 h-5 rounded-full bg-parchment border-2 shadow-md transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
-        style={{ borderColor: accentColor }}
-      />
+        className="group flex items-center justify-center w-11 h-11 rounded-full cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+      >
+        <span
+          aria-hidden="true"
+          className="block w-5 h-5 rounded-full bg-oled border-2 shadow-md transition-transform group-hover:scale-110"
+          style={{ borderColor: accentColor }}
+        />
+      </SliderPrimitive.Thumb>
     </SliderPrimitive.Root>
   );
 }

@@ -1,16 +1,22 @@
-# Milestone Completion Notice: M-TEST (E2E Testing Track)
+# Milestone Notice: M-TEST (E2E Reference Simulation Track)
 **The Spire v3.1 / BossVault Protocol**  
 **Author:** Test Writer / QA (`worker_test`)  
-**Date:** 2026-11-09  
-**Status:** **READY & VERIFIED (100% PASS RATE)**  
+**Snapshot Date:** 2026-11-09 (Updated for v3.1 Contract Parity Notes)  
+**Scope:** Historical M-TEST Opaque-Box Reference Suite (`tests/protocol_models.ts`)  
+
+> **[STATUS / AUTHORITATIVE REFERENCE]** The 111-test matrix recorded below captures the historical **2026-11-09 M-TEST** snapshot executed against the **offline TypeScript reference simulation** ([`tests/protocol_models.ts`](tests/protocol_models.ts)), NOT directly against the deployed `spire.testnet` Rust contract or current `web/` / `relayer/` parity suites. Live contract behavior in [`contract/src/types.rs`](contract/src/types.rs), [`contract/src/merchant.rs`](contract/src/merchant.rs), and [`contract/src/lib.rs`](contract/src/lib.rs) supersedes early v3 reference constants used inside `protocol_models.ts`:
+> - **Floor HP & Tickets:** Live `[1,000, 1,600, 2,500] HP` & `[0.10, 0.15, 0.25] NEAR` tickets; Floor 2 Frost Ward `+1,500 bps` Frost resistance; Floor 3 Enrage `+10% max HP = 250 HP / 5m` (vs `[1,000, 2,500, 5,000] HP`, `0.10 NEAR` flat, `-50%/+25%`, `+500 HP` in `protocol_models.ts`).
+> - **Crafting & Starter:** Live `2 ore:iron + 3 essence:* -> 1 weapon` (`vs 2 ore + 1 essence` in `protocol_models.ts`); `claim_starter` grants `[4 Solar, 1 Frost, 0 Void]` starter-locked weapons + `4` Iron Ore + `3` Solar/Frost/Void essence.
+> - **Merchant Curve:** Live `MERCHANT_BASE_PRICE = 0.05 NEAR`, `target = 100`, `k1 = 0.50`, `k2 = 0.30`, `0.50x..2.00x` (`0.025..0.10 NEAR` mid), `±10%` spread (vs `P0 = 0.1 NEAR` / `2x = 0.2 NEAR` in `protocol_models.ts`).
+> - **Session Key & AI Gate:** Live testnet frontend uses an **Ephemeral Testnet Guest Session** (`FullAccess` subaccount funded `0.60 NEAR` via `/api/accounts`, not Function Call Access Keys). Live `apply_ai_proposal` takes 4 args `(floor, proposal, chat_id, signature)` and only sets `buyback_multiplier_bps`, `altar_recipe_id`, and `taunt`; resistance shifts automatically on `lazy_epoch()`. NEP-297 `"standard"` is `"spire"` and NEP-171 trophy IDs are `spirefi-trophy-r{round}-f{floor}`. Cross-layer Rust/Relayer/Web parity is tracked in [`tests/cross_layer_math_parity.ts`](tests/cross_layer_math_parity.ts) and [`test-vectors/merchant_vectors.json`](test-vectors/merchant_vectors.json).
 
 ---
 
 ## 1. Executive Summary
 
-Milestone **M-TEST (E2E Testing Track)** for The Spire v3.1 / BossVault Protocol has been fully implemented, rigorously verified, and published. 
+Milestone **M-TEST (E2E Testing Track)** for The Spire v3.1 / BossVault Protocol implemented an offline TypeScript reference suite covering four testing tiers (category-partition feature coverage, boundary value analysis, pairwise cross-feature interactions, and full 3-floor campaign workload simulation) against `tests/protocol_models.ts`.
 
-All four testing tiers—ranging from category-partition feature coverage to boundary value analysis, pairwise cross-feature interactions, and full 3-floor tower assault workload simulations—have been executed and confirmed passing with **100% pass rate (111 passed, 0 failed)**.
+In the **2026-11-09 historical snapshot**, all four simulation tiers passed (**111 passed, 0 failed** against `tests/protocol_models.ts`). Separate active verification covers Rust (`cargo test`), Relayer (`npm test`), Web (`npm test` + `tsc --noEmit`), and live cross-layer parity (`tests/cross_layer_math_parity.ts` and `scripts/test-all-live.mjs`).
 
 ---
 

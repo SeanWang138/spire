@@ -25,24 +25,24 @@ export const DamageLog: React.FC<DamageLogProps> = ({ logs }) => {
   const elementIcons = {
     solar: <Flame className="w-3.5 h-3.5 text-solar flex-shrink-0" aria-hidden="true" />,
     frost: <Snowflake className="w-3.5 h-3.5 text-frost flex-shrink-0" aria-hidden="true" />,
-    void: <Sparkles className="w-3.5 h-3.5 text-void flex-shrink-0" aria-hidden="true" />,
+    void: <Sparkles className="w-3.5 h-3.5 text-void-text flex-shrink-0" aria-hidden="true" />,
   };
 
   return (
-    <div className="obsidian-surface p-4 space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="obsidian-surface overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between gap-2 border-b border-brass/20">
         <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-white">
+          <Terminal className="w-4 h-4 text-jackpot shrink-0" aria-hidden="true" />
+          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
             Combat Chronicle &amp; Strike Feed
           </h2>
         </div>
-        <span className="text-xs font-mono text-slate-300">Session Feed</span>
+        <span className="text-xs font-mono text-ash">Session Feed</span>
       </div>
 
-      <div className="h-44 overflow-y-auto rounded-lg bg-oled divide-y divide-white/10 font-mono text-xs border border-white/10">
+      <div className="h-44 overflow-y-auto bg-oled divide-y divide-brass/15 font-mono text-xs">
         {logs.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-slate-300 text-xs px-4 text-center">
+          <div className="h-full flex items-center justify-center text-ash text-xs px-4 text-center">
             No strikes dispatched this session. Launch an attack to record on-chain transactions.
           </div>
         ) : (
@@ -51,40 +51,40 @@ export const DamageLog: React.FC<DamageLogProps> = ({ logs }) => {
             return (
               <div
                 key={log.id}
-                className={`px-3 py-2 flex flex-wrap items-center justify-between gap-2 ${
-                  log.isConfiscated ? "bg-hp/5" : log.isCrit ? "bg-solar/5" : ""
+                className={`px-4 py-2 flex flex-wrap items-center justify-between gap-2 ${
+                  log.isConfiscated ? "bg-hp/10" : log.isCrit ? "bg-solar/10" : ""
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-[11px] text-slate-400 font-mono-numbers shrink-0">
+                  <span className="text-xs text-pewter font-mono-numbers shrink-0">
                     {log.timestamp}
                   </span>
                   {elementIcons[log.element]}
-                  <span className="text-slate-200 font-medium truncate">
+                  <span className="text-parchment font-medium truncate">
                     {truncateAccountId(log.accountId, 16)}
                   </span>
                   {log.note && (
-                    <span className="text-[11px] text-slate-300 truncate">{log.note}</span>
+                    <span className="text-xs text-ash truncate">{log.note}</span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {log.isConfiscated && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-hp/20 text-hp font-bold">
+                    <span className="text-xs px-2 py-0.5 rounded bg-hp/20 text-hp-text font-bold">
                       TRIBUTE SEIZED
                     </span>
                   )}
                   {log.isCrit && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-solar/20 text-solar font-bold">
+                    <span className="text-xs px-2 py-0.5 rounded bg-solar/20 text-solar font-bold">
                       CRIT
                     </span>
                   )}
                   {log.damage > 0 && (
-                    <span className="font-mono-numbers font-bold text-white">
+                    <span className="font-mono-numbers font-bold text-parchment">
                       ~-{log.damage} DMG
                     </span>
                   )}
-                  <span className="text-[11px] font-mono-numbers text-slate-300">
+                  <span className="text-xs font-mono-numbers text-ash">
                     [{log.remainingHp} HP]
                   </span>
                   {txUrl && (
@@ -92,10 +92,11 @@ export const DamageLog: React.FC<DamageLogProps> = ({ logs }) => {
                       href={txUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[11px] text-frost hover:underline inline-flex items-center gap-1"
+                      className="min-h-[44px] px-2 -my-1.5 text-xs text-frost hover:underline inline-flex items-center gap-1.5 rounded"
                       title={`Inspect tx ${log.txHash} on NearBlocks`}
                     >
-                      tx <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                      <span>tx</span>
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     </a>
                   )}
                 </div>

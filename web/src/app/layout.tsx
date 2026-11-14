@@ -60,10 +60,16 @@ export default function RootLayout({
       className={`dark ${cinzel.variable} ${cormorant.variable} ${jakarta.variable} ${jetbrains.variable}`}
     >
       <body className="bg-oled text-parchment font-sans min-h-screen selection:bg-solar/30 selection:text-parchment">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-solar focus:px-4 focus:py-2.5 focus:text-xs focus:font-bold focus:text-oled focus:shadow-lg"
+        >
+          Skip to content
+        </a>
         <AppProviders>
-          <main className="relative z-10 flex flex-col min-h-screen">
+          <div className="relative z-10 flex flex-col min-h-screen">
             {children}
-          </main>
+          </div>
         </AppProviders>
       </body>
     </html>

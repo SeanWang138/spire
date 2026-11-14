@@ -2,7 +2,8 @@
  * SpireFi - Relayer Core Types (contract ABI v3.1)
  *
  * Mirrors the on-chain view/change surface the relayer talks to.
- * Numeric u64 fields may arrive as strings from JSON-RPC; see `toBigInt`.
+ * Numeric u64/u128 fields may arrive as strings, numbers, or scientific-notation
+ * floats from JSON-RPC; see `parseYoctoSafe` / `toBigInt`.
  */
 
 export type Triple = [number, number, number];
@@ -29,31 +30,117 @@ export const ELEMENT_COUNT = 3;
 export const MAX_FLOOR = 3;
 export const TICKET_JACKPOT_SHARE_BPS = 9000;
 
+/**
+ * Parses integer, decimal, or scientific-notation numbers/strings (e.g. "2.3683e+24",
+ * 4e+22, "5.7e+22") into exact bigint without floating-point precision loss.
+ * Fractional yocto digits (if any) are truncated toward zero.
+ */
+export function parseYoctoSafe(value: string | number | bigint): bigint {
+  if (typeof value === "bigint") {
+    return value;
+  }
+
+  let raw: string;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid yocto value: ${value}`);
+    }
+    raw = String(value);
+  } else if (typeof value === "string") {
+    raw = value.trim();
+  } else {
+    throw new Error(`Unsupported yocto value type: ${typeof value}`);
+  }
+
+  if (raw.length === 0) {
+    throw new Error("Invalid yocto value: empty string");
+  }
+
+  const match = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(raw);
+  if (!match) {
+    throw new Error(`Invalid yocto value: ${value}`);
+  }
+
+  const sign = match[1] === "-" ? "-" : "";
+  const intPart = match[2] ?? "";
+  const fracPart = match[3] ?? match[4] ?? "";
+  const exp = match[5] !== undefined ? Number.parseInt(match[5], 10) : 0;
+  if (!Number.isFinite(exp)) {
+    throw new Error(`Invalid yocto exponent: ${value}`);
+  }
+
+  const digits = intPart + fracPart;
+  if (/^0+$/.test(digits)) {
+    return 0n;
+  }
+
+  const shift = exp - fracPart.length;
+  if (shift > 10000) {
+    throw new RangeError(`Yocto exponent too large: ${value}`);
+  }
+
+  let integerDigits: string;
+  if (shift >= 0) {
+    integerDigits = digits + "0".repeat(shift);
+  } else {
+    const cut = digits.length + shift;
+    if (cut <= 0) {
+      return 0n;
+    }
+    integerDigits = digits.slice(0, cut);
+  }
+
+  const normalized = integerDigits.replace(/^0+/, "") || "0";
+  if (normalized === "0") {
+    return 0n;
+  }
+  return BigInt(sign + normalized);
+}
+
 export function toBigInt(value: number | string | bigint): bigint {
-  return typeof value === "bigint" ? value : BigInt(value);
+  return parseYoctoSafe(value);
 }
 
 /** get_meta() */
 export interface MetaResponse {
   epoch: number;
   resistance: Triple;
-  /** Contract timestamp (ns) at which the epoch may be advanced; 0 = not scheduled. */
+  /** Relative countdown (ns) until epoch rollover is ready; 0 = rollover ready now. */
   next_epoch_in_ns: number | string;
-  /** Element index shifted in the previous epoch. */
+  /** Element shift counter across epochs. */
   shifted_by: number;
   supply: Triple;
-  /** Element the meta is currently weakest against. */
+  /** Element the meta is currently weakest against (0..2). */
   weak_element: number;
 }
 
-/** get_floor(floor) */
+/** get_floor(floor) / get_tower().floors[] (0-indexed floors 0..2) */
 export interface FloorResponse {
   floor: number;
+  /** Live contract field: current boss HP. */
+  hp?: number;
+  /** Legacy unit-test compatibility alias for `hp`. */
   boss_hp?: number;
   max_hp?: number;
   round?: number;
-  /** Contract timestamp (ns) after which resolve_expired(floor) is allowed; 0 = no deadline. */
+  first_attack_ns?: number | string;
+  /** Round duration (ns) from first_attack_ns (0 = no deadline). */
   deadline_ns?: number | string;
+  /** Remaining countdown (ns) until expiry; 0 = expired/ready for lazy settlement (or no deadline). */
+  time_left_ns?: number | string;
+  expired?: boolean;
+  jackpot?: number | string;
+  buyback_reserve?: number | string;
+  dividend_pool?: number | string;
+  backer_total_shares?: number | string;
+  backer_cycle?: number;
+  total_damage?: number | string;
+  loot?: Triple;
+  volume_buyback_epoch?: number;
+  unlocked?: boolean;
+  ward_element?: number | null;
+  enrage?: boolean;
+  /** Legacy unit-test compatibility fields for enrage evaluation. */
   floor_start_ns?: number | string;
   enrage_ticks?: number;
 }
@@ -72,6 +159,8 @@ export interface AiStateResponse {
   nonce: number;
   taunt?: string | null;
   altar_recipe_id?: string | null;
+  chat_id?: string | null;
+  signature_hex?: string;
 }
 
 /** get_ai_state(floor) - v3.1 ABI name. */
@@ -89,9 +178,13 @@ export interface AiProposal {
 
 export interface SignedAiProposal {
   proposal: AiProposal;
-  signature: string; // hex encoded Ed25519 signature (64 bytes)
+  signature: string; // hex encoded Ed25519 signature over canonical message (64 bytes)
   publicKey: string; // hex encoded Ed25519 public key (32 bytes)
   chatId?: string;
+  /** Optional NEAR AI Cloud chat audit signature from GET /signature/{chatId}. */
+  auditSignature?: string;
+  /** Optional NEAR AI Cloud TEE signing address / public key from GET /signature/{chatId}. */
+  auditPublicKey?: string;
   /** The exact canonical message that was signed (for ops/debugging). */
   message: string;
 }

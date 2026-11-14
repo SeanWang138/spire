@@ -4,6 +4,8 @@
  * the on-chain contract can never drift apart.
  */
 
+import { parseYoctoSafe } from "../utils/cn";
+
 // --- Elements / tokens ---------------------------------------------------
 
 export const ELEMENT_NAMES = ["Solar", "Frost", "Void"] as const;
@@ -90,8 +92,11 @@ export const SPLIT_BACKER_BPS = 1500;
 export const SPLIT_BUYBACK_BPS = 1000;
 export const SPLIT_MERCHANT_BPS = 500;
 
-/** 0.01 NEAR per backer share. */
-export const BACKER_SHARE_UNIT_NEAR = 0.01;
+/**
+ * Live contract `BACKER_SHARE_UNIT = 10_000_000_000_000_000` yoctoNEAR (1e16 = 10^-8 NEAR)
+ * in `contract/src/types.rs:75` (Jalur A ABI freeze on spire.testnet).
+ */
+export const BACKER_SHARE_UNIT_NEAR = 1e-8;
 export const DIVIDEND_SCALE = 1_000_000;
 
 // --- Starter kit / gathering -------------------------------------------------
@@ -143,11 +148,9 @@ export function nearToYocto(near: number): string {
   return fixed.replace(/^0+(?=\d)/, "") || "0";
 }
 
-/** yoctoNEAR string → whole NEAR (display float). */
-export function yoctoToNear(yocto: string | number | bigint): number {
-  try {
-    return Number(BigInt(yocto || "0")) / YOCTO_PER_NEAR;
-  } catch {
-    return 0;
-  }
+/** yoctoNEAR string/number/bigint → whole NEAR (display float). */
+export function yoctoToNear(
+  yocto: string | number | bigint | null | undefined
+): number {
+  return Number(parseYoctoSafe(yocto)) / YOCTO_PER_NEAR;
 }

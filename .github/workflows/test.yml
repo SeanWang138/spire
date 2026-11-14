@@ -6,6 +6,9 @@ jobs:
   code-formatting:
     name: Code Formatting
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contract
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -14,6 +17,9 @@ jobs:
   code-linter:
     name: Code Linter
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contract
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,6 +31,9 @@ jobs:
   tests:
     name: Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contract
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,3 +41,25 @@ jobs:
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.23.0/cargo-near-installer.sh | sh
       - name: Run cargo test
         run: cargo test
+
+  web-and-relayer:
+    name: Web & Relayer CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install and verify web
+        working-directory: web
+        run: |
+          npm ci
+          npx --no-install tsc --noEmit
+          npm test
+      - name: Install and test relayer
+        working-directory: relayer
+        run: |
+          npm ci
+          npm test

@@ -13,6 +13,7 @@
 
 import { EventEmitter } from "node:events";
 import { createServer, IncomingMessage, Server, ServerResponse } from "node:http";
+import { connect, keyStores, KeyPair, utils } from "near-api-js";
 import { WebSocketServer, WebSocket } from "ws";
 import {
   Nep297Event,
@@ -40,6 +41,7 @@ import {
   MerchantResponse,
   SpireStats,
   TICKET_JACKPOT_SHARE_BPS,
+  parseYoctoSafe,
 } from "./types.js";
 import { normalizeTower } from "./keeper.js";
 
@@ -343,14 +345,14 @@ export class StatsCollector {
         this.totalRaids += 1;
         this.totalDamage += Number(payload.damage ?? 0);
         this.floorRaids.set(floor, (this.floorRaids.get(floor) ?? 0) + 1);
-        const ticket = BigInt(payload.ticket_paid as string);
+        const ticket = parseYoctoSafe(payload.ticket_paid as string);
         const share = (ticket * BigInt(this.ticketJackpotShareBps)) / 10000n;
         this.addJackpot(floor, share);
         break;
       }
       case "boss_defeated": {
         const floor = Number(payload.floor ?? 0);
-        this.floorJackpot.set(floor, BigInt(payload.total_jackpot as string));
+        this.floorJackpot.set(floor, parseYoctoSafe(payload.total_jackpot as string));
         this.floorRounds.set(floor, (this.floorRounds.get(floor) ?? 0) + 1);
         break;
       }
@@ -360,7 +362,7 @@ export class StatsCollector {
         break;
       }
       case "payout_claimed": {
-        this.addJackpot(Number(payload.floor ?? 0), -BigInt(payload.amount as string));
+        this.addJackpot(Number(payload.floor ?? 0), -parseYoctoSafe(payload.amount as string));
         break;
       }
       case "meta_updated": {
@@ -578,53 +580,95 @@ export interface SubaccountCreationResult {
   private_key: string | null;
 }
 
+export const DEFAULT_SUBACCOUNT_FUNDING_YOCTO = "600000000000000000000000"; // 0.60 NEAR
+
 /**
- * Creates `<label>.spire.testnet`. The parent account funds the new subaccount.
+ * Parses and validates an Ed25519 public key in either canonical NEAR `ed25519:<base58>`
+ * format or 64-char hex (with or without `ed25519:` prefix) via `utils.PublicKey.from`.
+ */
+export function parseEd25519PublicKey(rawPublicKey: string): InstanceType<typeof utils.PublicKey> {
+  const trimmed = (rawPublicKey ?? "").trim();
+  if (!trimmed) {
+    throw new Error("invalid_public_key: empty Ed25519 public key");
+  }
+
+  const maybeHex = trimmed.startsWith("ed25519:")
+    ? trimmed.slice("ed25519:".length)
+    : trimmed;
+
+  if (/^[0-9a-fA-F]{64}$/.test(maybeHex)) {
+    const encoded = utils.serialize.base_encode(Buffer.from(maybeHex, "hex"));
+    return utils.PublicKey.from(`ed25519:${encoded}`);
+  }
+
+  if (trimmed.startsWith("ed25519:")) {
+    try {
+      const pk = utils.PublicKey.from(trimmed);
+      if (pk.data.length !== 32) {
+        throw new Error(`expected 32-byte Ed25519 key, got ${pk.data.length}`);
+      }
+      return pk;
+    } catch (err: any) {
+      throw new Error(
+        `invalid_public_key: malformed ed25519:<base58> public key (${err?.message || String(err)})`
+      );
+    }
+  }
+
+  throw new Error(
+    "invalid_public_key: expected ed25519:<base58> or 64-char hex ed25519 public key"
+  );
+}
+
+/**
+ * Creates a playable `<label>.spire.testnet` subaccount funded by the parent account
+ * (default 0.60 NEAR >= minimum needed for account storage + gameplay deposit) with a
+ * Full Access Key (`createAccount` adds a full access key on NEAR).
  *
  * Two key paths:
  * - `browserPublicKey` provided (normal player onboarding): the account is created
- *   with THE BROWSER's Function Call Key, so the user's localStorage key is the
- *   only credential — signless actions work immediately and no private key ever
- *   passes through the server.
+ *   with the browser's key (`ed25519:<base58>` or 64-char hex), so the user's
+ *   localStorage key is the only credential and no private key passes through the server.
  * - No key provided (operator path): a fresh keypair is generated and its private
  *   key is returned ONCE to the operator (never served over the API).
  */
-export async function createSubaccountWithFunctionKey(
+export async function createPlayableSubaccount(
   parentAccountId: string,
   parentPrivateKey: string,
   rpcUrl: string,
   subAccountId: string,
-  fundingYocto: string,
+  fundingYocto: string = DEFAULT_SUBACCOUNT_FUNDING_YOCTO,
   browserPublicKey?: string
 ): Promise<SubaccountCreationResult> {
-  const { connect, keyStores, KeyPair } = await import("near-api-js");
-  let keyPair: ReturnType<typeof KeyPair.fromRandom>;
+  let publicKey: InstanceType<typeof utils.PublicKey>;
   let generatedPrivateKey: string | null = null;
   if (browserPublicKey) {
     // Validate the browser-provided key strictly — a malformed key would otherwise
     // create an account nobody can use.
-    const raw = browserPublicKey.startsWith("ed25519:")
-      ? browserPublicKey.slice("ed25519:".length)
-      : browserPublicKey;
-    if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
-      throw new Error("invalid_public_key: expected 64-char hex ed25519 public key");
-    }
-    keyPair = KeyPair.fromString(`ed25519:${raw}` as Parameters<typeof KeyPair.fromString>[0]);
+    publicKey = parseEd25519PublicKey(browserPublicKey);
   } else {
-    keyPair = KeyPair.fromRandom("ed25519");
+    const keyPair = KeyPair.fromRandom("ed25519");
+    publicKey = keyPair.getPublicKey();
     generatedPrivateKey = keyPair.toString();
   }
   const keyStore = new keyStores.InMemoryKeyStore();
-  await keyStore.setKey("testnet", parentAccountId, KeyPair.fromString(parentPrivateKey));
+  await keyStore.setKey(
+    "testnet",
+    parentAccountId,
+    KeyPair.fromString(parentPrivateKey as Parameters<typeof KeyPair.fromString>[0])
+  );
   const near = await connect({ networkId: "testnet", nodeUrl: rpcUrl, keyStore } as never);
   const parent = await near.account(parentAccountId);
-  await parent.createAccount(subAccountId, keyPair.publicKey, BigInt(fundingYocto));
+  await parent.createAccount(subAccountId, publicKey, parseYoctoSafe(fundingYocto));
   return {
     account_id: subAccountId,
-    public_key: keyPair.publicKey.toString(),
+    public_key: publicKey.toString(),
     private_key: generatedPrivateKey,
   };
 }
+
+/** Compatibility export alias for `createPlayableSubaccount`. */
+export const createSubaccountWithFunctionKey = createPlayableSubaccount;
 
 /**
  * Pure HTTP router so the routes can be tested without sockets.
@@ -800,7 +844,8 @@ export class SpireIndexer extends EventEmitter {
     let bossHpTotal = 0n;
     let defeatedFloors = 0;
     for (const floor of floors) {
-      const hp = BigInt(Math.max(0, Math.floor(floor.boss_hp ?? 0)));
+      const parsedHp = parseYoctoSafe(floor.hp ?? floor.boss_hp ?? 0);
+      const hp = parsedHp > 0n ? parsedHp : 0n;
       bossHpTotal += hp;
       if (hp === 0n) defeatedFloors += 1;
     }

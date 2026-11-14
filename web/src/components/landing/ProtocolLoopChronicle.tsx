@@ -41,14 +41,14 @@ const STAGES: ChronicleStage[] = [
     loreNote: "One deposit fills your satchel. From there, every swing of the pickaxe and barter with the town merchant lands cleanly without interrupting wallet prompts.",
     steps: [
       {
-        title: "Instant Signless Key",
-        detail: "Provision your named testnet session key and deposit once into the internal vault ledger.",
-        metric: "1x Deposit · 0 Popups",
+        title: "Instant 1-Click Ephemeral Account",
+        detail: "Provision an ephemeral 0.60 NEAR testnet guest subaccount with a local FullAccess keypair (or deposit via your wallet) into the internal vault.",
+        metric: "0.60 N Guest · 0 Popups",
         icon: <KeyRound className="w-4 h-4 text-solar" aria-hidden="true" />,
       },
       {
         title: "Claim Starter Kit & Gather",
-        detail: "Claim 4x locked Solar + 1x Frost blades, then harvest +2 Iron Ore or Essences every 30 seconds.",
+        detail: "Claim 4x Solar + 1x Frost blades plus 4 Ore and 3 each Essence, then harvest +2 Iron Ore or Essences every 30 seconds.",
         metric: "+2 Unit · 20/Epoch Cap",
         icon: <Hammer className="w-4 h-4 text-frost" aria-hidden="true" />,
       },
@@ -60,7 +60,7 @@ const STAGES: ChronicleStage[] = [
       },
     ],
     ctaHref: "/game/start",
-    ctaLabel: "Create Signless Key",
+    ctaLabel: "Play Now (1 Click)",
     secondaryHref: "/game/merchant",
     secondaryLabel: "Open Town Bazaar",
     accentBorder: "border-solar/45",
@@ -81,7 +81,7 @@ const STAGES: ChronicleStage[] = [
       },
       {
         title: "Scout Radar & Reforge at the Altar",
-        detail: "Spot saturated elements above 7,000 bps Tribute risk and burn surplus weapons at the Altar into the Boss's weak point.",
+        detail: "Spot saturated elements above 7,000 bps Tribute risk and burn surplus blades via reforge_2_to_1 anytime (or AI-unlocked reforge_3_to_2).",
         metric: "13,500 bps Total Pool",
         icon: <Radar className="w-4 h-4 text-void" aria-hidden="true" />,
       },
@@ -101,10 +101,10 @@ const STAGES: ChronicleStage[] = [
   },
   {
     id: "session",
-    tabLabel: "Per Session · Ascension, Backers & TEE",
+    tabLabel: "Per Session · Ascension, Backers & AI",
     cadence: "Across Each Session",
     headline: "Higher Tiers, Backer Yields & Contract-Bounded AI",
-    loreNote: "Defeating Floor 1 drips 10% of its pool into Frost-warded heights and Enraging Void spires. AI may propose shifting buyback bounties or taunts, but the contract enforces every boundary.",
+    loreNote: "Defeating Floor 1 drips 10% of its pool into Frost-warded heights and Enraging Void spires. AI proposes buyback multipliers or taunts off-chain, and the contract enforces every boundary.",
     steps: [
       {
         title: "Conquer Enrage & Mint Trophy",
@@ -114,13 +114,13 @@ const STAGES: ChronicleStage[] = [
       },
       {
         title: "Boss Buyback & Backer Vault",
-        detail: "Sell scarce non-starter blades at 1.0x-4.0x buyback quotes, or underwrite Floor pools at 0.01 N/share for 15% ticket dividends.",
-        metric: "High-Risk LP Cycle",
+        detail: "Sell scarce non-starter blades at 1.0x-4.0x buyback quotes, or fund Floor jackpots directly for 15% ticket dividends until Boss defeat.",
+        metric: "15% Ticket Stream",
         icon: <Clock className="w-4 h-4 text-jackpot" aria-hidden="true" />,
       },
       {
         title: "AI Proposes, Contract Decides",
-        detail: "NEAR AI Cloud proposes buyback multipliers, reforge_3_to_2 unlock, and taunts with chat_id + Ed25519 signature checks enforced on-chain.",
+        detail: "NEAR AI Cloud proposes buyback multipliers, reforge_3_to_2 unlock, and taunts off-chain with chat_id audit logs while Ed25519 relayer signatures and bounds run on-chain.",
         metric: "Max 2,500 bps Shift/Epoch",
         icon: <ShieldCheck className="w-4 h-4 text-solar" aria-hidden="true" />,
       },
@@ -128,9 +128,9 @@ const STAGES: ChronicleStage[] = [
     ctaHref: "/game/vault",
     ctaLabel: "Open Boss Vault",
     secondaryHref: "/game/ai",
-    secondaryLabel: "Inspect TEE Oracle",
+    secondaryLabel: "Inspect Boss Brain & Sim",
     accentBorder: "border-void/50",
-    accentText: "text-purple-300",
+    accentText: "text-void-text",
   },
 ];
 
@@ -138,6 +138,16 @@ export const ProtocolLoopChronicle: React.FC = () => {
   const { reducedMotion } = useMotionControl();
   const [activeId, setActiveId] = useState<string>("30s");
   const current = STAGES.find((s) => s.id === activeId) ?? STAGES[0];
+
+  const handleTabKeyDown = (idx: number) => (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setActiveId(STAGES[(idx + 1) % STAGES.length].id);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setActiveId(STAGES[(idx - 1 + STAGES.length) % STAGES.length].id);
+    }
+  };
 
   return (
     <section id="loop" className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-16">
@@ -147,20 +157,24 @@ export const ProtocolLoopChronicle: React.FC = () => {
             The Three Cadences of the Spire
           </h2>
           <p className="mt-2.5 text-sm sm:text-base text-ash max-w-2xl leading-relaxed">
-            Built around a continuous closed-loop economy from thirty-second town trades to full multi-floor boss expeditions and oracle verification.
+            Built around a continuous closed-loop economy from thirty-second town trades to full multi-floor boss expeditions and market simulation.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Game loop cadences">
-          {STAGES.map((stage) => {
+          {STAGES.map((stage, idx) => {
             const active = stage.id === activeId;
             return (
               <button
                 key={stage.id}
+                id={`chronicle-tab-${stage.id}`}
                 type="button"
                 role="tab"
                 aria-selected={active}
+                aria-controls={`chronicle-panel-${stage.id}`}
+                tabIndex={active ? 0 : -1}
                 onClick={() => setActiveId(stage.id)}
+                onKeyDown={handleTabKeyDown(idx)}
                 className={`min-h-[44px] px-4 py-2 rounded-lg border font-mono text-xs font-bold transition-all ${
                   active
                     ? "bg-solar/20 border-solar text-parchment"
@@ -178,6 +192,9 @@ export const ProtocolLoopChronicle: React.FC = () => {
         <AnimatePresence mode="wait">
           <motion.div
             key={current.id}
+            id={`chronicle-panel-${current.id}`}
+            role="tabpanel"
+            aria-labelledby={`chronicle-tab-${current.id}`}
             initial={reducedMotion ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={reducedMotion ? undefined : { opacity: 0, y: -6 }}
@@ -205,17 +222,14 @@ export const ProtocolLoopChronicle: React.FC = () => {
                   className="p-5 flex flex-col justify-between gap-3"
                 >
                   <div>
-                    <div className="flex items-center justify-between gap-2 mb-3">
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-panel-card">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-panel-card shrink-0">
                         {step.icon}
                       </span>
-                      <span className="font-mono text-xs text-pewter font-bold">
-                        Step 0{idx + 1}
-                      </span>
+                      <h4 className="font-serif text-base font-bold text-parchment">
+                        {idx + 1}. {step.title}
+                      </h4>
                     </div>
-                    <h4 className="font-serif text-base font-bold text-parchment">
-                      {step.title}
-                    </h4>
                     <p className="mt-1.5 text-xs sm:text-sm text-ash leading-relaxed">
                       {step.detail}
                     </p>

@@ -8,16 +8,33 @@ import {
   ShoppingCart,
   HelpCircle,
   Wallet,
+  Coins,
+  ShieldAlert,
 } from "lucide-react";
-import { PlayerInventory, ItemId, MerchantQuote, get_quote } from "@/lib/contract";
 import {
+  get_quote,
+  get_buyback_quote,
+  type PlayerInventory,
+  type ItemId,
+  type MerchantQuote,
+  type FloorResponse,
+  type ElementIndex,
+  type BuybackQuote,
+} from "@/lib/contract";
+import {
+  MERCHANT_BASE_PRICE_NEAR,
   MERCHANT_TARGET_STOCK,
   MERCHANT_CAP_PER_ITEM_EPOCH,
   MERCHANT_MIN_CASH_NEAR,
   MERCHANT_SPREAD_BPS,
+  BUYBACK_MAX_PER_FLOOR_EPOCH,
+  BUYBACK_MAX_PER_ACCOUNT_EPOCH,
+  ELEMENT_NAMES,
   yoctoToNear,
 } from "@/lib/spire/constants";
-import { formatNearAmount } from "@/lib/utils/cn";
+import { explainMerchantQuote } from "@/lib/merchant-reasoning";
+import { getFreeWeaponCounts } from "@/lib/combat-rules";
+import { formatNearAmount, parseYoctoSafe } from "@/lib/utils/cn";
 
 interface NpcMerchantBazaarProps {
   cashYocto: string;
@@ -29,14 +46,11 @@ interface NpcMerchantBazaarProps {
   disabled?: boolean;
 }
 
-const CATALOG: { id: ItemId; name: string; group: "Materials" | "Weapons"; weaponIdx?: 0 | 1 | 2 }[] = [
-  { id: "ore:iron", name: "Iron Ore", group: "Materials" },
-  { id: "essence:solar", name: "Solar Essence", group: "Materials" },
-  { id: "essence:frost", name: "Frost Essence", group: "Materials" },
-  { id: "essence:void", name: "Void Essence", group: "Materials" },
-  { id: "weapon:solar", name: "Solar Blade", group: "Weapons", weaponIdx: 0 },
-  { id: "weapon:frost", name: "Frost Spear", group: "Weapons", weaponIdx: 1 },
-  { id: "weapon:void", name: "Void Scythe", group: "Weapons", weaponIdx: 2 },
+const MATERIAL_CATALOG: { id: Extract<ItemId, "ore:iron" | "essence:solar" | "essence:frost" | "essence:void">; name: string }[] = [
+  { id: "ore:iron", name: "Iron Ore" },
+  { id: "essence:solar", name: "Solar Essence" },
+  { id: "essence:frost", name: "Frost Essence" },
+  { id: "essence:void", name: "Void Essence" },
 ];
 
 export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
@@ -48,7 +62,9 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
   onFundMerchant,
   disabled = false,
 }) => {
-  const [selectedItem, setSelectedItem] = useState<ItemId>("ore:iron");
+  const [selectedItem, setSelectedItem] = useState<
+    "ore:iron" | "essence:solar" | "essence:frost" | "essence:void"
+  >("ore:iron");
   const [qty, setQty] = useState<number>(1);
   const [isTrading, setIsTrading] = useState(false);
   const [fundInput, setFundInput] = useState<string>("2");
@@ -60,19 +76,9 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
   });
 
   const cashNear = yoctoToNear(cashYocto);
-  const isClosed = !isOpen;
-
-  const itemMeta = CATALOG.find((c) => c.id === selectedItem)!;
+  const isClosed = !isOpen || cashNear < MERCHANT_MIN_CASH_NEAR;
   const currentStock = stock[selectedItem] ?? 0;
-
-  const lockedCount =
-    itemMeta.weaponIdx !== undefined ? inventory.starter_locked[itemMeta.weaponIdx] : 0;
-  const rawHoldings =
-    itemMeta.weaponIdx !== undefined
-      ? inventory.weapons[itemMeta.weaponIdx]
-      : inventory.materials[selectedItem];
-  const sellableBalance =
-    itemMeta.weaponIdx !== undefined ? Math.max(0, rawHoldings - lockedCount) : rawHoldings;
+  const sellableBalance = inventory.materials[selectedItem] ?? 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +91,27 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedItem, qty, cashYocto]);
+  }, [selectedItem, qty, cashYocto, currentStock]);
+
+  const buyReasoning = explainMerchantQuote({
+    itemId: selectedItem,
+    side: "buy",
+    stock: currentStock,
+    cashNear,
+    unitPriceNear: liveQuotes.buy ? yoctoToNear(liveQuotes.buy.unit_price) : MERCHANT_BASE_PRICE_NEAR,
+    basePriceNear: MERCHANT_BASE_PRICE_NEAR,
+    rawReason: liveQuotes.buy?.reason,
+  });
+
+  const sellReasoning = explainMerchantQuote({
+    itemId: selectedItem,
+    side: "sell",
+    stock: currentStock,
+    cashNear,
+    unitPriceNear: liveQuotes.sell ? yoctoToNear(liveQuotes.sell.unit_price) : MERCHANT_BASE_PRICE_NEAR,
+    basePriceNear: MERCHANT_BASE_PRICE_NEAR,
+    rawReason: liveQuotes.sell?.reason,
+  });
 
   const handleAction = async (action: "buy" | "sell") => {
     if (isClosed || isTrading || disabled || qty < 1) return;
@@ -120,114 +146,107 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
   };
 
   return (
-    <div className="citadel-stage p-4 sm:p-5 space-y-4">
+    <section className="citadel-stage p-5 sm:p-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Store className="w-4 h-4 text-solar" aria-hidden="true" />
           <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
-            NPC Merchant Desk
+            NPC Material Desk
           </h2>
         </div>
         <div className="flex items-center gap-1.5 text-xs font-mono">
           <span className="text-ash">Cash Reserve:</span>
-          <span className={`font-bold font-mono-numbers ${isClosed ? "text-hp" : "text-emerald-400"}`}>
-            {cashNear.toFixed(2)} NEAR
+          <span className={`font-bold font-mono-numbers ${isClosed ? "text-hp-text" : "text-jackpot"}`}>
+            {formatNearAmount(cashYocto, 2)}
           </span>
         </div>
       </div>
 
-      {/* Closed warning */}
       {isClosed && (
-        <div className="p-3 rounded-lg bg-hp/15 border border-hp/40 text-hp text-xs font-mono flex items-start gap-2.5">
-          <Lock className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+        <div className="p-3 rounded-lg bg-hp/15 border border-hp/40 text-hp-text text-xs font-mono flex items-start gap-2.5">
+          <Lock className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
           <div>
             <span className="font-bold uppercase tracking-wider block">Bazaar Closed (Liquidity Halt)</span>
-            <span className="text-xs text-rose-100 block mt-0.5 leading-relaxed">
-              Merchant reserve fell below {MERCHANT_MIN_CASH_NEAR.toFixed(1)} NEAR. Trading pauses automatically until ticket inflow or a liquidity refill restores cash above 1.0 NEAR.
+            <span className="text-xs text-parchment block mt-0.5 leading-relaxed">
+              Reserve fell below {MERCHANT_MIN_CASH_NEAR.toFixed(2)} NEAR. Trading pauses until raid ticket inflows or a liquidity refill restores cash above 1.00 NEAR.
             </span>
           </div>
         </div>
       )}
 
-      {/* Item selector */}
       <div>
         <label htmlFor="merchant-item-select" className="text-xs font-mono uppercase text-ash mb-1.5 block">
-          Select Commodity or Weapon
+          Select Material (4 Commodities Only)
         </label>
         <select
           id="merchant-item-select"
           value={selectedItem}
-          onChange={(e) => setSelectedItem(e.target.value as ItemId)}
-          className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/20 text-xs font-mono text-parchment focus:outline-none focus:border-frost"
+          onChange={(e) =>
+            setSelectedItem(
+              e.target.value as "ore:iron" | "essence:solar" | "essence:frost" | "essence:void"
+            )
+          }
+          className="w-full min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/25 text-xs font-mono text-parchment focus:outline-none focus-visible:ring-2 focus-visible:ring-solar"
         >
-          <optgroup label="Materials">
-            {CATALOG.filter((c) => c.group === "Materials").map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} (Stock: {stock[c.id] ?? 0})
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="Weapons">
-            {CATALOG.filter((c) => c.group === "Weapons").map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} (Stock: {stock[c.id] ?? 0})
-              </option>
-            ))}
-          </optgroup>
+          {MATERIAL_CATALOG.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} (Stock: {stock[c.id] ?? 0})
+            </option>
+          ))}
         </select>
       </div>
 
-      {/* Live AMM Bonding Curve Gauge + Stock Ledger */}
-      <div className="rounded-lg border border-brass/20 bg-[#090A10]/90 p-3 space-y-2">
-        <div className="flex items-center justify-between text-xs font-mono text-ash">
-          <span>AMM Curve vs Target Stock ({MERCHANT_TARGET_STOCK})</span>
-          <span className="text-frost font-bold">{currentStock} units in vault</span>
+      <div className="rounded-lg bg-panel-dark p-3.5 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-ash">
+          <span>
+            Base {MERCHANT_BASE_PRICE_NEAR.toFixed(2)} NEAR · Target {MERCHANT_TARGET_STOCK}
+          </span>
+          <span className="text-frost font-bold font-mono-numbers">{currentStock} units in vault</span>
         </div>
-        <svg viewBox="0 0 320 68" className="w-full h-16" aria-label="Bonding curve stock pricing gauge">
+        <svg viewBox="0 0 320 72" className="w-full h-16" aria-label="Bonding curve stock pricing gauge">
           <path
-            d="M 10 12 Q 110 22, 160 36 T 310 56"
+            d="M 10 14 Q 110 24, 160 38 T 310 58"
             fill="none"
             stroke="#38BDF8"
-            strokeOpacity="0.65"
+            strokeOpacity="0.7"
             strokeWidth="2"
           />
-          <line x1="160" y1="6" x2="160" y2="62" stroke="#E5A93B" strokeOpacity="0.4" strokeDasharray="3 3" />
+          <line x1="160" y1="8" x2="160" y2="64" stroke="#E5A93B" strokeOpacity="0.45" strokeDasharray="3 3" />
           <circle
             cx={Math.max(14, Math.min(306, 160 + (currentStock - MERCHANT_TARGET_STOCK) * 1.4))}
-            cy={Math.max(12, Math.min(56, 36 + (currentStock - MERCHANT_TARGET_STOCK) * 0.19))}
+            cy={Math.max(14, Math.min(58, 38 + (currentStock - MERCHANT_TARGET_STOCK) * 0.19))}
             r="5"
             fill="#F2A63B"
           />
-          <text x="12" y="62" fill="#CEC4B3" fontSize="10" fontFamily="monospace">Scarce (High Ask)</text>
-          <text x="225" y="18" fill="#CEC4B3" fontSize="10" fontFamily="monospace">Surplus (Low Bid)</text>
+          <text x="12" y="66" fill="#CEC4B3" fontSize="12" fontFamily="monospace">
+            Scarce (High Ask)
+          </text>
+          <text x="195" y="18" fill="#CEC4B3" fontSize="12" fontFamily="monospace">
+            Surplus (Low Bid)
+          </text>
         </svg>
       </div>
 
-      {/* Flat Telemetry Ledger */}
       <dl className="rounded-lg bg-panel-dark divide-x divide-brass/15 grid grid-cols-3 text-xs font-mono">
         <div className="p-2.5 flex flex-col">
-          <dt className="text-[11px] text-pewter">Stock</dt>
+          <dt className="text-xs text-pewter">Stock</dt>
           <dd className="font-mono-numbers text-parchment font-bold mt-0.5">{currentStock}</dd>
         </div>
         <div className="p-2.5 flex flex-col">
-          <dt className="text-[11px] text-pewter">Sellable</dt>
-          <dd className="font-mono-numbers text-parchment font-bold mt-0.5">
-            {sellableBalance}
-            {lockedCount > 0 && <span className="text-[11px] text-pewter font-normal"> (+{lockedCount} locked)</span>}
-          </dd>
+          <dt className="text-xs text-pewter">Your Bag</dt>
+          <dd className="font-mono-numbers text-parchment font-bold mt-0.5">{sellableBalance}</dd>
         </div>
         <div className="p-2.5 flex flex-col">
-          <dt className="text-[11px] text-pewter">Target / Cap</dt>
+          <dt className="text-xs text-pewter">Target / Cap</dt>
           <dd className="font-mono-numbers text-ash font-bold mt-0.5">
             {MERCHANT_TARGET_STOCK} · {MERCHANT_CAP_PER_ITEM_EPOCH}/ep
           </dd>
         </div>
       </dl>
 
-      {/* Quantity + Trade Actions */}
-      <div className="space-y-2.5">
-        <div className="flex items-center gap-3">
-          <label htmlFor="merchant-qty-input" className="text-xs font-mono uppercase text-slate-300 shrink-0">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label htmlFor="merchant-qty-input" className="text-xs font-mono uppercase text-ash shrink-0">
             Quantity
           </label>
           <input
@@ -235,12 +254,15 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
             type="number"
             min={1}
             max={MERCHANT_CAP_PER_ITEM_EPOCH}
+            placeholder="1"
             value={qty}
-            onChange={(e) => setQty(Math.max(1, Math.min(MERCHANT_CAP_PER_ITEM_EPOCH, Number(e.target.value) || 1)))}
-            className="w-24 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-white text-xs font-mono-numbers focus:outline-none focus:border-frost"
+            onChange={(e) =>
+              setQty(Math.max(1, Math.min(MERCHANT_CAP_PER_ITEM_EPOCH, Number(e.target.value) || 1)))
+            }
+            className="w-24 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/25 text-parchment text-xs font-mono-numbers placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar"
           />
-          <span className="text-[11px] font-mono text-slate-400">
-            {MERCHANT_SPREAD_BPS / 100}% bid-ask spread
+          <span className="text-xs font-mono text-pewter">
+            &plusmn;{MERCHANT_SPREAD_BPS / 100}% bid-ask spread
           </span>
         </div>
 
@@ -249,15 +271,15 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
             type="button"
             onClick={() => handleAction("buy")}
             disabled={isClosed || isTrading || disabled || currentStock < qty}
-            title={liveQuotes.buy?.reason || "Bonding curve ask price from on-chain quote"}
-            className="min-h-[48px] py-2.5 px-3 rounded-lg bg-frost/15 hover:bg-frost/25 border border-frost/40 text-frost text-xs font-mono font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between gap-2"
+            title={buyReasoning}
+            className="min-h-[48px] py-2.5 px-3 rounded-lg bg-frost/15 hover:bg-frost/25 border border-frost/40 text-frost text-xs font-mono font-bold transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
           >
             <span className="inline-flex items-center gap-1.5 uppercase">
               <ShoppingCart className="w-4 h-4 shrink-0" aria-hidden="true" />
               Buy {qty}x
             </span>
-            <span className="font-mono-numbers text-white">
-              {liveQuotes.buy ? formatNearAmount(liveQuotes.buy.total_price, 3) : "..."}
+            <span className="font-mono-numbers text-parchment">
+              {liveQuotes.buy ? formatNearAmount(liveQuotes.buy.total_price, 4) : "..."}
             </span>
           </button>
 
@@ -265,35 +287,31 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
             type="button"
             onClick={() => handleAction("sell")}
             disabled={isClosed || isTrading || disabled || sellableBalance < qty}
-            title={liveQuotes.sell?.reason || "Bonding curve bid price with 10% spread deduction"}
-            className="min-h-[48px] py-2.5 px-3 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between gap-2"
+            title={sellReasoning}
+            className="min-h-[48px] py-2.5 px-3 rounded-lg bg-solar/15 hover:bg-solar/25 border border-solar/40 text-solar text-xs font-mono font-bold transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
           >
             <span className="inline-flex items-center gap-1.5 uppercase">
               <TrendingUp className="w-4 h-4 shrink-0" aria-hidden="true" />
               Sell {qty}x
             </span>
-            <span className="font-mono-numbers text-white">
-              {liveQuotes.sell ? formatNearAmount(liveQuotes.sell.total_price, 3) : "..."}
+            <span className="font-mono-numbers text-parchment">
+              {liveQuotes.sell ? formatNearAmount(liveQuotes.sell.total_price, 4) : "..."}
             </span>
           </button>
         </div>
 
-        {/* Inline Quote Reasoning Tooltip Banner */}
-        {(liveQuotes.buy?.reason || liveQuotes.sell?.reason) && (
-          <div className="px-3 py-2 rounded-lg bg-panel-dark text-xs font-mono text-slate-300 flex items-start gap-2">
+        <div className="px-3.5 py-2.5 rounded-lg bg-panel-dark text-xs font-mono text-ash space-y-1.5">
+          <div className="flex items-start gap-2">
             <HelpCircle className="w-4 h-4 text-frost shrink-0 mt-0.5" aria-hidden="true" />
-            <span>
-              <strong className="text-white">Contract Pricing Reason:</strong>{" "}
-              {liveQuotes.buy?.reason ?? liveQuotes.sell?.reason}
-            </span>
+            <span>{buyReasoning}</span>
           </div>
-        )}
+          <div className="pl-6 text-pewter">{sellReasoning}</div>
+        </div>
       </div>
 
-      {/* Rescue Reserve Control */}
       {onFundMerchant && (
-        <form onSubmit={handleFund} className="pt-3 border-t border-white/10 space-y-2">
-          <label htmlFor="fund-merchant-input" className="text-[11px] font-mono uppercase text-slate-300 flex items-center gap-1.5">
+        <form onSubmit={handleFund} className="pt-3 border-t border-brass/15 space-y-2">
+          <label htmlFor="fund-merchant-input" className="text-xs font-mono uppercase text-ash flex items-center gap-1.5">
             <Wallet className="w-3.5 h-3.5 text-jackpot" aria-hidden="true" />
             <span>Refill Merchant Liquidity Reserve (NEAR)</span>
           </label>
@@ -303,14 +321,15 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
               type="number"
               step="0.1"
               min="0.1"
+              placeholder="2.0"
               value={fundInput}
               onChange={(e) => setFundInput(e.target.value)}
-              className="flex-1 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-white/15 text-white text-xs font-mono-numbers focus:outline-none focus:border-jackpot"
+              className="flex-1 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/25 text-parchment text-xs font-mono-numbers placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar"
             />
             <button
               type="submit"
               disabled={isFunding || disabled}
-              className="min-h-[44px] px-4 py-2 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase transition-colors disabled:opacity-40"
+              className="min-h-[44px] px-4 py-2 rounded-lg bg-jackpot/15 hover:bg-jackpot/25 border border-jackpot/40 text-jackpot text-xs font-mono font-bold uppercase transition-colors disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
             >
               {isFunding ? "Sending..." : "Fund Reserve"}
             </button>
@@ -319,10 +338,252 @@ export const NpcMerchantBazaar: React.FC<NpcMerchantBazaarProps> = ({
       )}
 
       {error && (
-        <div role="alert" className="text-xs font-mono text-hp bg-hp/10 border border-hp/30 rounded-lg px-3 py-2">
+        <div role="alert" className="text-xs font-mono text-hp-text bg-hp/15 border border-hp/40 rounded-lg px-3 py-2">
           {error}
         </div>
       )}
-    </div>
+    </section>
+  );
+};
+
+export interface FloorBuybackDeskProps {
+  floors: FloorResponse[];
+  inventory: PlayerInventory;
+  onBuyback: (floor: number, element: ElementIndex, qty: number) => Promise<void>;
+  disabled?: boolean;
+}
+
+/**
+ * Separate Floor Buyback Desk (`get_buyback_quote` / `sell_to_boss_buyback`).
+ * Buys back Free Crafted (non-starter) weapons from players using a floor's
+ * buyback_reserve at the AI-governed multiplier, crediting Citadel Ledger.
+ */
+export const FloorBuybackDesk: React.FC<FloorBuybackDeskProps> = ({
+  floors,
+  inventory,
+  onBuyback,
+  disabled = false,
+}) => {
+  const [selectedFloor, setSelectedFloor] = useState<number>(1);
+  const [selectedElement, setSelectedElement] = useState<ElementIndex>(0);
+  const [qty, setQty] = useState<number>(1);
+  const [quote, setQuote] = useState<BuybackQuote | null>(null);
+  const [loadingQuote, setLoadingQuote] = useState(false);
+  const [isSelling, setIsSelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const floorData = floors.find((f) => f.floor === selectedFloor) ?? floors[0];
+  const activeFloor = floorData?.floor ?? selectedFloor;
+  const freeCounts = getFreeWeaponCounts(inventory.weapons, inventory.starter_locked);
+  const freeForElement = freeCounts[selectedElement] ?? 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingQuote(true);
+    get_buyback_quote(activeFloor, selectedElement)
+      .then((res) => {
+        if (!cancelled) setQuote(res);
+      })
+      .catch(() => {
+        if (!cancelled) setQuote(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingQuote(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFloor, selectedElement]);
+
+  const unitYocto = parseYoctoSafe(quote?.unit_price);
+  const totalPayoutYocto = unitYocto * BigInt(qty);
+  const reserveYocto = parseYoctoSafe(floorData?.buyback_reserve);
+  const floorCapUsed = floorData?.volume_buyback_epoch ?? 0;
+  const floorCapLeft = Math.max(0, BUYBACK_MAX_PER_FLOOR_EPOCH - floorCapUsed);
+
+  const isUnlocked = Boolean(floorData?.unlocked);
+  const hasEnoughWeapons = freeForElement >= qty;
+  const hasEnoughReserve = reserveYocto >= totalPayoutYocto && totalPayoutYocto > 0n;
+  const hasFloorCap = floorCapLeft >= qty;
+
+  const canSell =
+    isUnlocked && hasEnoughWeapons && hasEnoughReserve && hasFloorCap && !isSelling && !disabled;
+
+  const handleSellBuyback = async () => {
+    if (!canSell) return;
+    setIsSelling(true);
+    setError(null);
+    try {
+      await onBuyback(activeFloor, selectedElement, qty);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Floor buyback transaction failed.");
+    } finally {
+      setIsSelling(false);
+    }
+  };
+
+  let disabledHint: string | null = null;
+  if (!isUnlocked) {
+    disabledHint = `Floor ${activeFloor} is locked until the prior floor boss falls.`;
+  } else if (!hasEnoughWeapons) {
+    disabledHint = `Need ${qty} Free Crafted ${ELEMENT_NAMES[selectedElement]} weapon(s). Starter Locked blades cannot be sold.`;
+  } else if (!hasFloorCap) {
+    disabledHint = `Floor ${activeFloor} epoch buyback limit (${BUYBACK_MAX_PER_FLOOR_EPOCH}/epoch) reached.`;
+  } else if (!hasEnoughReserve && quote) {
+    disabledHint = `Floor ${activeFloor} buyback reserve (${formatNearAmount(reserveYocto, 4)}) is below payout.`;
+  }
+
+  return (
+    <section className="obsidian-surface p-5 sm:p-6 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Coins className="w-4 h-4 text-void-text" aria-hidden="true" />
+          <h2 className="text-sm font-bold tracking-wide uppercase font-mono text-parchment">
+            Floor Buyback Desk
+          </h2>
+        </div>
+        <span className="text-xs font-mono text-ash">
+          Reserve:{" "}
+          <strong className="font-mono-numbers text-jackpot">
+            {floorData ? formatNearAmount(floorData.buyback_reserve, 4) : "0.0000 NEAR"}
+          </strong>
+        </span>
+      </div>
+
+      <p className="text-xs text-ash leading-relaxed">
+        Sell Free Crafted weapons to a floor&apos;s Boss Reserve at its AI-set multiplier. Credits directly to your Citadel Ledger (Starter Locked weapons excluded).
+      </p>
+
+      {/* Floor selector */}
+      <div className="space-y-1.5">
+        <span className="text-xs font-mono uppercase text-ash block">Target Floor</span>
+        <div className="grid grid-cols-3 gap-2">
+          {[1, 2, 3].map((fl) => {
+            const f = floors.find((x) => x.floor === fl);
+            const active = activeFloor === fl;
+            return (
+              <button
+                key={fl}
+                type="button"
+                onClick={() => setSelectedFloor(fl)}
+                aria-pressed={active}
+                className={`min-h-[44px] px-3 py-2 rounded-lg border text-xs font-mono font-semibold flex flex-col items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar ${
+                  active
+                    ? "border-void/60 bg-void/20 text-void-text"
+                    : "border-brass/20 bg-panel-dark text-ash hover:text-parchment hover:bg-panel-elevated"
+                }`}
+              >
+                <span>Floor {fl}</span>
+                <span className="text-xs text-pewter">
+                  {f?.unlocked ? "Open" : "Locked"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Element selector */}
+      <div className="space-y-1.5">
+        <span className="text-xs font-mono uppercase text-ash block">Weapon Element (Free Crafted)</span>
+        <div className="grid grid-cols-3 gap-2">
+          {([0, 1, 2] as ElementIndex[]).map((el) => {
+            const active = selectedElement === el;
+            return (
+              <button
+                key={el}
+                type="button"
+                onClick={() => setSelectedElement(el)}
+                aria-pressed={active}
+                className={`min-h-[44px] px-2.5 py-2 rounded-lg border text-xs font-mono font-semibold flex flex-col items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar ${
+                  active
+                    ? "border-solar/60 bg-solar/15 text-solar"
+                    : "border-brass/20 bg-panel-dark text-ash hover:text-parchment hover:bg-panel-elevated"
+                }`}
+              >
+                <span>{ELEMENT_NAMES[el]}</span>
+                <span className="text-xs font-mono-numbers text-pewter">
+                  {freeCounts[el]} free
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <dl className="rounded-lg bg-panel-dark divide-x divide-brass/15 grid grid-cols-3 text-xs font-mono">
+        <div className="p-2.5 flex flex-col">
+          <dt className="text-xs text-pewter">Multiplier</dt>
+          <dd className="font-mono-numbers text-void-text font-bold mt-0.5">
+            {loadingQuote ? "..." : quote ? `${(quote.multiplier_bps / 100).toFixed(0)}%` : "N/A"}
+          </dd>
+        </div>
+        <div className="p-2.5 flex flex-col">
+          <dt className="text-xs text-pewter">Unit Bid</dt>
+          <dd className="font-mono-numbers text-parchment font-bold mt-0.5">
+            {loadingQuote ? "..." : quote ? formatNearAmount(quote.unit_price, 4) : "N/A"}
+          </dd>
+        </div>
+        <div className="p-2.5 flex flex-col">
+          <dt className="text-xs text-pewter">Epoch Cap</dt>
+          <dd className="font-mono-numbers text-ash font-bold mt-0.5">
+            {floorCapUsed}/{BUYBACK_MAX_PER_FLOOR_EPOCH} fl · {BUYBACK_MAX_PER_ACCOUNT_EPOCH}/acct
+          </dd>
+        </div>
+      </dl>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="buyback-qty-input" className="text-xs font-mono uppercase text-ash shrink-0">
+          Qty (1-{BUYBACK_MAX_PER_ACCOUNT_EPOCH})
+        </label>
+        <input
+          id="buyback-qty-input"
+          type="number"
+          min={1}
+          max={BUYBACK_MAX_PER_ACCOUNT_EPOCH}
+          placeholder="1"
+          value={qty}
+          onChange={(e) =>
+            setQty(Math.max(1, Math.min(BUYBACK_MAX_PER_ACCOUNT_EPOCH, Number(e.target.value) || 1)))
+          }
+          className="w-24 min-h-[44px] px-3 py-2 rounded-lg bg-panel-dark border border-brass/25 text-parchment text-xs font-mono-numbers placeholder-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+        />
+        <span className="text-xs font-mono text-pewter">
+          Payout:{" "}
+          <strong className="font-mono-numbers text-jackpot">
+            {quote ? formatNearAmount(totalPayoutYocto, 4) : "..."}
+          </strong>
+        </span>
+      </div>
+
+      {disabledHint && (
+        <div className="px-3 py-2 rounded-lg bg-panel-dark text-xs font-mono text-solar flex items-start gap-2">
+          <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+          <span>{disabledHint}</span>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleSellBuyback}
+        disabled={!canSell}
+        className="min-h-[44px] w-full py-2.5 px-4 rounded-lg bg-void/25 hover:bg-void/35 border border-void/50 text-void-text font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-between gap-2 transition-colors disabled:opacity-45 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar"
+      >
+        <span>
+          {isSelling
+            ? "Settling Buyback..."
+            : `Sell ${qty}x ${ELEMENT_NAMES[selectedElement]} to Floor ${activeFloor}`}
+        </span>
+        <span className="font-mono-numbers text-parchment">
+          {quote ? formatNearAmount(totalPayoutYocto, 4) : "..."}
+        </span>
+      </button>
+
+      {error && (
+        <div role="alert" className="text-xs font-mono text-hp-text bg-hp/15 border border-hp/40 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+    </section>
   );
 };

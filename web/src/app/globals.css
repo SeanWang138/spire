@@ -22,6 +22,10 @@
 
   --border-brass: rgba(229, 169, 59, 0.16);
   --border-brass-strong: rgba(242, 166, 59, 0.34);
+
+  --color-void-text: #D8B4FE;
+  --color-hp-text: #FCA5A5;
+  --ink-placeholder: #94A3B8;
 }
 
 html {
@@ -39,7 +43,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Native interactive pointer and visible keyboard focus indicators */
+/* Native interactive pointer, disabled cursor, and visible keyboard focus indicators */
 button:not(:disabled),
 a[href],
 select:not(:disabled),
@@ -50,8 +54,15 @@ summary,
   cursor: pointer;
 }
 
+button:disabled,
+select:disabled,
+input:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 :focus-visible {
-  outline: 2px solid #F2A63B;
+  outline: 2px solid var(--solar-amber);
   outline-offset: 2px;
 }
 
@@ -59,15 +70,28 @@ a {
   text-underline-offset: 4px;
 }
 
-/* Honor reduced-motion preferences gracefully without dimming scene shaders */
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-placeholder);
+  opacity: 1;
+}
+
+/* Selective reduced-motion: quiet decorative loops without halting Three.js shaders or state feedback */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  html {
+    scroll-behavior: auto;
+  }
+
+  .rpg-sheen::after,
+  .rpg-sheen:hover::after {
+    transition: none;
+    transform: none;
+  }
+
+  .animate-pulse,
+  .animate-pulse-slow,
+  .animate-spin {
+    animation: none !important;
   }
 }
 
@@ -102,7 +126,7 @@ a {
 .obsidian-chamfer {
   position: relative;
   background: linear-gradient(175deg, rgba(20, 21, 32, 0.92) 0%, rgba(9, 10, 16, 0.98) 100%);
-  box-shadow: inset 0 1px 0 rgba(243, 234, 216, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.72);
+  box-shadow: inset 0 1px 0 rgba(243, 234, 216, 0.14), inset 0 -1px 0 rgba(6, 6, 10, 0.72);
   clip-path: polygon(
     14px 0,
     calc(100% - 14px) 0,
@@ -172,14 +196,29 @@ a {
 }
 
 ::-webkit-scrollbar-track {
-  background: #06060A;
+  background: var(--bg-oled);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #272736;
+  background: var(--bg-elevated);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3B3B50;
+  background: var(--border-brass-strong);
+}
+
+@layer utilities {
+  .text-void-text {
+    color: var(--color-void-text);
+  }
+
+  .text-hp-text {
+    color: var(--color-hp-text);
+  }
+
+  .placeholder-ink::placeholder {
+    color: var(--ink-placeholder);
+    opacity: 1;
+  }
 }

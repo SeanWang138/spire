@@ -14,8 +14,14 @@ import {
   computeShiftWithCap,
   calculateBuybackQuote,
   BUYBACK_BASE_YOCTO,
+  MERCHANT_BASE_PRICE_YOCTO,
 } from "../dist/pricing.js";
-import { DEFAULT_RESISTANCE_CONFIG, ONE_NEAR_YOCTO } from "../dist/types.js";
+import {
+  DEFAULT_RESISTANCE_CONFIG,
+  ONE_NEAR_YOCTO,
+  parseYoctoSafe,
+  toBigInt,
+} from "../dist/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -183,6 +189,16 @@ describe("Pricing Engine - Merchant quote", () => {
     assert.strictEqual(sell.price, ((BASE * 9000n) / 10000n).toString());
   });
 
+  it("defaults basePriceYocto to 0.05 NEAR (50000000000000000000000 yocto)", () => {
+    assert.strictEqual(MERCHANT_BASE_PRICE_YOCTO, MERCHANT_BASE);
+    const quote = calculateMerchantQuote({ stock: 100 });
+    assert.strictEqual(quote.midPriceYocto, 50_000_000_000_000_000_000_000n);
+    assert.strictEqual(quote.buyPriceYocto, 55_000_000_000_000_000_000_000n);
+    assert.strictEqual(quote.sellPriceYocto, 45_000_000_000_000_000_000_000n);
+    assert.strictEqual(quote.isClosed, false);
+    assert.strictEqual(quote.reason, "ok");
+  });
+
   it("passes every vector in relayer/merchant_vectors.json (merchant)", () => {
     for (const vector of vectors.merchant) {
       const quote = calculateMerchantQuote({
@@ -308,5 +324,47 @@ describe("Pricing Engine - 90/10 Proportional Jackpot", () => {
     assert.strictEqual(payoutB.totalPayout, 640_000_000_000_000_000_000_000n);
 
     assert.strictEqual(payoutA.totalPayout + payoutB.totalPayout, totalJackpot);
+  });
+});
+
+describe("Types - parseYoctoSafe & toBigInt", () => {
+  it("parses integers, decimals, and scientific notation strings/numbers cleanly", () => {
+    assert.strictEqual(parseYoctoSafe("2.3683e+24"), 2368300000000000000000000n);
+    assert.strictEqual(parseYoctoSafe(2.3683e+24), 2368300000000000000000000n);
+    assert.strictEqual(parseYoctoSafe("4e+22"), 40000000000000000000000n);
+    assert.strictEqual(parseYoctoSafe(4e+22), 40000000000000000000000n);
+    assert.strictEqual(parseYoctoSafe("5.7e+22"), 57000000000000000000000n);
+    assert.strictEqual(parseYoctoSafe("0"), 0n);
+    assert.strictEqual(parseYoctoSafe(0), 0n);
+    assert.strictEqual(parseYoctoSafe(42n), 42n);
+    assert.strictEqual(parseYoctoSafe("123.0"), 123n);
+    assert.strictEqual(parseYoctoSafe("123.99"), 123n);
+    assert.strictEqual(parseYoctoSafe("0.5"), 0n);
+    assert.strictEqual(parseYoctoSafe("-2.5e+2"), -250n);
+    assert.strictEqual(toBigInt("2.3683e+24"), 2368300000000000000000000n);
+  });
+
+  it("accepts scientific notation reserve/jackpot inputs in pricing helpers", () => {
+    const merchant = calculateMerchantQuote({
+      stock: 100,
+      treasuryReserveYocto: "2.3683e+24",
+    });
+    assert.strictEqual(merchant.isClosed, false);
+    assert.strictEqual(merchant.midPriceYocto, MERCHANT_BASE);
+
+    const buyback = calculateBuybackQuote({
+      floor: 0,
+      element: 0,
+      buybackMultiplierBps: 10000,
+      vaultBalanceYocto: "4e+22",
+    });
+    assert.strictEqual(buyback.is_open, false);
+  });
+
+  it("rejects empty or non-numeric inputs", () => {
+    assert.throws(() => parseYoctoSafe(""), /Invalid yocto/);
+    assert.throws(() => parseYoctoSafe("not-a-number"), /Invalid yocto/);
+    assert.throws(() => parseYoctoSafe(Number.NaN), /Invalid yocto/);
+    assert.throws(() => parseYoctoSafe(Number.POSITIVE_INFINITY), /Invalid yocto/);
   });
 });

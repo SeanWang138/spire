@@ -11,12 +11,17 @@ export * from "./tee.js";
 export * from "./indexer.js";
 export * from "./keeper.js";
 
-import { SpireKeeper } from "./keeper.js";
-import { SpireIndexer, createSubaccountWithFunctionKey } from "./indexer.js";
+import { SpireKeeper, resolveKeeperAiMode } from "./keeper.js";
+import {
+  SpireIndexer,
+  createPlayableSubaccount,
+  DEFAULT_SUBACCOUNT_FUNDING_YOCTO,
+} from "./indexer.js";
 import {
   NearAiTeeClient,
   DEFAULT_NEAR_AI_MODEL,
   getMockTeeKeyPair,
+  parseTeeSigningKeyPair,
   requireMockSeed,
   requireTeePublicKey,
 } from "./tee.js";
@@ -34,6 +39,7 @@ async function main() {
   const rpcUrl = process.env.NEAR_RPC_URL || "https://test.rpc.fastnear.com";
   const contractId = process.env.CONTRACT_ID || "spire.testnet";
   const mockMode = process.env.MOCK_TEE === "true";
+  const aiMode = resolveKeeperAiMode();
   const pollIntervalMs = Number(process.env.POLL_INTERVAL_MS || 5000);
   const streamerPort = Number(process.env.STREAMER_PORT || 8080);
 
@@ -43,16 +49,24 @@ async function main() {
   console.log(`Role: ${role}`);
   console.log(`RPC Endpoint: ${rpcUrl}`);
   console.log(`Contract ID: ${contractId}`);
-  console.log(
-    `TEE signer: ${mockMode ? "MOCK (MOCK_TEE=true, local tests only)" : "LIVE NEAR AI Cloud"}`
-  );
-  console.log(`AI model: ${process.env.NEAR_AI_MODEL || DEFAULT_NEAR_AI_MODEL}`);
-  // Fail fast here as well: no hardcoded keys, no defaults.
-  if (mockMode) {
-    const mockKeyPair = getMockTeeKeyPair(requireMockSeed());
-    console.log(`Mock signer pubkey: ${Buffer.from(mockKeyPair.publicKey).toString("hex")}`);
+  console.log(`Keeper AI mode: ${aiMode}`);
+  if (aiMode === "epoch-only") {
+    console.log("TEE signer: SKIPPED (KEEPER_AI_MODE=epoch-only; running update_meta & telemetry)");
   } else {
-    console.log(`TEE pubkey: ${requireTeePublicKey()}`);
+    console.log(
+      `TEE signer: ${mockMode ? "MOCK (MOCK_TEE=true, local tests only)" : "LIVE NEAR AI Cloud"}`
+    );
+    console.log(`AI model: ${process.env.NEAR_AI_MODEL || DEFAULT_NEAR_AI_MODEL}`);
+    // Fail fast here as well: no hardcoded keys, no defaults.
+    if (mockMode) {
+      const mockKeyPair = getMockTeeKeyPair(requireMockSeed());
+      console.log(`Mock signer pubkey: ${Buffer.from(mockKeyPair.publicKey).toString("hex")}`);
+    } else {
+      const teePubkey = process.env.TEE_SIGNING_PRIVATE_KEY
+        ? Buffer.from(parseTeeSigningKeyPair(process.env.TEE_SIGNING_PRIVATE_KEY).publicKey).toString("hex")
+        : requireTeePublicKey();
+      console.log(`TEE pubkey: ${teePubkey}`);
+    }
   }
   console.log(`Poll Interval: ${pollIntervalMs}ms`);
 
@@ -61,15 +75,22 @@ async function main() {
 
   if (role === "keeper" || role === "all") {
     console.log("[Keeper] Initializing autonomous keeper...");
+    const teeClient =
+      aiMode === "epoch-only" ? null : new NearAiTeeClient({ mockMode });
     keeper = new SpireKeeper({
       rpcUrl,
       contractId,
       pollIntervalMs,
       mockMode,
-      teeClient: new NearAiTeeClient({ mockMode }),
+      aiMode,
+      teeClient,
     });
     keeper.start();
-    console.log("[Keeper] Started epoch, expiry and AI proposal loop.");
+    console.log(
+      aiMode === "epoch-only"
+        ? "[Keeper] Started epoch rollover & floor telemetry loop (AI proposals disabled)."
+        : "[Keeper] Started epoch, expiry and AI proposal loop."
+    );
   }
 
   if (role === "indexer" || role === "all") {
@@ -82,9 +103,9 @@ async function main() {
     const parentKey = process.env.KEEPER_PRIVATE_KEY ?? "";
     const parentAccount = process.env.KEEPER_ACCOUNT_ID ?? "";
     if (autoCreate && parentKey && parentAccount) {
-      const fundingYocto = process.env.SUBACCOUNT_FUNDING_YOCTO || "10000000000000000000000";
+      const fundingYocto = process.env.SUBACCOUNT_FUNDING_YOCTO || DEFAULT_SUBACCOUNT_FUNDING_YOCTO;
       indexer.accountCreator = async (accountId, publicKey) => {
-        const created = await createSubaccountWithFunctionKey(
+        const created = await createPlayableSubaccount(
           parentAccount,
           parentKey,
           rpcUrl,

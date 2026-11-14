@@ -42,7 +42,7 @@ const PRESETS: BrainPreset[] = [
     buybackBps: [10000, 18500, 36000],
     altarRecipe: "reforge_2_to_1",
     taunt: "Ten thousand novices march in with borrowed Solar blades. My carapace drinks the glare while Void remains unseen.",
-    chatId: "chat_tee_v3_starter_820",
+    chatId: "sample_audit_starter_820",
     sigPrefix: "ed25519:7c9f...4b1a",
   },
   {
@@ -53,7 +53,7 @@ const PRESETS: BrainPreset[] = [
     buybackBps: [10000, 24000, 40000],
     altarRecipe: "reforge_3_to_2",
     taunt: "Solar saturation triggers Tribute at 8,500 bps. Burn three crowded swords at the Altar or watch steel shatter!",
-    chatId: "chat_tee_v3_swarm_802010",
+    chatId: "sample_audit_swarm_802010",
     sigPrefix: "ed25519:a31e...9d82",
   },
   {
@@ -64,7 +64,7 @@ const PRESETS: BrainPreset[] = [
     buybackBps: [16000, 16000, 16000],
     altarRecipe: "reforge_2_to_1",
     taunt: "Equilibrium holds the Bastion. No Tribute bites today, yet no single blade pierces unchecked.",
-    chatId: "chat_tee_v3_triad_45",
+    chatId: "sample_audit_triad_45",
     sigPrefix: "ed25519:f02c...19e4",
   },
 ];
@@ -72,7 +72,7 @@ const PRESETS: BrainPreset[] = [
 const ELEMENTS = [
   { name: "Solar", color: "#F2A63B", textClass: "text-solar", icon: <Flame className="w-4 h-4 text-solar" aria-hidden="true" /> },
   { name: "Frost", color: "#38BDF8", textClass: "text-frost", icon: <Snowflake className="w-4 h-4 text-frost" aria-hidden="true" /> },
-  { name: "Void", color: "#A855F7", textClass: "text-purple-300", icon: <Sparkles className="w-4 h-4 text-void" aria-hidden="true" /> },
+  { name: "Void", color: "#A855F7", textClass: "text-void-text", icon: <Sparkles className="w-4 h-4 text-void-text" aria-hidden="true" /> },
 ] as const;
 
 export const BossBrainPreview: React.FC = () => {
@@ -108,16 +108,16 @@ export const BossBrainPreview: React.FC = () => {
             Adaptive Meta Defense &amp; Verifiable AI Oracle
           </h2>
           <p className="mt-2.5 text-sm sm:text-base text-ash max-w-2xl leading-relaxed">
-            Boss armor renormalizes deterministically on-chain across a strict 13,500 bps resistance pool, while NEAR AI TEE proposes buyback multipliers, Altar unlocks, and combat taunts within ironclad smart contract limits.
+            Weapon supply shifts Boss resistance deterministically on-chain across a strict 13,500 bps pool during lazy epochs, while the AI Relayer proposes buyback multipliers, bonus Altar unlocks, and combat taunts within hard smart contract bounds.
           </p>
         </div>
 
         <Link
           href="/game/ai"
-          className="min-h-[44px] px-4 py-2 rounded-lg border border-brass/30 bg-panel-dark/90 text-xs font-mono font-bold text-parchment hover:border-solar/60 inline-flex items-center gap-2 self-start transition-colors"
+          className="min-h-[44px] px-4 py-2 rounded-lg border border-brass/30 bg-panel-dark/90 text-xs font-mono font-bold text-parchment hover:border-solar/60 inline-flex items-center gap-2 self-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled"
         >
-          <Brain className="w-4 h-4 text-void" aria-hidden="true" />
-          <span>Inspect Live TEE Oracle</span>
+          <Brain className="w-4 h-4 text-void-text" aria-hidden="true" />
+          <span>Open Proof &amp; Lab</span>
           <ArrowRight className="w-3.5 h-3.5 text-solar" aria-hidden="true" />
         </Link>
       </div>
@@ -127,12 +127,12 @@ export const BossBrainPreview: React.FC = () => {
         <SpireSurface variant="stage" className="lg:col-span-6 p-6 flex flex-col justify-between gap-5">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider text-parchment">
+              <h3 className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider text-parchment">
                 <Cpu className="w-4 h-4 text-solar" aria-hidden="true" />
                 <span>On-Chain Resistance Lab</span>
-              </div>
+              </h3>
               <span className="font-mono-numbers text-xs text-pewter">
-                Invariant Pool: {totalRes.toLocaleString("en-US")} / {TOTAL_RESISTANCE_BPS.toLocaleString("en-US")} bps
+                Pool: {totalRes.toLocaleString("en-US")} / {TOTAL_RESISTANCE_BPS.toLocaleString("en-US")} bps
               </span>
             </div>
 
@@ -146,7 +146,7 @@ export const BossBrainPreview: React.FC = () => {
                     type="button"
                     onClick={() => handlePreset(preset)}
                     aria-pressed={active}
-                    className={`min-h-[40px] px-3 py-1.5 rounded-md border font-mono text-xs font-semibold transition-all ${
+                    className={`min-h-[44px] px-3 py-2 rounded-md border font-mono text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-solar focus-visible:ring-offset-2 focus-visible:ring-offset-oled ${
                       active
                         ? "bg-solar/20 border-solar/70 text-parchment"
                         : "bg-[#090A10] border-brass/20 text-ash hover:border-brass/50 hover:text-parchment"
@@ -175,7 +175,7 @@ export const BossBrainPreview: React.FC = () => {
                           {el.name} Supply: {supplies[i]}
                         </span>
                         {isWeakest && (
-                          <span className="px-2 py-0.5 rounded bg-jackpot/15 text-jackpot font-mono text-[11px] font-bold">
+                          <span className="px-2 py-0.5 rounded bg-jackpot/15 text-jackpot font-mono text-xs font-bold">
                             BOSS WEAK POINT
                           </span>
                         )}
@@ -189,9 +189,9 @@ export const BossBrainPreview: React.FC = () => {
                           ({(bps / 100).toFixed(1)}%)
                         </span>
                         {isTribute && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-hp/15 text-rose-200 font-mono text-[11px] font-bold">
-                            <AlertTriangle className="w-3 h-3 text-hp" aria-hidden="true" />
-                            TRIBUTE
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/55 border border-red-500/45 text-hp-text font-mono text-xs font-bold">
+                            <AlertTriangle className="w-3.5 h-3.5 text-hp-text" aria-hidden="true" />
+                            <span>TRIBUTE</span>
                           </span>
                         )}
                       </div>
@@ -215,17 +215,17 @@ export const BossBrainPreview: React.FC = () => {
           <div
             className={`rounded-lg px-4 py-3 text-xs leading-relaxed border-t ${
               anyTributeRisk
-                ? "bg-hp/10 border-hp/60 text-rose-100"
+                ? "bg-red-950/50 border-red-500/50 text-hp-text"
                 : "bg-[#090A10]/90 border-jackpot/50 text-ash"
             }`}
           >
             {anyTributeRisk ? (
               <span>
-                <strong>Tribute Seizure Active (&ge; 7,000 bps):</strong> Crowded non-starter attacks carry a progressive confiscation risk. Reforge surplus steel into <strong>{ELEMENTS[weakIdx].name}</strong> or attack with Starter-Locked blades!
+                <strong className="text-parchment">Tribute Seizure Active (&ge; 7,000 bps):</strong> Crowded non-starter attacks carry a confiscation risk unless it is your final remaining weapon. Reforge surplus steel into <strong className="text-parchment">{ELEMENTS[weakIdx].name}</strong> or strike with Starter-Locked blades.
               </span>
             ) : (
               <span>
-                <strong>Safe Meta Corridor (&lt; 7,000 bps):</strong> No element triggers Tribute seizure. Balanced guild composition keeps every attack intact.
+                <strong className="text-parchment">Safe Meta Corridor (&lt; 7,000 bps):</strong> No element triggers Tribute seizure. Balanced guild composition keeps every attack intact.
               </span>
             )}
           </div>
@@ -238,16 +238,19 @@ export const BossBrainPreview: React.FC = () => {
               <h3 className="font-serif text-xl sm:text-2xl font-bold text-parchment">
                 AI Proposes, Smart Contract Validates
               </h3>
-              <SpireTooltip content="Phala / NEAR AI TEE signs proposals off-chain via Ed25519; lib.rs rejects any out-of-range multiplier or unauthorized recipe.">
-                <span className="inline-flex items-center gap-1.5 font-mono text-xs text-purple-300 cursor-help">
+              <SpireTooltip
+                triggerLabel="Explain signed relayer proposal and NEAR AI Cloud audit flow"
+                content="Signed Relayer Proposal + NEAR AI Cloud Audit ChatID (Full hardware TEE attestation: roadmap §13). lib.rs verifies the Ed25519 signature over canonical preimage strings and rejects out-of-range multipliers or invalid Altar recipes."
+              >
+                <span className="inline-flex items-center gap-1.5 font-mono text-xs text-void-text">
                   <Lock className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>TEE Ed25519 Gate</span>
+                  <span>Ed25519 Relayer Gate</span>
                 </span>
               </SpireTooltip>
             </div>
 
             <p className="text-sm text-ash leading-relaxed">
-              The Keeper&apos;s off-chain intelligence never picks combat winners or alters your armor rolls arbitrarily. Every epoch decision passes through strict Rust bounds on NEAR:
+              The off-chain Relayer submits NEAR AI Cloud reasoning proposals via <code className="font-mono text-frost">apply_ai_proposal</code>. AI never chooses winners or alters elemental armor directly; weapon supply drives resistance automatically on <code className="font-mono text-frost">lazy_epoch</code>:
             </p>
 
             {/* Clean flat rule table (no double card nesting) */}
@@ -259,13 +262,13 @@ export const BossBrainPreview: React.FC = () => {
                 </dd>
               </div>
               <div className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <dt className="font-mono text-pewter uppercase">Altar Reforge Unlocks</dt>
+                <dt className="font-mono text-pewter uppercase">Altar Bonus Unlocks</dt>
                 <dd className="font-mono font-bold text-frost">
-                  reforge_2_to_1 / AI reforge_3_to_2
+                  reforge_2_to_1 (always) / AI reforge_3_to_2
                 </dd>
               </div>
               <div className="py-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <dt className="font-mono text-pewter uppercase">Epoch Shift Guard</dt>
+                <dt className="font-mono text-pewter uppercase">Supply-Driven Epoch Shift</dt>
                 <dd className="font-mono-numbers font-bold text-parchment">
                   Deterministic Math · Cap {MAX_SHIFT_BPS.toLocaleString("en-US")} bps / Epoch
                 </dd>
@@ -273,16 +276,16 @@ export const BossBrainPreview: React.FC = () => {
             </dl>
           </div>
 
-          {/* Live Boss Voice Manuscript Transmission */}
+          {/* Illustrative Boss Voice Preset Preview */}
           <div className="pt-4 border-t border-brass/20 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-serif text-sm font-bold text-parchment">
-                {activePreset.bossName}
+                {activePreset.bossName} <span className="font-mono text-xs font-normal text-pewter">(Preset Preview)</span>
               </span>
-              <div className="flex items-center gap-2 font-mono text-[11px] text-pewter">
+              <div className="flex items-center gap-2 font-mono text-xs text-pewter">
                 <span>Altar: <strong className="text-frost">{activePreset.altarRecipe}</strong></span>
-                <span>·</span>
-                <span>Void Quote: <strong className="text-purple-300">{(activePreset.buybackBps[2] / 10000).toFixed(2)}x</strong></span>
+                <span aria-hidden="true">·</span>
+                <span>Void Quote: <strong className="text-void-text">{(activePreset.buybackBps[2] / 10000).toFixed(2)}x</strong></span>
               </div>
             </div>
 
@@ -290,12 +293,12 @@ export const BossBrainPreview: React.FC = () => {
               &ldquo;{activePreset.taunt}&rdquo;
             </blockquote>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-mono text-[11px] text-pewter">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-mono text-xs text-pewter">
               <span className="inline-flex items-center gap-1.5 text-jackpot">
                 <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Verified {activePreset.sigPrefix}</span>
+                <span>Sample Signed Relayer {activePreset.sigPrefix}</span>
               </span>
-              <span>chat_id: {activePreset.chatId}</span>
+              <span>Audit ChatID: {activePreset.chatId}</span>
             </div>
           </div>
         </SpireSurface>

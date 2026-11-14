@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** /game is the shell — land players on the title screen. */
+/** /game routes entrants directly to 1-Click Start onboarding. */
 export default function GameIndex() {
   redirect("/game/start");
 }

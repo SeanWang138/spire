@@ -32,6 +32,7 @@ const SPLIT_FLOWS = [
     pct: 70,
     label: "Boss Jackpot Pool",
     color: "#00EC97",
+    textColor: "#00EC97",
     textClass: "text-jackpot",
     summary: "90% pro-rata to round damage dealt + 10% Executioner bonus. 10% drips up to the next floor on kill.",
     pathY: 58,
@@ -41,7 +42,8 @@ const SPLIT_FLOWS = [
     pct: 15,
     label: "Backer Dividend Pool",
     color: "#A855F7",
-    textClass: "text-purple-300",
+    textColor: "#D8B4FE",
+    textClass: "text-void-text",
     summary: "Streaming share yield for guild Backers (or rolls automatically into Boss Jackpot if zero shares exist).",
     pathY: 122,
   },
@@ -50,6 +52,7 @@ const SPLIT_FLOWS = [
     pct: 10,
     label: "Boss Buyback Reserve",
     color: "#F2A63B",
+    textColor: "#F2A63B",
     textClass: "text-solar",
     summary: "Accumulates per floor to fund 1.0x-4.0x scarce weapon bounties inside Boss Vault.",
     pathY: 186,
@@ -59,6 +62,7 @@ const SPLIT_FLOWS = [
     pct: 5,
     label: "NPC Merchant Liquidity",
     color: "#38BDF8",
+    textColor: "#38BDF8",
     textClass: "text-frost",
     summary: "Tops up the town bazaar cash ledger above 1.00 NEAR so Artisans always find a liquid counter.",
     pathY: 250,
@@ -81,7 +85,7 @@ const ROLE_TABS: {
   {
     id: "slayer",
     label: "Slayer",
-    subtitle: "Signless tactical combatant chasing proportional Jackpot and Conqueror NFT trophies.",
+    subtitle: "Popup-free tactical combatant chasing proportional Jackpot and Conqueror NFT trophies.",
     ctaHref: "/game/raid",
     ctaLabel: "Enter Raid Arena",
     accentText: "text-solar",
@@ -116,32 +120,32 @@ const ROLE_TABS: {
       { label: "Buyback Range", value: "1.0x - 4.0x Scarcity Quote" },
     ],
     mechanics: [
-      "Gather Iron Ore and elemental Essences every 30 seconds without wallet popups using your session key.",
-      "Mint tradable Solar, Frost, or scarce Void armaments at the Forge for exactly 2 Ore + 3 Essence.",
-      "Burn surplus blades at the AI Altar (reforge_2_to_1 or AI-unlocked reforge_3_to_2) or sell non-starter weapons into 4.0x Boss Buybacks.",
+      "Gather Iron Ore and elemental Essences every 30 seconds popup-free via your 0.60 NEAR ephemeral testnet guest subaccount or wallet session.",
+      "Mint tradeable Solar, Frost, or scarce Void armaments at the Forge for exactly 2 Ore + 3 Essence.",
+      "Burn surplus blades at the Altar via reforge_2_to_1 anytime (or AI-unlocked reforge_3_to_2), or sell non-starter weapons into Boss Buybacks up to 4.0x.",
     ],
   },
   {
     id: "backer",
     label: "Backer",
-    subtitle: "Cycle underwriter funding Boss raids early for streaming 15% ticket dividends.",
+    subtitle: "Round underwriter funding active Floor Jackpots for a pro-rata 15% ticket dividend stream.",
     ctaHref: "/game/vault",
     ctaLabel: "Open Backer Vault",
-    accentText: "text-purple-300",
+    accentText: "text-void-text",
     accentBorder: "border-void/45",
     icon: <Vault className="w-4 h-4 text-void" aria-hidden="true" />,
     highlights: [
-      { label: "Share Price", value: "0.01 NEAR / Share" },
-      { label: "Entry Window", value: "Boss HP >= 80%" },
+      { label: "Capital Routing", value: "Funds Floor Jackpot" },
+      { label: "Lock Window", value: "Until Boss Defeat" },
       { label: "Stream Revenue", value: "15% of Every Raid Ticket" },
     ],
     mechanics: [
-      "Acquire shares at 0.01 NEAR per share while floor Boss HP remains at or above 80%.",
-      "Earn a pro-rata stream from 15% of every raid ticket paid during that active floor cycle.",
-      "Collect accrued dividends continuously; principal shares unlock for full reclaim as soon as the floor Boss falls.",
+      "Contribute NEAR directly into a Floor vault via back_boss_vault; your capital enters the Floor Jackpot immediately with no HP entry gate and no mid-cycle withdrawal.",
+      "Earn a pro-rata stream from 15% of every raid ticket paid on that Floor across the active cycle.",
+      "On Floors 2 & 3, timed-out rounds carry both the Jackpot and your shares forward without a 70% payout, keeping dividends active until Boss defeat.",
     ],
     riskNotice:
-      "Principal Cycle Risk: Backer share principal returns only upon Boss kill. If Floor 2 (30m) or Floor 3 (20m) expires unslain and resets, round principal is absorbed and the cycle advances.",
+      "Jackpot Funding Risk: Backer capital enters the Floor Jackpot directly with no mid-cycle withdrawal and pays out to Raiders on Boss kill. Timed-out rounds carry Jackpot and shares forward without a 70% payout while 15% ticket dividends stream until Boss defeat.",
   },
   {
     id: "investor",
@@ -169,10 +173,20 @@ export const EconomyConduitPreview: React.FC = () => {
   const { paused, reducedMotion } = useMotionControl();
   const [selectedFloorIdx, setSelectedFloorIdx] = useState<0 | 1 | 2>(0);
   const [hoveredSplit, setHoveredSplit] = useState<string | null>(null);
+  const [focusedSplit, setFocusedSplit] = useState<string | null>(null);
+  const [selectedSplit, setSelectedSplit] = useState<string | null>(null);
   const [activeRole, setActiveRole] = useState<RoleTabId>("slayer");
 
   const animateConduit = !paused && !reducedMotion;
   const ticketNear = FLOOR_TICKET_COST_NEAR[selectedFloorIdx];
+  const activeSplit = hoveredSplit ?? focusedSplit ?? selectedSplit;
+
+  const handleSplitKeyDown = (flowId: string) => (e: React.KeyboardEvent<SVGGElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSelectedSplit((prev) => (prev === flowId ? null : flowId));
+    }
+  };
 
   return (
     <section id="economy" className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-16">
@@ -188,7 +202,7 @@ export const EconomyConduitPreview: React.FC = () => {
 
         {/* Interactive Floor Ticket Selector */}
         <div
-          className="inline-flex items-center gap-1.5 rounded-lg border border-brass/25 bg-panel-dark/90 p-1 self-start"
+          className="inline-flex items-center gap-2 rounded-lg border border-brass/25 bg-panel-dark/90 p-1 self-start"
           role="group"
           aria-label="Inspect ticket split by Citadel floor"
         >
@@ -232,12 +246,12 @@ export const EconomyConduitPreview: React.FC = () => {
             </p>
           </div>
 
-          {/* Animated SVG Split Diagram */}
-          <div className="relative w-full rounded-xl bg-[#07080E] border border-brass/15 p-3">
+          {/* Animated SVG Split Diagram (tonal surface without nested border) */}
+          <div className="relative w-full rounded-xl bg-[#07080E] p-3">
             <svg
-              viewBox="0 0 420 296"
+              viewBox="0 0 432 300"
               className="w-full h-auto"
-              role="img"
+              role="group"
               aria-label="Interactive ticket revenue routing: 70 percent Boss Jackpot, 15 percent Backer Dividend, 10 percent Boss Buyback, 5 percent NPC Merchant"
             >
               <defs>
@@ -252,36 +266,45 @@ export const EconomyConduitPreview: React.FC = () => {
 
               {/* Entry Node */}
               <rect
-                x="10"
-                y="120"
-                width="96"
-                height="64"
+                x="8"
+                y="118"
+                width="102"
+                height="68"
                 rx="10"
                 fill="#12131D"
                 stroke="#E5A93B"
                 strokeOpacity="0.65"
                 strokeWidth="1.5"
               />
-              <text x="58" y="146" textAnchor="middle" fill="#CEC4B3" fontSize="10" fontFamily="monospace">
+              <text x="59" y="145" textAnchor="middle" fill="#CEC4B3" fontSize="12" fontFamily="monospace">
                 RAID TICKET
               </text>
-              <text x="58" y="166" textAnchor="middle" fill="#F3EAD8" fontSize="14" fontWeight="bold" fontFamily="monospace">
+              <text x="59" y="168" textAnchor="middle" fill="#F3EAD8" fontSize="14" fontWeight="bold" fontFamily="monospace">
                 {ticketNear.toFixed(2)} N
               </text>
 
               {SPLIT_FLOWS.map((flow, index) => {
-                const isActive = hoveredSplit === null || hoveredSplit === flow.id;
-                const d = `M 106 152 C 165 152, 165 ${flow.pathY}, 224 ${flow.pathY}`;
+                const isActive = activeSplit === null || activeSplit === flow.id;
+                const isFocusedOrSelected = focusedSplit === flow.id || selectedSplit === flow.id;
+                const d = `M 110 152 C 165 152, 165 ${flow.pathY}, 220 ${flow.pathY}`;
                 const pathId = `spire-conduit-${flow.id}`;
                 const amountNear = (ticketNear * flow.pct) / 100;
 
                 return (
                   <g
                     key={flow.id}
-                    opacity={isActive ? 1 : 0.35}
+                    tabIndex={0}
+                    role="button"
+                    aria-pressed={selectedSplit === flow.id}
+                    aria-label={`${flow.label}: ${flow.pct} percent (${amountNear.toFixed(4)} NEAR). ${flow.summary}`}
+                    opacity={isActive ? 1 : 0.4}
                     onMouseEnter={() => setHoveredSplit(flow.id)}
                     onMouseLeave={() => setHoveredSplit(null)}
-                    className="cursor-pointer transition-opacity duration-200"
+                    onFocus={() => setFocusedSplit(flow.id)}
+                    onBlur={() => setFocusedSplit(null)}
+                    onClick={() => setSelectedSplit((prev) => (prev === flow.id ? null : flow.id))}
+                    onKeyDown={handleSplitKeyDown(flow.id)}
+                    className="cursor-pointer transition-opacity duration-200 focus:outline-none"
                   >
                     <path
                       id={pathId}
@@ -289,7 +312,7 @@ export const EconomyConduitPreview: React.FC = () => {
                       fill="none"
                       stroke={flow.color}
                       strokeWidth={flow.pct >= 70 ? "3" : "2"}
-                      strokeOpacity="0.45"
+                      strokeOpacity="0.5"
                     />
                     {animateConduit && (
                       <circle r={flow.pct >= 70 ? "4" : "3"} fill={flow.color} filter="url(#conduitGlow)">
@@ -303,31 +326,31 @@ export const EconomyConduitPreview: React.FC = () => {
 
                     {/* Destination Ledger Block */}
                     <rect
-                      x="224"
-                      y={flow.pathY - 24}
-                      width="186"
-                      height="48"
+                      x="220"
+                      y={flow.pathY - 25}
+                      width="202"
+                      height="50"
                       rx="8"
                       fill="#12131D"
-                      stroke={flow.color}
-                      strokeOpacity={hoveredSplit === flow.id ? "0.9" : "0.4"}
-                      strokeWidth="1.25"
+                      stroke={isFocusedOrSelected ? "#F3EAD8" : flow.color}
+                      strokeOpacity={isFocusedOrSelected || hoveredSplit === flow.id ? "0.95" : "0.45"}
+                      strokeWidth={isFocusedOrSelected ? "2" : "1.25"}
                     />
                     <text
-                      x="236"
+                      x="232"
                       y={flow.pathY - 4}
                       fill="#F3EAD8"
-                      fontSize="11"
+                      fontSize="12"
                       fontWeight="600"
                       fontFamily="sans-serif"
                     >
                       {flow.label}
                     </text>
                     <text
-                      x="236"
-                      y={flow.pathY + 14}
-                      fill={flow.color}
-                      fontSize="11"
+                      x="232"
+                      y={flow.pathY + 15}
+                      fill={flow.textColor}
+                      fontSize="12"
                       fontWeight="700"
                       fontFamily="monospace"
                     >
@@ -340,9 +363,9 @@ export const EconomyConduitPreview: React.FC = () => {
           </div>
 
           <div className="pt-2 border-t border-brass/15 text-xs text-ash leading-relaxed">
-            {hoveredSplit
-              ? SPLIT_FLOWS.find((f) => f.id === hoveredSplit)?.summary
-              : "Hover any conduit channel above to inspect how ticket inflow funds PvE bounties, town liquidity, and Backer dividends."}
+            {activeSplit
+              ? SPLIT_FLOWS.find((f) => f.id === activeSplit)?.summary
+              : "Hover, focus, or select any conduit channel above to inspect how ticket inflow funds PvE bounties, town liquidity, and Backer dividends."}
           </div>
         </SpireSurface>
 
@@ -360,7 +383,7 @@ export const EconomyConduitPreview: React.FC = () => {
                 </h3>
                 <SpireTabsList aria-label="SpireFi Guild Roles" className="w-fit">
                   {ROLE_TABS.map((role) => (
-                    <SpireTabsTrigger key={role.id} value={role.id} className="gap-1.5 whitespace-nowrap">
+                    <SpireTabsTrigger key={role.id} value={role.id} className="gap-2 whitespace-nowrap">
                       <span>{role.label}</span>
                     </SpireTabsTrigger>
                   ))}
@@ -385,11 +408,11 @@ export const EconomyConduitPreview: React.FC = () => {
                       <p className="text-sm text-ash leading-relaxed">{role.subtitle}</p>
                     </div>
 
-                    {/* Highlights row — clean hairline separators, no nested bordered boxes */}
-                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4 border-y border-brass/15 bg-[#090A10]/80 px-4 rounded-lg">
+                    {/* Highlights row — tonal surface without nested bordered boxes */}
+                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-4 bg-[#090A10]/85 px-4 rounded-lg">
                       {role.highlights.map((item) => (
                         <div key={item.label} className="flex flex-col gap-1">
-                          <dt className="text-[11px] font-mono uppercase tracking-wider text-pewter">
+                          <dt className="text-xs font-mono uppercase tracking-wider text-pewter">
                             {item.label}
                           </dt>
                           <dd className="font-mono-numbers text-sm font-bold text-parchment">
@@ -404,7 +427,7 @@ export const EconomyConduitPreview: React.FC = () => {
                       {role.mechanics.map((line) => (
                         <li key={line} className="flex items-start gap-2.5 leading-relaxed">
                           <ShieldCheck
-                            className="w-4 h-4 text-brass shrink-0 mt-0.5"
+                            className={`w-4 h-4 shrink-0 mt-0.5 ${role.accentText}`}
                             aria-hidden="true"
                           />
                           <span>{line}</span>
@@ -413,9 +436,9 @@ export const EconomyConduitPreview: React.FC = () => {
                     </ul>
 
                     {role.riskNotice && (
-                      <div className="flex items-start gap-3 rounded-lg bg-hp/10 border-t border-hp/50 px-4 py-3 text-xs text-rose-100 leading-relaxed">
+                      <div className="flex items-start gap-3 rounded-lg bg-red-950/55 px-4 py-3 text-xs text-hp-text leading-relaxed">
                         <AlertTriangle
-                          className="w-4 h-4 text-hp shrink-0 mt-0.5"
+                          className="w-4 h-4 text-hp-text shrink-0 mt-0.5"
                           aria-hidden="true"
                         />
                         <span>{role.riskNotice}</span>
@@ -426,7 +449,7 @@ export const EconomyConduitPreview: React.FC = () => {
                       <span className="font-mono text-xs text-pewter">
                         {role.id === "artisan" && "Starter kit attacks stay free · Crafting requires 2 Ore + 3 Essence"}
                         {role.id === "slayer" && "70% Ticket -> Jackpot · 90/10 Settlement Split"}
-                        {role.id === "backer" && "0.01 NEAR / share · Active only while Boss HP >= 80%"}
+                        {role.id === "backer" && "Funds Floor Jackpot directly · 15% ticket dividends until Boss defeat"}
                         {role.id === "investor" && "Keeps NPC Bazaar active >= 1.00 NEAR cash reserve"}
                       </span>
 
